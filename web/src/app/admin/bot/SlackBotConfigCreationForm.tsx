@@ -155,8 +155,8 @@ export const SlackBotCreationForm = ({
               const errorMsg = responseJson.detail || responseJson.message;
               setPopup({
                 message: isUpdate
-                  ? `Error updating DarwinBot config - ${errorMsg}`
-                  : `Error creating DarwinBot config - ${errorMsg}`,
+                  ? `Error updating Darwin config - ${errorMsg}`
+                  : `Error creating Darwin config - ${errorMsg}`,
                 type: "error",
               });
             }
@@ -175,10 +175,10 @@ export const SlackBotCreationForm = ({
                     <div>
                       The names of the Slack channels you want this
                       configuration to apply to. For example,
-                      &apos;#ask-darwin&apos;.
+                      &apos;#darwin-feedback&apos;.
                       <br />
                       <br />
-                      <i>NOTE</i>: you still need to add DarwinBot to the
+                      <i>NOTE</i>: you still need to add Darwin to the
                       channel(s) in Slack itself. Setting this config will not
                       auto-add the bot to the channel.
                     </div>
@@ -190,15 +190,15 @@ export const SlackBotCreationForm = ({
                   label="Response Format"
                   subtext={
                     <>
-                      If set to Citations, DarwinBot will respond with a direct
+                      If set to Citations, Darwin will respond with a direct
                       answer with inline citations. It will also provide links
                       to these cited documents below the answer. When in doubt,
                       choose this option.
                       <br />
                       <br />
-                      If set to Quotes, DarwinBot will respond with a direct
+                      If set to Quotes, Darwin will respond with a direct
                       answer as well as with quotes pulled from the context
-                      documents to support that answer. DarwinBot will also
+                      documents to support that answer. Darwin will also
                       give a list of relevant documents. Choose this option if
                       you want a very detailed response AND/OR a list of
                       relevant documents would be useful just in case the LLM
@@ -213,7 +213,7 @@ export const SlackBotCreationForm = ({
 
                 <Divider />
 
-                <SectionHeader>When should DarwinBot respond?</SectionHeader>
+                <SectionHeader>When should Darwin respond?</SectionHeader>
 
                 <BooleanFormField
                   name="answer_validity_check_enabled"
@@ -227,22 +227,22 @@ export const SlackBotCreationForm = ({
                 />
                 <BooleanFormField
                   name="respond_tag_only"
-                  label="Respond to @DarwinBot Only"
-                  subtext="If set, DarwinBot will only respond when directly tagged"
+                  label="Respond to @Darwin Only"
+                  subtext="If set, Darwin will only respond when directly tagged"
                 />
                 <BooleanFormField
                   name="respond_to_bots"
                   label="Responds to Bot messages"
-                  subtext="If not set, DarwinBot will always ignore messages from Bots"
+                  subtext="If not set, Darwin will always ignore messages from Bots"
                 />
                 <TextArrayField
                   name="respond_member_group_list"
                   label="Team Member Emails Or Slack Group Names"
-                  subtext={`If specified, DarwinBot responses will only be 
+                  subtext={`If specified, Darwin responses will only be 
                   visible to the members or groups in this list. This is
-                  useful if you want DarwinBot to operate in an
+                  useful if you want Darwin to operate in an
                   "assistant" mode, where it helps the team members find
-                  answers, but let's them build on top of DarwinBot's response / throw 
+                  answers, but let's them build on top of Darwin's response / throw 
                   out the occasional incorrect answer. Group names are case sensitive.`}
                   values={values}
                 />
@@ -253,7 +253,7 @@ export const SlackBotCreationForm = ({
                 <BooleanFormField
                   name="still_need_help_enabled"
                   label="Should Darwin give a “Still need help?” button?"
-                  subtext={`If specified, DarwinBot's response will include a button at the bottom 
+                  subtext={`If specified, Darwin's response will include a button at the bottom 
                   of the response that asks the user if they still need help.`}
                 />
                 {values.still_need_help_enabled && (
@@ -287,7 +287,7 @@ export const SlackBotCreationForm = ({
                   </SectionHeader>
                   <Text>
                     Use either a Persona <b>or</b> Document Sets to control how
-                    DarwinBot answers.
+                    Darwin answers.
                   </Text>
                   <Text>
                     <ul className="list-disc mt-2 ml-4">
@@ -297,7 +297,7 @@ export const SlackBotCreationForm = ({
                       </li>
                       <li>
                         You should use Document Sets if you just want to control
-                        which documents DarwinBot uses as references.
+                        which documents Darwin uses as references.
                       </li>
                     </ul>
                   </Text>
@@ -325,8 +325,8 @@ export const SlackBotCreationForm = ({
                           <div>
                             <div>
                               <SubLabel>
-                                The document sets that DarwinBot should search
-                                through. If left blank, DarwinBot will search
+                                The document sets that Darwin should search
+                                through. If left blank, Darwin will search
                                 through all documents.
                               </SubLabel>
                             </div>

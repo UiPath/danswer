@@ -203,15 +203,15 @@ const Main = () => {
       <Text className="mb-2">
         <ul className="list-disc mt-2 ml-4">
           <li>
-            Setup DarwinBot to automatically answer questions in certain
+            Setup Darwin to automatically answer questions in certain
             channels.
           </li>
           <li>
-            Choose which document sets DarwinBot should answer from, depending
+            Choose which document sets Darwin should answer from, depending
             on the channel the question is being asked.
           </li>
           <li>
-            Directly message DarwinBot to search just as you would in the web
+            Directly message Darwin to search just as you would in the web
             UI.
           </li>
         </ul>
@@ -267,7 +267,7 @@ const Main = () => {
       )}
       {slackBotTokens && (
         <>
-          <Title className="mb-2 mt-4">Step 2: Setup DarwinBot</Title>
+          <Title className="mb-2 mt-4">Step 2: Setup Darwin</Title>
           <Text className="mb-3">
             Configure Darwin to automatically answer questions in Slack
             channels. By default, Darwin only responds in channels where a
