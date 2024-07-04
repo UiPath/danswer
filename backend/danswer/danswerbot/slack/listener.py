@@ -167,6 +167,7 @@ def prefilter_requests(req: SocketModeRequest, client: SocketModeClient) -> bool
             and message_ts != thread_ts
             and event_type != "app_mention"
             and event.get("channel_type") != "im"
+            and event.get("subtype")  != "thread_broadcast"
         ):
             channel_specific_logger.debug(
                 "Skipping message since it is not the root of a thread"

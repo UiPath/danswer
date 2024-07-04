@@ -229,6 +229,26 @@ def convert_lm_input_to_basic_string(lm_input: LanguageModelInput) -> str:
 
     return prompt_value.to_string()
 
+def convert_lm_input_to_prompt(lm_input: LanguageModelInput) -> PromptValue:
+    """Heavily inspired by:
+    https://github.com/langchain-ai/langchain/blob/master/libs/langchain/langchain/chat_models/base.py#L86
+    """
+    prompt_value = None
+    if isinstance(lm_input, PromptValue):
+        prompt_value = lm_input
+    elif isinstance(lm_input, str):
+        prompt_value = StringPromptValue(text=lm_input)
+    elif isinstance(lm_input, list):
+        prompt_value = ChatPromptValue(messages=lm_input)
+
+    if prompt_value is None:
+        raise ValueError(
+            f"Invalid input type {type(lm_input)}. "
+            "Must be a PromptValue, str, or list of BaseMessages."
+        )
+
+    return prompt_value
+
 
 def message_to_string(message: BaseMessage) -> str:
     if not isinstance(message.content, str):

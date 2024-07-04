@@ -1,4 +1,5 @@
 import asyncio
+import os
 from logging.config import fileConfig
 
 from alembic import context
@@ -48,6 +49,7 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,  # type: ignore
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        version_table_schema='public',
     )
 
     with context.begin_transaction():
@@ -83,8 +85,9 @@ def run_migrations_online() -> None:
 
     asyncio.run(run_async_migrations())
 
-
-if context.is_offline_mode():
-    run_migrations_offline()
-else:
-    run_migrations_online()
+migrate = os.getenv("APPLY_MIGRATIONS")
+if migrate:
+    if context.is_offline_mode():
+        run_migrations_offline()
+    else:
+        run_migrations_online()

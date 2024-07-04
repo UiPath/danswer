@@ -81,6 +81,9 @@ GEN_AI_LLM_PROVIDER_TYPE = os.environ.get("GEN_AI_LLM_PROVIDER_TYPE") or None
 GEN_AI_MAX_TOKENS = int(os.environ.get("GEN_AI_MAX_TOKENS") or 0) or None
 # Set this to be enough for an answer + quotes. Also used for Chat
 GEN_AI_MAX_OUTPUT_TOKENS = int(os.environ.get("GEN_AI_MAX_OUTPUT_TOKENS") or 1024)
+GEN_AI_IDENTITY_ENDPOINT = os.environ.get("GEN_AI_IDENTITY_ENDPOINT") or None
+GEN_AI_CLIENT_ID = os.environ.get("GEN_AI_CLIENT_ID") or None
+GEN_AI_CLIENT_SECRET = os.environ.get("GEN_AI_CLIENT_SECRET") or None
 # Number of tokens from chat history to include at maximum
 # 3000 should be enough context regardless of use, no need to include as much as possible
 # as this drives up the cost unnecessarily

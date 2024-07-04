@@ -64,34 +64,33 @@ def extract_citations_from_stream(
         citation_found = re.search(citation_pattern, curr_segment)
 
         if citation_found and not in_code_block(llm_out):
-            numerical_value = int(citation_found.group(1))
-            if 1 <= numerical_value <= max_citation_num:
-                context_llm_doc = context_docs[
-                    numerical_value - 1
-                ]  # remove 1 index offset
+            pattern=r"\[(\d+)\]"
+            matches = re.findall(pattern, curr_segment, flags=0)
+            matchSet = set(matches)
 
-                link = context_llm_doc.link
-                target_citation_num = doc_id_to_rank_map[context_llm_doc.document_id]
+            for match in matchSet:
+                numerical_value = int(match)
+                if 1 <= numerical_value <= max_citation_num:
+                    context_llm_doc = context_docs[
+                        numerical_value - 1
+                    ]  # remove 1 index offset
+                    link = context_llm_doc.link
+                    #target_citation_num = doc_id_to_rank_map[context_llm_doc.document_id]
 
-                # Use the citation number for the document's rank in
-                # the search (or selected docs) results
-                curr_segment = re.sub(
-                    rf"\[{numerical_value}\]", f"[{target_citation_num}]", curr_segment
-                )
+                    if numerical_value not in cited_inds:
+                        cited_inds.add(numerical_value)
+                        yield CitationInfo(
+                            citation_num=numerical_value,
+                            document_id=context_llm_doc.document_id,
+                        )
 
-                if target_citation_num not in cited_inds:
-                    cited_inds.add(target_citation_num)
-                    yield CitationInfo(
-                        citation_num=target_citation_num,
-                        document_id=context_llm_doc.document_id,
-                    )
-
-                if link:
-                    curr_segment = re.sub(r"\[", "[[", curr_segment, count=1)
-                    curr_segment = re.sub("]", f"]]({link})", curr_segment, count=1)
-
-                # In case there's another open bracket like [1][, don't want to match this
+                    if link:
+                        old = "[{0}]".format(match)
+                        new = "[[{0}]]({1})".format(numerical_value, link)
+                        curr_segment = curr_segment.replace(old,new,1)
+            # In case there's another open bracket like [1][, don't want to match this
             possible_citation_found = None
+
 
         # if we see "[", but haven't seen the right side, hold back - this may be a
         # citation that needs to be replaced with a link
