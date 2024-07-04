@@ -224,7 +224,7 @@ const Main = () => {
                 Specify the base URL for your Slab team below. This will look
                 something like:{" "}
                 <b>
-                  <i>https://danswer.slab.com/</i>
+                  <i>https://darwin.slab.com/</i>
                 </b>
               </Text>
               <Card className="mt-4">
@@ -241,7 +241,7 @@ const Main = () => {
                   }
                   validationSchema={Yup.object().shape({
                     base_url: Yup.string().required(
-                      "Please enter the base URL for your team e.g. https://danswer.slab.com/"
+                      "Please enter the base URL for your team e.g. https://darwin.slab.com/"
                     ),
                   })}
                   initialValues={{

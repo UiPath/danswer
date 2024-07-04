@@ -196,22 +196,22 @@ const Main = () => {
       {popup}
 
       <Text className="mb-2">
-        Setup a Slack bot that connects to Danswer. Once setup, you will be able
-        to ask questions to Danswer directly from Slack. Additionally, you can:
+        Setup a Slack bot that connects to Darwin. Once setup, you will be able
+        to ask questions to Darwin directly from Slack. Additionally, you can:
       </Text>
 
       <Text className="mb-2">
         <ul className="list-disc mt-2 ml-4">
           <li>
-            Setup DanswerBot to automatically answer questions in certain
+            Setup DarwinBot to automatically answer questions in certain
             channels.
           </li>
           <li>
-            Choose which document sets DanswerBot should answer from, depending
+            Choose which document sets DarwinBot should answer from, depending
             on the channel the question is being asked.
           </li>
           <li>
-            Directly message DanswerBot to search just as you would in the web
+            Directly message DarwinBot to search just as you would in the web
             UI.
           </li>
         </ul>
@@ -226,7 +226,7 @@ const Main = () => {
         >
           guide{" "}
         </a>
-        found in the Danswer documentation to get started!
+        found in the Darwin documentation to get started!
       </Text>
 
       <Title>Step 1: Configure Slack Tokens</Title>
@@ -267,10 +267,10 @@ const Main = () => {
       )}
       {slackBotTokens && (
         <>
-          <Title className="mb-2 mt-4">Step 2: Setup DanswerBot</Title>
+          <Title className="mb-2 mt-4">Step 2: Setup DarwinBot</Title>
           <Text className="mb-3">
-            Configure Danswer to automatically answer questions in Slack
-            channels. By default, Danswer only responds in channels where a
+            Configure Darwin to automatically answer questions in Slack
+            channels. By default, Darwin only responds in channels where a
             configuration is setup unless it is explicitly tagged.
           </Text>
 
