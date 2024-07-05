@@ -179,7 +179,7 @@ export const AIMessage = ({
             <div className="font-bold text-emphasis ml-2 my-auto">
               {alternativeAssistant
                 ? alternativeAssistant.name
-                : personaName || "Danswer"}
+                : personaName || "Darwin"}
             </div>
 
             {query === undefined &&
