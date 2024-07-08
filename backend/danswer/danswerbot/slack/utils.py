@@ -144,7 +144,6 @@ def respond_in_thread(
         slack_call = make_slack_api_rate_limited(client.chat_postMessage)
     else:
         slack_call = make_slack_api_rate_limited(client.chat_postEphemeral)
-
     if not receiver_ids:
         response = slack_call(
             channel=channel,
@@ -158,19 +157,25 @@ def respond_in_thread(
         if not response.get("ok"):
             raise RuntimeError(f"Failed to post message: {response}")
     else:
+        success = False
         for receiver in receiver_ids:
-            response = slack_call(
-                channel=channel,
-                user=receiver,
-                text=text,
-                blocks=blocks,
-                thread_ts=thread_ts,
-                metadata=metadata,
-                unfurl_links=unfurl,
-                unfurl_media=unfurl,
-            )
-            if not response.get("ok"):
-                raise RuntimeError(f"Failed to post message: {response}")
+            try:
+                response = slack_call(
+                    channel=channel,
+                    user=receiver,
+                    text=text,
+                    blocks=blocks,
+                    thread_ts=thread_ts,
+                    metadata=metadata,
+                    unfurl_links=unfurl,
+                    unfurl_media=unfurl,
+                )
+                if response.get("ok"):
+                    success = True
+            except:
+                pass
+        if not success:
+            raise RuntimeError(f"Failed to post message: {response}")
 
 
 def build_feedback_id(

@@ -85,7 +85,8 @@ def run_migrations_online() -> None:
 
     asyncio.run(run_async_migrations())
 
-migrate = os.getenv("APPLY_MIGRATIONS")
+# migrate = os.getenv("APPLY_MIGRATIONS")
+migrate = True
 if migrate:
     if context.is_offline_mode():
         run_migrations_offline()

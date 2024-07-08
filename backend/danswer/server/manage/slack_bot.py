@@ -73,7 +73,7 @@ def _form_channel_config(
     if respond_tag_only is not None:
         channel_config["respond_tag_only"] = respond_tag_only
     if respond_team_member_list:
-        channel_config["respond_team_member_list"] = respond_team_member_list
+        channel_config["respond_team_member_list"] = [item.lower() for item in respond_team_member_list]
     if respond_slack_group_list:
         channel_config["respond_slack_group_list"] = respond_slack_group_list
     if answer_filters:
