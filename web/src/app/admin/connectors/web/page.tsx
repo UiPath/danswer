@@ -117,7 +117,7 @@ export default function Web() {
             base_url: "",
             web_connector_type: undefined,
           }}
-          refreshFreq={60 * 60 * 24} // 1 day
+          // refreshFreq={60 * 60 * 24} // 1 day
           pruneFreq={0} // Don't prune
         />
       </Card>

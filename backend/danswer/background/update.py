@@ -2,6 +2,7 @@ import logging
 import time
 from datetime import datetime
 
+from CodeBase.danswer.backend.danswer.configs.constants import DocumentSource
 import dask
 from dask.distributed import Client
 from dask.distributed import Future
@@ -90,6 +91,10 @@ def _should_create_new_indexing(
     if last_index.status == IndexingStatus.NOT_STARTED:
         return False
 
+    # Assuming webhook_triggered is a boolean flag "associated with that connector"
+    if connector.source == DocumentSource.WEB and webhook_triggered:
+        return True
+        
     current_db_time = get_db_current_time(db_session)
     time_since_index = current_db_time - last_index.time_updated
     return time_since_index.total_seconds() >= connector.refresh_freq
