@@ -639,20 +639,6 @@ def _vespa_hit_to_inference_chunk(hit: dict[str, Any]) -> InferenceChunk:
 
     return inference_chunk
 
-<<<<<<< Updated upstream
-@retry(tries=3, delay=1, backoff=2)
-def _query_vespa(query_params: Mapping[str, str | int | float]) -> list[InferenceChunk]:
-    if "query" in query_params and not cast(str, query_params["query"]).strip():
-        raise ValueError("No/empty query received")
-
-    params = dict(
-        **query_params,
-        **{
-            "presentation.timing": True,
-        }
-        if LOG_VESPA_TIMING_INFORMATION
-        else {},
-    )
 
 def query_vespa_helper(params):
     logger.info("Vespa Query ---> {0}".format(params))
@@ -714,13 +700,12 @@ def _query_vespa(query_params: Mapping[str, str | int | float]) -> list[Inferenc
     )
   
     #All records including web
-    params["hits"] = 40
+    params["hits"] = 50
     filtered_hits_all = query_vespa_helper(params)
 
     #Only Web Records
     params["hits"] = 10
     params["yql"] = params["yql"] + ' and source_type contains "web"'
-
     filtered_hits_web = query_vespa_helper(params)
 
     filtered_hits_final = filtered_hits_web + filtered_hits_all
