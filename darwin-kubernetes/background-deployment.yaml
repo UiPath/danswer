@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: background-deployment
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: background
+  template:
+    metadata:
+      labels:
+        app: background
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: agentpool
+                operator: In
+                values:
+                - indexcpu
+      containers:
+      - name: background
+        image: sfbrdevhelmweacr.azurecr.io/danswer/danswer-backend:vha-5
+        imagePullPolicy: IfNotPresent
+        command: ["/usr/bin/supervisord"]
+        # There are some extra values since this is shared between services
+        # There are no conflicts though, extra env variables are simply ignored
+        env:
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              key: postgres_user
+              name: danswer-secrets
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: postgres_password
+              name: danswer-secrets
+        envFrom:
+        - configMapRef:
+            name: env-configmap
+        volumeMounts:
+        - name: dynamic-storage
+          mountPath: /home/storage
+        - name: file-connector-storage
+          mountPath: /home/file_connector_storage
+      tolerations:
+      - effect: NoSchedule
+        key: darwin
+        operator: Equal
+        value: indexing
+      volumes:
+      - name: dynamic-storage
+        persistentVolumeClaim:
+          claimName: dynamic-pvc
+      - name: file-connector-storage
+        persistentVolumeClaim:
+          claimName: file-connector-pvc

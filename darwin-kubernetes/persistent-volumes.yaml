@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: dynamic-pvc
+spec:
+  storageClassName: azurefile-csi-premium
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: file-connector-pvc
+spec:
+  storageClassName: azurefile-csi-premium
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 5Gi

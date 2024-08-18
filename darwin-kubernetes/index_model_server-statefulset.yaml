@@ -1,0 +1,71 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: indexing-model-server-service
+spec:
+  selector:
+    app: indexing-model-server
+  ports:
+    - name: indexing-model-server-port
+      protocol: TCP
+      port: 9000
+      targetPort: 9000
+  type: ClusterIP
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: indexing-model-server-statefulset
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: indexing-model-server
+      name: indexing-model-server
+  serviceName: indexing-model-server-service
+  template:
+    metadata:
+      labels:
+        app: indexing-model-server
+        name: indexing-model-server
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: agentpool
+                operator: In
+                values:
+                - indexcpu
+      containers:
+      - name: indexing-model-server
+        image: danswer/danswer-model-server:v0.3.94
+        imagePullPolicy: IfNotPresent
+        command: [ "uvicorn", "model_server.main:app", "--host", "0.0.0.0", "--port", "9000" ]
+        ports:
+        - containerPort: 9000
+        envFrom:
+        - configMapRef:
+            name: env-configmap
+        env:
+          - name: INDEXING_ONLY
+            value: "True"
+        volumeMounts:
+        - name: indexing-model-storage
+          mountPath: /root/.cache
+      tolerations:
+      - effect: NoSchedule
+        key: darwin
+        operator: Equal
+        value: indexing
+  volumeClaimTemplates:
+  - metadata:
+      name: indexing-model-storage
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: 10Gi
+---
+

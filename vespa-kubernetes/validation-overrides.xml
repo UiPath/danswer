@@ -1,0 +1,4 @@
+<validation-overrides>
+    <allow until='2024-07-01'>content-cluster-removal</allow>
+</validation-overrides>
+
