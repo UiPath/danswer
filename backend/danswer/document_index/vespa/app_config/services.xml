@@ -1,23 +1,81 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <services version="1.0">
-    <container id="default" version="1.0">
-        <document-api/>
-        <search/>
-        <http>
-            <server id="default" port="8081"/>
-        </http>
+
+    <admin version="2.0">
+        <configservers>
+          <configserver hostalias="config0" />
+          <configserver hostalias="config1" />
+          <configserver hostalias="config2" />
+        </configservers>
+        <cluster-controllers>
+          <cluster-controller hostalias="config0" /> <!-- jvm-options added only to shrink memory for testing - remove before real use -->
+          <cluster-controller hostalias="config1" />
+          <cluster-controller hostalias="config2" />
+        </cluster-controllers>
+        <slobroks>
+          <slobrok hostalias="config0" />
+          <slobrok hostalias="config1" />
+          <slobrok hostalias="config2" />
+        </slobroks>
+
+        <adminserver hostalias="admin0" />
+    </admin>
+
+    <container id="feed" version="1.0">
+        <document-api />
+        <document-processing/>
         <nodes>
-            <node hostalias="danswer-node" />
+          <node hostalias="feed0"/>
+          <node hostalias="feed1"/>
         </nodes>
     </container>
+
+    <container id="query" version="1.0">
+        <search/>
+        <http>
+            <filtering strict-mode="false">
+                <request-chain id="request-chain">
+                    <filter id="com.yahoo.jdisc.http.filter.security.cors.CorsPreflightRequestFilter"
+                            bundle="jdisc-security-filters">
+                        <config name="jdisc.http.filter.security.cors.cors-filter">
+                            <allowedUrls>
+                                <item>*</item>
+                            </allowedUrls>
+                        </config>
+                    </filter>
+                    <binding>http://*/search/</binding>
+                </request-chain>
+
+                <response-chain id="response-chain">
+                    <filter id="com.yahoo.jdisc.http.filter.security.cors.CorsResponseFilter"
+                            bundle="jdisc-security-filters">
+                        <config name="jdisc.http.filter.security.cors.cors-filter">
+                            <allowedUrls>
+                                <item>*</item>
+                            </allowedUrls>
+                        </config>
+                    </filter>
+                    <binding>http://*/search/</binding>
+                </response-chain>
+            </filtering>
+            <server port="8080" id="query"/>
+        </http>
+        <nodes>
+          <node hostalias="query0" />
+          <node hostalias="query1" />
+        </nodes>
+    </container>
+
     <content id="danswer_index" version="1.0">
-        <redundancy>1</redundancy>
+        <min-redundancy>2</min-redundancy>
         <documents>
             <!-- <document type="danswer_chunk" mode="index" /> -->
             DOCUMENT_REPLACEMENT
         </documents>
         <nodes>
-            <node hostalias="danswer-node" distribution-key="0" />
+          <node hostalias="content0" distribution-key="0" />
+          <node hostalias="content1" distribution-key="1" />
+          <node hostalias="content2" distribution-key="2" />
         </nodes>
         <tuning>
             <resource-limits>
@@ -34,3 +92,4 @@
         </config>
     </content>
 </services>
+

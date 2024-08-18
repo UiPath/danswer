@@ -23,6 +23,8 @@ from danswer.configs.app_configs import VESPA_CONFIG_SERVER_HOST
 from danswer.configs.app_configs import VESPA_HOST
 from danswer.configs.app_configs import VESPA_PORT
 from danswer.configs.app_configs import VESPA_TENANT_PORT
+from danswer.configs.app_configs import VESPA_FEED_HOST
+from danswer.configs.app_configs import VESPA_FEED_PORT
 from danswer.configs.chat_configs import DOC_TIME_DECAY
 from danswer.configs.chat_configs import EDIT_KEYWORD_QUERY
 from danswer.configs.chat_configs import HYBRID_ALPHA
@@ -83,9 +85,10 @@ VESPA_APPLICATION_ENDPOINT = f"{VESPA_CONFIG_SERVER_URL}/application/v2"
 
 # main search application
 VESPA_APP_CONTAINER_URL = f"http://{VESPA_HOST}:{VESPA_PORT}"
+VESPA_FEED_CONTAINER_URL = f"http://{VESPA_FEED_HOST}:{VESPA_FEED_PORT}"
 # danswer_chunk below is defined in vespa/app_configs/schemas/danswer_chunk.sd
 DOCUMENT_ID_ENDPOINT = (
-    f"{VESPA_APP_CONTAINER_URL}/document/v1/default/{{index_name}}/docid"
+    f"{VESPA_FEED_CONTAINER_URL}/document/v1/default/{{index_name}}/docid"
 )
 SEARCH_ENDPOINT = f"{VESPA_APP_CONTAINER_URL}/search/"
 
@@ -604,7 +607,13 @@ def _vespa_hit_to_inference_chunk(hit: dict[str, Any]) -> InferenceChunk:
         for k, v in cast(dict[str, str], source_links_dict_unprocessed).items()
     }
 
-    return InferenceChunk(
+    if 'web' in fields[SOURCE_TYPE]:
+        score = 1.0
+    else:
+        score = hit.get("relevance", 0)
+
+
+    inference_chunk = InferenceChunk(
         chunk_id=fields[CHUNK_ID],
         blurb=blurb,
         content=content,
@@ -614,8 +623,10 @@ def _vespa_hit_to_inference_chunk(hit: dict[str, Any]) -> InferenceChunk:
         source_type=fields[SOURCE_TYPE],
         semantic_identifier=fields[SEMANTIC_IDENTIFIER],
         boost=fields.get(BOOST, 1),
+        #boost = boost,
         recency_bias=fields.get("matchfeatures", {}).get(RECENCY_BIAS, 1.0),
         score=hit.get("relevance", 0),
+        #score = score,
         hidden=fields.get(HIDDEN, False),
         primary_owners=fields.get(PRIMARY_OWNERS),
         secondary_owners=fields.get(SECONDARY_OWNERS),
@@ -623,8 +634,12 @@ def _vespa_hit_to_inference_chunk(hit: dict[str, Any]) -> InferenceChunk:
         match_highlights=match_highlights,
         updated_at=updated_at,
     )
+    attrs = vars(inference_chunk)
+    logger.info(', '.join("%s: %s" % item for item in attrs.items()))
 
+    return inference_chunk
 
+<<<<<<< Updated upstream
 @retry(tries=3, delay=1, backoff=2)
 def _query_vespa(query_params: Mapping[str, str | int | float]) -> list[InferenceChunk]:
     if "query" in query_params and not cast(str, query_params["query"]).strip():
@@ -639,10 +654,14 @@ def _query_vespa(query_params: Mapping[str, str | int | float]) -> list[Inferenc
         else {},
     )
 
+def query_vespa_helper(params):
+    logger.info("Vespa Query ---> {0}".format(params))
+
     response = requests.post(
         SEARCH_ENDPOINT,
         json=params,
     )
+
     try:
         response.raise_for_status()
     except requests.HTTPError as e:
@@ -676,7 +695,55 @@ def _query_vespa(query_params: Mapping[str, str | int | float]) -> list[Inferenc
 
     filtered_hits = [hit for hit in hits if hit["fields"].get(CONTENT) is not None]
 
-    inference_chunks = [_vespa_hit_to_inference_chunk(hit) for hit in filtered_hits]
+    return filtered_hits
+
+
+@retry(tries=3, delay=1, backoff=2)
+def _query_vespa(query_params: Mapping[str, str | int | float]) -> list[InferenceChunk]:
+    if "query" in query_params and not cast(str, query_params["query"]).strip():
+        raise ValueError("No/empty query received")
+
+    
+    params = dict(
+        **query_params,
+        **{
+            "presentation.timing": True,
+        }
+        if LOG_VESPA_TIMING_INFORMATION
+        else {},
+    )
+  
+    #All records including web
+    params["hits"] = 40
+    filtered_hits_all = query_vespa_helper(params)
+
+    #Only Web Records
+    params["hits"] = 10
+    params["yql"] = params["yql"] + ' and source_type contains "web"'
+
+    filtered_hits_web = query_vespa_helper(params)
+
+    filtered_hits_final = filtered_hits_web + filtered_hits_all
+
+    inference_chunks = [_vespa_hit_to_inference_chunk(hit) for hit in filtered_hits_final]
+    #inplace sorting based on score
+    #inference_chunks.sort(key=lambda x: x.score, reverse=True)
+
+    unique_chunks: dict[tuple[str, int], InferenceChunk] = {}
+    for chunk in inference_chunks:
+        key = (chunk.document_id, chunk.chunk_id)
+        if key not in unique_chunks:
+            unique_chunks[key] = chunk
+            continue
+
+        stored_chunk_score = unique_chunks[key].score or 0
+        this_chunk_score = chunk.score or 0
+        if stored_chunk_score < this_chunk_score:
+            unique_chunks[key] = chunk
+
+    inference_chunks = sorted(
+        unique_chunks.values(), key=lambda x: x.score or 0, reverse=True
+    )
     # Good Debugging Spot
     return inference_chunks
 
@@ -764,6 +831,7 @@ class VespaIndex(DocumentIndex):
         schema_file = os.path.join(vespa_schema_path, "schemas", "danswer_chunk.sd")
         services_file = os.path.join(vespa_schema_path, "services.xml")
         overrides_file = os.path.join(vespa_schema_path, "validation-overrides.xml")
+        hosts_file = os.path.join(vespa_schema_path, "hosts.xml")
 
         with open(services_file, "r") as services_f:
             services_template = services_f.read()
@@ -784,9 +852,13 @@ class VespaIndex(DocumentIndex):
 
         overrides = overrides_template.replace(DATE_REPLACEMENT, formatted_date)
 
+        with open(hosts_file, "r") as hosts_f:
+            hosts_template = hosts_f.read()
+
         zip_dict = {
             "services.xml": services.encode("utf-8"),
             "validation-overrides.xml": overrides.encode("utf-8"),
+            "hosts.xml": hosts_template.encode("utf-8"),
         }
 
         with open(schema_file, "r") as schema_f:
