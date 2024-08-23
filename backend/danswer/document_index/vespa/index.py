@@ -25,6 +25,7 @@ from danswer.configs.app_configs import VESPA_PORT
 from danswer.configs.app_configs import VESPA_TENANT_PORT
 from danswer.configs.app_configs import VESPA_FEED_HOST
 from danswer.configs.app_configs import VESPA_FEED_PORT
+from danswer.configs.app_configs import ENVIRONMENT
 from danswer.configs.chat_configs import DOC_TIME_DECAY
 from danswer.configs.chat_configs import EDIT_KEYWORD_QUERY
 from danswer.configs.chat_configs import HYBRID_ALPHA
@@ -816,7 +817,10 @@ class VespaIndex(DocumentIndex):
         schema_file = os.path.join(vespa_schema_path, "schemas", "danswer_chunk.sd")
         services_file = os.path.join(vespa_schema_path, "services.xml")
         overrides_file = os.path.join(vespa_schema_path, "validation-overrides.xml")
-        hosts_file = os.path.join(vespa_schema_path, "hosts.xml")
+        if ENVIRONMENT in "DEV":
+            hosts_file = os.path.join(vespa_schema_path, "hosts-dev.xml")
+        else:
+            hosts_file = os.path.join(vespa_schema_path, "hosts.xml")
 
         with open(services_file, "r") as services_f:
             services_template = services_f.read()
