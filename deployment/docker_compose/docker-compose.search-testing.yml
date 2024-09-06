@@ -215,6 +215,7 @@ services:
 
 
 volumes:
+  cache_volume:
   db_volume:
     driver: local
     driver_opts:

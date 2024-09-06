@@ -38,9 +38,15 @@ jobs:
           backend/requirements/model_server.txt
     - run: |
         python -m pip install --upgrade pip
+<<<<<<< HEAD
         pip install --retries 5 --timeout 30 -r backend/requirements/default.txt
         pip install --retries 5 --timeout 30 -r backend/requirements/dev.txt
         pip install --retries 5 --timeout 30 -r backend/requirements/model_server.txt
+=======
+        pip install -r backend/requirements/default.txt
+        pip install -r backend/requirements/dev.txt
+        pip install -r backend/requirements/model_server.txt
+>>>>>>> 6daea805 (first cut at redis (#2226))
 
     - name: Set up chart-testing
       uses: helm/chart-testing-action@v2.6.1

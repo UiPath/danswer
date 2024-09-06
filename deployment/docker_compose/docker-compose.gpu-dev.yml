@@ -365,6 +365,7 @@ services:
 
 
 volumes:
+  cache_volume:
   db_volume:
   vespa_volume:
   # Created by the container itself
