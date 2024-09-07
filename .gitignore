@@ -6,4 +6,6 @@
 /deployment/data/nginx/app.conf
 .vscode/launch.json
 *.sw?
+.docker-compose.local.yml
 /backend/tests/regression/answer_quality/search_test_config.yaml
+deployment/docker_compose/docker-compose.local.yml

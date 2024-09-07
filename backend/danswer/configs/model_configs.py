@@ -54,14 +54,42 @@ CROSS_ENCODER_RANGE_MIN = 0
 # NOTE: settings like `GEN_AI_MODEL_PROVIDER`, `GEN_AI_MODEL_VERSION`, etc. which
 # used to be here are now solely configured via the UI and stored in Postgres.
 
+# Additionally Danswer supports GPT4All and custom request library based models
+# Set GEN_AI_MODEL_PROVIDER to "custom" to use the custom requests approach
+# Set GEN_AI_MODEL_PROVIDER to "gpt4all" to use gpt4all models running locally
+GEN_AI_MODEL_PROVIDER = os.environ.get("GEN_AI_MODEL_PROVIDER") or "openai"
+# If using Azure, it's the engine name, for example: Danswer
+GEN_AI_MODEL_VERSION = os.environ.get("GEN_AI_MODEL_VERSION")
+
+# For secondary flows like extracting filters or deciding if a chunk is useful, we don't need
+# as powerful of a model as say GPT-4 so we can use an alternative that is faster and cheaper
+FAST_GEN_AI_MODEL_VERSION = os.environ.get("FAST_GEN_AI_MODEL_VERSION")
+
+# If the Generative AI model requires an API key for access, otherwise can leave blank
+GEN_AI_API_KEY = (
+    os.environ.get("GEN_AI_API_KEY", os.environ.get("OPENAI_API_KEY")) or None
+)
+
+# API Base, such as (for Azure): https://danswer.openai.azure.com/
+GEN_AI_API_ENDPOINT = os.environ.get("GEN_AI_API_ENDPOINT") or None
+# API Version, such as (for Azure): 2023-09-15-preview
+GEN_AI_API_VERSION = os.environ.get("GEN_AI_API_VERSION") or None
+# LiteLLM custom_llm_provider
+GEN_AI_LLM_PROVIDER_TYPE = os.environ.get("GEN_AI_LLM_PROVIDER_TYPE") or None
+# Override the auto-detection of LLM max context length
+
 # Override the auto-detection of LLM max context length
 GEN_AI_MAX_TOKENS = int(os.environ.get("GEN_AI_MAX_TOKENS") or 0) or None
+GEN_AI_MAX_OUTPUT_TOKENS = int(os.environ.get("GEN_AI_MAX_OUTPUT_TOKENS") or 1024)
 
 # Set this to be enough for an answer + quotes. Also used for Chat
 # This is the minimum token context we will leave for the LLM to generate an answer
 GEN_AI_NUM_RESERVED_OUTPUT_TOKENS = int(
     os.environ.get("GEN_AI_NUM_RESERVED_OUTPUT_TOKENS") or 1024
 )
+GEN_AI_IDENTITY_ENDPOINT = os.environ.get("GEN_AI_IDENTITY_ENDPOINT") or None
+GEN_AI_CLIENT_ID = os.environ.get("GEN_AI_CLIENT_ID") or None
+GEN_AI_CLIENT_SECRET = os.environ.get("GEN_AI_CLIENT_SECRET") or None
 
 # Typically, GenAI models nowadays are at least 4K tokens
 GEN_AI_MODEL_FALLBACK_MAX_TOKENS = 4096

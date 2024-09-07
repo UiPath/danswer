@@ -80,7 +80,7 @@ postgresql:
   primary:
     persistence:
       size: 5Gi
-  enabled: true
+  enabled: false
   auth:
     existingSecret: danswer-secrets
     secretKeys:
@@ -209,7 +209,7 @@ api:
   autoscaling:
     enabled: false
     minReplicas: 1
-    maxReplicas: 100
+    maxReplicas: 5
     targetCPUUtilizationPercentage: 80
     # targetMemoryUtilizationPercentage: 80
 
@@ -269,7 +269,7 @@ background:
   autoscaling:
     enabled: false
     minReplicas: 1
-    maxReplicas: 100
+    maxReplicas: 5
     targetCPUUtilizationPercentage: 80
     # targetMemoryUtilizationPercentage: 80
 

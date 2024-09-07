@@ -32,6 +32,7 @@ from litellm.exceptions import UnprocessableEntityError  # type: ignore
 from danswer.configs.constants import MessageType
 from danswer.configs.model_configs import GEN_AI_MAX_TOKENS
 from danswer.configs.model_configs import GEN_AI_MODEL_FALLBACK_MAX_TOKENS
+from danswer.configs.model_configs import GEN_AI_MODEL_PROVIDER
 from danswer.configs.model_configs import GEN_AI_NUM_RESERVED_OUTPUT_TOKENS
 from danswer.db.models import ChatMessage
 from danswer.file_store.models import ChatFileType
@@ -247,6 +248,26 @@ def convert_lm_input_to_basic_string(lm_input: LanguageModelInput) -> str:
 
     return prompt_value.to_string()
 
+def convert_lm_input_to_prompt(lm_input: LanguageModelInput) -> PromptValue:
+    """Heavily inspired by:
+    https://github.com/langchain-ai/langchain/blob/master/libs/langchain/langchain/chat_models/base.py#L86
+    """
+    prompt_value = None
+    if isinstance(lm_input, PromptValue):
+        prompt_value = lm_input
+    elif isinstance(lm_input, str):
+        prompt_value = StringPromptValue(text=lm_input)
+    elif isinstance(lm_input, list):
+        prompt_value = ChatPromptValue(messages=lm_input)
+
+    if prompt_value is None:
+        raise ValueError(
+            f"Invalid input type {type(lm_input)}. "
+            "Must be a PromptValue, str, or list of BaseMessages."
+        )
+
+    return prompt_value
+
 
 def message_to_string(message: BaseMessage) -> str:
     if not isinstance(message.content, str):
@@ -330,7 +351,7 @@ def test_llm(llm: LLM) -> str | None:
 def get_llm_max_tokens(
     model_map: dict,
     model_name: str,
-    model_provider: str,
+    model_provider: str = GEN_AI_MODEL_PROVIDER,
 ) -> int:
     """Best effort attempt to get the max tokens for the LLM"""
     if GEN_AI_MAX_TOKENS:
@@ -370,7 +391,7 @@ def get_llm_max_tokens(
 def get_llm_max_output_tokens(
     model_map: dict,
     model_name: str,
-    model_provider: str,
+    model_provider: str = GEN_AI_MODEL_PROVIDER,
 ) -> int:
     """Best effort attempt to get the max output tokens for the LLM"""
     try:
