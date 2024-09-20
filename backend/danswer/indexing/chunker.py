@@ -1,4 +1,6 @@
 import abc
+import sys
+sys.setrecursionlimit(3000)
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 

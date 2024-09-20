@@ -636,13 +636,13 @@ def _vespa_hit_to_inference_chunk(hit: dict[str, Any]) -> InferenceChunk:
         updated_at=updated_at,
     )
     attrs = vars(inference_chunk)
-    logger.info(', '.join("%s: %s" % item for item in attrs.items()))
+    #logger.info(', '.join("%s: %s" % item for item in attrs.items()))
 
     return inference_chunk
 
 
 def query_vespa_helper(params):
-    logger.info("Vespa Query ---> {0}".format(params))
+    #logger.info("Vespa Query ---> {0}".format(params))
 
     response = requests.post(
         SEARCH_ENDPOINT,

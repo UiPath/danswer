@@ -92,11 +92,11 @@ def translate_citations(
     for db_doc in db_docs:
         if db_doc.document_id not in doc_id_to_saved_doc_id_map:
             doc_id_to_saved_doc_id_map[db_doc.document_id] = db_doc.id
-            print(f'found doc id: {db_doc.id}')
+            #print(f'found doc id: {db_doc.id}')
 
     citation_to_saved_doc_id_map: dict[int, int] = {}
     for citation in citations_list:
-        print(f'citation id {citation.document_id} for doc num {citation.citation_num}')
+        #print(f'citation id {citation.document_id} for doc num {citation.citation_num}')
         if citation.citation_num not in citation_to_saved_doc_id_map:
             citation_to_saved_doc_id_map[
                 citation.citation_num

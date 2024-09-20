@@ -152,18 +152,15 @@ def thread_to_doc(
 ) -> Document:
     channel_id = channel["id"]
 
-    #Avoid throttling of slack user api calls, not able to index help-integration-service
-    initial_sender_name = "Unknown"
+    initial_sender_expert_info = expert_info_from_slack_id(
+        user_id=thread[0].get("user"), client=client, user_cache=user_cache
+    )
 
-    # initial_sender_expert_info = expert_info_from_slack_id(
-    #     user_id=thread[0].get("user"), client=client, user_cache=user_cache
-    # )
-
-    # initial_sender_name = (
-    #     initial_sender_expert_info.get_semantic_name()
-    #     if initial_sender_expert_info
-    #     else "Unknown"
-    # )
+    initial_sender_name = (
+        initial_sender_expert_info.get_semantic_name()
+        if initial_sender_expert_info
+        else "Unknown"
+    )
 
     valid_experts = None
     if ENABLE_EXPENSIVE_EXPERT_CALLS:

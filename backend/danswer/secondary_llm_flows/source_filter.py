@@ -168,4 +168,4 @@ if __name__ == "__main__":
             sources = extract_source_filter(
                 user_input, get_main_llm_from_tuple(get_default_llms()), db_session
             )
-            print(sources)
+            #print(sources)

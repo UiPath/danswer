@@ -360,4 +360,4 @@ if __name__ == "__main__":
     one_year_ago = current - 24 * 60 * 60 * 360
     latest_docs = connector.poll_source(one_year_ago, current)
 
-    print(next(latest_docs))
+    #print(next(latest_docs))

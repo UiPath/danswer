@@ -93,17 +93,23 @@ def make_slack_api_rate_limited(
                     error = "unknown error"
 
                 if error == "ratelimited":
-                    # Handle rate limiting: get the 'Retry-After' header value and sleep for that duration
-                    retry_after = int(e.response.headers.get("Retry-After", 1))
-                    logger.info(
-                        f"Slack call rate limited, retrying after {retry_after} seconds. Exception: {e}"
-                    )
-                    time.sleep(retry_after)
+                        # Handle rate limiting: get the 'Retry-After' header value and sleep for that duration
+                        retry_after = int(e.response.headers['Retry-After'])
+                        logger.info(
+                            f"Slack call rate limited, retrying after {retry_after} seconds. Exception: {e}"
+                        )
+                        time.sleep(retry_after)
+                        continue
                 elif error in ["already_reacted", "no_reaction"]:
+                    logger.info("not here already_reacted")
                     # The response isn't used for reactions, this is basically just a pass
                     return e.response
+                elif "status" in e.response and e.response["status"] == 503:
+                    time.sleep(60)
+                    continue
                 else:
                     # Raise the error for non-transient errors
+                    logger.info(f"Non Transient Exception: {e}")
                     raise
 
         # If the code reaches this point, all retries have been exhausted

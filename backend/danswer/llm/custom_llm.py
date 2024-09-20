@@ -125,11 +125,11 @@ class CustomModelServer(LLM):
 
     def _execute(self, input: LanguageModelInput) -> AIMessage:
 
-        print(f"Access Token: {self.token}")
-        print(f"Endpoint: {self._endpoint}")
-        print(f"_client_id: {self._client_id}")
-        print(f"_client_secret: {self._client_secret}")
-        print(f"_identity_url: {self._identity_url}")
+        # print(f"Access Token: {self.token}")
+        # print(f"Endpoint: {self._endpoint}")
+        # print(f"_client_id: {self._client_id}")
+        # print(f"_client_secret: {self._client_secret}")
+        # print(f"_identity_url: {self._identity_url}")
 
         headers = {
             "Content-Type": "application/json",
@@ -149,7 +149,7 @@ class CustomModelServer(LLM):
             json_obj = {"role": mapped_type, "content": msg.content}
             json_array.append(json_obj)
 
-        print(f"Json Array: {json_array}")
+        #print(f"Json Array: {json_array}")
 
         data = {
             "messages": json_array
@@ -160,17 +160,17 @@ class CustomModelServer(LLM):
                 self._endpoint, headers=headers, json=data, timeout=self._timeout
             )
             #print(response)
-            print(response.json())
+            # print(response.json())
         except Timeout as error:
             raise Timeout(f"Model inference to {self._endpoint} timed out") from error
 
         response.raise_for_status()
         data = json.loads(response.content)
-        print(data)
+        # print(data)
         message_content = "No response from LLM server"
         if data['choices']:
             message_content = data['choices'][0]['message']['content']
-        print(message_content)
+        # print(message_content)
         return AIMessage(content=message_content)
 
     # Convert from AI to LLMGateway types, Only basic, no chunks and no tool and function calls
