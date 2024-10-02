@@ -65,6 +65,7 @@ from danswer.search.models import InferenceChunkUncleaned
 from danswer.utils.batching import batch_generator
 from danswer.utils.logger import setup_logger
 from shared_configs.model_server_models import Embedding
+from danswer.configs.app_configs import ENVIRONMENT
 
 logger = setup_logger()
 
@@ -128,9 +129,20 @@ class VespaIndex(DocumentIndex):
         schema_file = os.path.join(vespa_schema_path, "schemas", "danswer_chunk.sd")
         services_file = os.path.join(vespa_schema_path, "services.xml")
         overrides_file = os.path.join(vespa_schema_path, "validation-overrides.xml")
+        
+        if ENVIRONMENT in "DEV":
+            hosts_file = os.path.join(vespa_schema_path, "hosts-dev.xml")
+        elif ENVIRONMENT in "PROD":
+            hosts_file = os.path.join(vespa_schema_path, "hosts.xml")
+        else:
+            hosts_file = None
 
         with open(services_file, "r") as services_f:
             services_template = services_f.read()
+
+        if hosts_file:
+            with open(hosts_file, "r") as hosts_f:
+                hosts_template = hosts_f.read()
 
         schema_names = [self.index_name, self.secondary_index_name]
 
@@ -159,10 +171,18 @@ class VespaIndex(DocumentIndex):
 
         overrides = overrides_template.replace(DATE_REPLACEMENT, formatted_date)
 
-        zip_dict = {
-            "services.xml": services.encode("utf-8"),
-            "validation-overrides.xml": overrides.encode("utf-8"),
-        }
+        if hosts_file:
+            zip_dict = {
+                "services.xml": services.encode("utf-8"),
+                "validation-overrides.xml": overrides.encode("utf-8"),
+                "hosts.xml": hosts_template.encode("utf-8"),
+            }
+        else:
+            zip_dict = {
+                "services.xml": services.encode("utf-8"),
+                "validation-overrides.xml": overrides.encode("utf-8"),
+            }
+
 
         with open(schema_file, "r") as schema_f:
             schema_template = schema_f.read()

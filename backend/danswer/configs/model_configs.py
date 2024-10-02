@@ -63,6 +63,11 @@ FAST_GEN_AI_MODEL_VERSION = os.environ.get("FAST_GEN_AI_MODEL_VERSION")
 # Override the auto-detection of LLM max context length
 GEN_AI_MAX_TOKENS = int(os.environ.get("GEN_AI_MAX_TOKENS") or 0) or None
 
+GEN_AI_MAX_OUTPUT_TOKENS = int(os.environ.get("GEN_AI_MAX_OUTPUT_TOKENS") or 1024)
+GEN_AI_IDENTITY_ENDPOINT = os.environ.get("GEN_AI_IDENTITY_ENDPOINT") or None
+GEN_AI_CLIENT_ID = os.environ.get("GEN_AI_CLIENT_ID") or None
+GEN_AI_CLIENT_SECRET = os.environ.get("GEN_AI_CLIENT_SECRET") or None
+
 # Set this to be enough for an answer + quotes. Also used for Chat
 # This is the minimum token context we will leave for the LLM to generate an answer
 GEN_AI_NUM_RESERVED_OUTPUT_TOKENS = int(

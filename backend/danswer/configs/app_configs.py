@@ -15,6 +15,7 @@ APP_PORT = 8080
 # generally used if using a reverse proxy which doesn't support stripping the `/api`
 # prefix from requests directed towards the API server. In these cases, set this to `/api`
 APP_API_PREFIX = os.environ.get("API_PREFIX", "")
+ENVIRONMENT = os.environ.get("ENVIRONMENT") or "PROD"
 
 
 #####
@@ -111,10 +112,12 @@ DOCUMENT_INDEX_TYPE = os.environ.get(
     "DOCUMENT_INDEX_TYPE", DocumentIndexType.COMBINED.value
 )
 VESPA_HOST = os.environ.get("VESPA_HOST") or "localhost"
+VESPA_FEED_HOST = os.environ.get("VESPA_FEED_HOST") or "localhost"
 # NOTE: this is used if and only if the vespa config server is accessible via a
 # different host than the main vespa application
 VESPA_CONFIG_SERVER_HOST = os.environ.get("VESPA_CONFIG_SERVER_HOST") or VESPA_HOST
 VESPA_PORT = os.environ.get("VESPA_PORT") or "8081"
+VESPA_FEED_PORT = os.environ.get("VESPA_FEED_PORT") or "8080"
 VESPA_TENANT_PORT = os.environ.get("VESPA_TENANT_PORT") or "19071"
 # The default below is for dockerized deployment
 VESPA_DEPLOYMENT_ZIP = (

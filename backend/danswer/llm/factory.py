@@ -10,7 +10,7 @@ from danswer.llm.exceptions import GenAIDisabledException
 from danswer.llm.headers import build_llm_extra_headers
 from danswer.llm.interfaces import LLM
 from danswer.llm.override_models import LLMOverride
-
+from danswer.llm.custom_llm import CustomModelServer
 
 def get_main_llm_from_tuple(
     llms: tuple[LLM, LLM],
@@ -111,14 +111,7 @@ def get_llm(
     timeout: int = QA_TIMEOUT,
     additional_headers: dict[str, str] | None = None,
 ) -> LLM:
-    return DefaultMultiLLM(
-        model_provider=provider,
-        model_name=model,
-        api_key=api_key,
-        api_base=api_base,
-        api_version=api_version,
-        timeout=timeout,
-        temperature=temperature,
-        custom_config=custom_config,
-        extra_headers=build_llm_extra_headers(additional_headers),
-    )
+    return CustomModelServer(
+         timeout=timeout,
+         api_key=api_key,
+     )

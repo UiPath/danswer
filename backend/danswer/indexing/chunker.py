@@ -15,7 +15,8 @@ from danswer.indexing.models import DocAwareChunk
 from danswer.natural_language_processing.utils import BaseTokenizer
 from danswer.utils.logger import setup_logger
 from danswer.utils.text_processing import shared_precompare_cleanup
-
+import sys
+sys.setrecursionlimit(3000)
 
 # Not supporting overlaps, we need a clean combination of chunks and it is unclear if overlaps
 # actually help quality at all

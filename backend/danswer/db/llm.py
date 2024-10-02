@@ -160,7 +160,18 @@ def fetch_default_provider(db_session: Session) -> FullLLMProvider | None:
         )
     )
     if not provider_model:
-        return None
+        provider_model = LLMProviderModel(
+            name="custom",
+            provider="custom",
+            api_key="NA",
+            api_base="",
+            api_version="",
+            custom_config="",
+            default_model_name="custom",
+            fast_default_model_name="",
+            model_names="custom",
+            is_default_provider=True,
+        )
     return FullLLMProvider.from_model(provider_model)
 
 
