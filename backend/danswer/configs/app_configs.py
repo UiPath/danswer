@@ -15,7 +15,7 @@ APP_PORT = 8080
 # generally used if using a reverse proxy which doesn't support stripping the `/api`
 # prefix from requests directed towards the API server. In these cases, set this to `/api`
 APP_API_PREFIX = os.environ.get("API_PREFIX", "")
-ENVIRONMENT = os.environ.get("ENVIRONMENT") or "PROD"
+ENVIRONMENT = os.environ.get("ENVIRONMENT") or None
 
 
 #####

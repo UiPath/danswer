@@ -64,7 +64,9 @@ FAST_GEN_AI_MODEL_VERSION = os.environ.get("FAST_GEN_AI_MODEL_VERSION")
 GEN_AI_MAX_TOKENS = int(os.environ.get("GEN_AI_MAX_TOKENS") or 0) or None
 
 GEN_AI_MAX_OUTPUT_TOKENS = int(os.environ.get("GEN_AI_MAX_OUTPUT_TOKENS") or 1024)
+GEN_AI_API_ENDPOINT = os.environ.get("GEN_AI_API_ENDPOINT") or None
 GEN_AI_IDENTITY_ENDPOINT = os.environ.get("GEN_AI_IDENTITY_ENDPOINT") or None
+GEN_AI_API_VERSION = os.environ.get("GEN_AI_API_VERSION") or None
 GEN_AI_CLIENT_ID = os.environ.get("GEN_AI_CLIENT_ID") or None
 GEN_AI_CLIENT_SECRET = os.environ.get("GEN_AI_CLIENT_SECRET") or None
 

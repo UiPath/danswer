@@ -9,13 +9,11 @@ services:
       echo \"Starting Danswer Api Server\" &&
       uvicorn danswer.main:app --host 0.0.0.0 --port 8080"
     depends_on:
-      - relational_db
-      - index
+      # - relational_db
+      # - index
       - cache
       - inference_model_server
     restart: always
-    ports:
-      - "8080:8080"
     environment:
       # Auth Settings
       - AUTH_TYPE=${AUTH_TYPE:-disabled}
@@ -61,9 +59,12 @@ services:
       - LANGUAGE_CHAT_NAMING_HINT=${LANGUAGE_CHAT_NAMING_HINT:-}
       - QA_PROMPT_OVERRIDE=${QA_PROMPT_OVERRIDE:-}
       # Other services
-      - POSTGRES_HOST=relational_db
-      - VESPA_HOST=index
-      - REDIS_HOST=cache
+      - POSTGRES_HOST=${POSTGRES_HOST:-relational_db}  
+      - POSTGRES_USER=${POSTGRES_USER:-}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-}
+      - POSTGRES_DB=${POSTGRES_DB:-}
+      - VESPA_HOST=${VESPA_HOST:-index}
+      - REDIS_HOST=${REDIS_HOST:-cache}
       - WEB_DOMAIN=${WEB_DOMAIN:-} # For frontend redirect auth purpose
       # Don't change the NLP model configs unless you know what you're doing
       - EMBEDDING_BATCH_SIZE=${EMBEDDING_BATCH_SIZE:-}
@@ -95,6 +96,25 @@ services:
       - ENABLE_PAID_ENTERPRISE_EDITION_FEATURES=${ENABLE_PAID_ENTERPRISE_EDITION_FEATURES:-false}
       - API_KEY_HASH_ROUNDS=${API_KEY_HASH_ROUNDS:-}
       # Seeding configuration
+      # UiPath Overrides
+      -  GEN_AI_IDENTITY_ENDPOINT=${GEN_AI_IDENTITY_ENDPOINT:-}
+      -  DISABLE_LLM_FILTER_EXTRACTION=true
+      -  LOG_ALL_MODEL_INTERACTIONS=true
+      -  DISABLE_LLM_CHOOSE_SEARCH=true
+      -  FAST_GEN_AI_MODEL_VERSION=
+      -  GEN_AI_API_KEY=
+      -  GEN_AI_MODEL_VERSION=
+      -  GEN_AI_MODEL_PROVIDER=custom
+      -  CONTINUE_ON_CONNECTOR_FAILURE=true
+      -  GEN_AI_CLIENT_SECRET=${GEN_AI_CLIENT_SECRET:-}
+      -  GEN_AI_CLIENT_ID=${GEN_AI_CLIENT_ID:-}
+      -  NUM_INDEXING_WORKERS=1
+      -  APPLY_MIGRATIONS=true
+      -  DISABLE_LLM_CHUNK_FILTER=true
+      -  DASK_JOB_CLIENT_ENABLED=true
+      -  GEN_AI_MAX_TOKENS=
+      -  GEN_AI_API_ENDPOINT=${GEN_AI_API_ENDPOINT:-}
+      -  GEN_AI_LLM_PROVIDER_TYPE=   
     extra_hosts:
       - "host.docker.internal:host-gateway"
     logging:
@@ -110,8 +130,8 @@ services:
       dockerfile: Dockerfile
     command: /usr/bin/supervisord -c /etc/supervisor/conf.d/supervisord.conf
     depends_on:
-      - relational_db
-      - index
+      # - relational_db
+      # - index
       - cache
       - inference_model_server
       - indexing_model_server
@@ -138,12 +158,12 @@ services:
       - LANGUAGE_CHAT_NAMING_HINT=${LANGUAGE_CHAT_NAMING_HINT:-}
       - QA_PROMPT_OVERRIDE=${QA_PROMPT_OVERRIDE:-}
       # Other Services
-      - POSTGRES_HOST=relational_db
+      - POSTGRES_HOST=${POSTGRES_HOST:-relational_db}  
       - POSTGRES_USER=${POSTGRES_USER:-}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-}
       - POSTGRES_DB=${POSTGRES_DB:-}
-      - VESPA_HOST=index
-      - REDIS_HOST=cache
+      - VESPA_HOST=${VESPA_HOST:-index}
+      - REDIS_HOST=${REDIS_HOST:-cache}
       - WEB_DOMAIN=${WEB_DOMAIN:-} # For frontend redirect auth purpose for OAuth2 connectors
       # Don't change the NLP model configs unless you know what you're doing
       - DOCUMENT_ENCODER_MODEL=${DOCUMENT_ENCODER_MODEL:-}
@@ -154,6 +174,7 @@ services:
       - MODEL_SERVER_HOST=${MODEL_SERVER_HOST:-inference_model_server}
       - MODEL_SERVER_PORT=${MODEL_SERVER_PORT:-}
       - INDEXING_MODEL_SERVER_HOST=${INDEXING_MODEL_SERVER_HOST:-indexing_model_server}
+      - INDEXING_MODEL_SERVER_PORT=${INDEXING_MODEL_SERVER_PORT:-}
       # Indexing Configs
       - VESPA_SEARCHER_THREADS=${VESPA_SEARCHER_THREADS:-}
       - NUM_INDEXING_WORKERS=${NUM_INDEXING_WORKERS:-}
@@ -193,6 +214,25 @@ services:
 
       # Enterprise Edition stuff
       - ENABLE_PAID_ENTERPRISE_EDITION_FEATURES=${ENABLE_PAID_ENTERPRISE_EDITION_FEATURES:-false}
+      # UiPath Overrides
+      -  GEN_AI_IDENTITY_ENDPOINT=${GEN_AI_IDENTITY_ENDPOINT:-}
+      -  DISABLE_LLM_FILTER_EXTRACTION=true
+      -  LOG_ALL_MODEL_INTERACTIONS=true
+      -  DISABLE_LLM_CHOOSE_SEARCH=true
+      -  FAST_GEN_AI_MODEL_VERSION=
+      -  GEN_AI_API_KEY=
+      -  GEN_AI_MODEL_VERSION=
+      -  GEN_AI_MODEL_PROVIDER=custom
+      -  CONTINUE_ON_CONNECTOR_FAILURE=true
+      -  GEN_AI_CLIENT_SECRET=${GEN_AI_CLIENT_SECRET:-}
+      -  GEN_AI_CLIENT_ID=${GEN_AI_CLIENT_ID:-}
+      -  NUM_INDEXING_WORKERS=1
+      -  APPLY_MIGRATIONS=true
+      -  DISABLE_LLM_CHUNK_FILTER=true
+      -  DASK_JOB_CLIENT_ENABLED=true
+      -  GEN_AI_MAX_TOKENS=
+      -  GEN_AI_API_ENDPOINT=${GEN_AI_API_ENDPOINT:-}
+      -  GEN_AI_LLM_PROVIDER_TYPE=
     extra_hosts:
       - "host.docker.internal:host-gateway"
     logging:
@@ -222,7 +262,7 @@ services:
       - api_server
     restart: always
     environment:
-      - INTERNAL_URL=http://api_server:8080
+      - INTERNAL_URL=http://host.docker.internal:8080
       - WEB_DOMAIN=${WEB_DOMAIN:-}
       - THEME_IS_DARK=${THEME_IS_DARK:-}
       - DISABLE_LLM_DOC_RELEVANCE=${DISABLE_LLM_DOC_RELEVANCE:-}
@@ -285,32 +325,32 @@ services:
         max-size: "50m"
         max-file: "6"
 
-  relational_db:
-    image: postgres:15.2-alpine
-    command: -c 'max_connections=150'
-    restart: always
-    environment:
-      - POSTGRES_USER=${POSTGRES_USER:-postgres}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-password}
-    ports:
-      - "5432:5432"
-    volumes:
-      - db_volume:/var/lib/postgresql/data
+  # relational_db:
+  #   image: postgres:15.2-alpine
+  #   command: -c 'max_connections=150'
+  #   restart: always
+  #   environment:
+  #     - POSTGRES_USER=${POSTGRES_USER:-postgres}
+  #     - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-password}
+  #   ports:
+  #     - "5432:5432"
+  #   volumes:
+  #     - db_volume:/var/lib/postgresql/data
 
-  # This container name cannot have an underscore in it due to Vespa expectations of the URL
-  index:
-    image: vespaengine/vespa:8.277.17
-    restart: always
-    ports:
-      - "19071:19071"
-      - "8081:8081"
-    volumes:
-      - vespa_volume:/opt/vespa/var
-    logging:
-      driver: json-file
-      options:
-        max-size: "50m"
-        max-file: "6"
+  # # This container name cannot have an underscore in it due to Vespa expectations of the URL
+  # index:
+  #   image: vespaengine/vespa:8.277.17
+  #   restart: always
+  #   ports:
+  #     - "19071:19071"
+  #     - "8081:8081"
+  #   volumes:
+  #     - vespa_volume:/opt/vespa/var
+  #   logging:
+  #     driver: json-file
+  #     options:
+  #       max-size: "50m"
+  #       max-file: "6"
 
   nginx:
     image: nginx:1.23.4-alpine
@@ -344,15 +384,13 @@ services:
   cache:
     image: redis:7.4-alpine
     restart: always
-    ports:
-      - '6379:6379'
     # docker silently mounts /data even without an explicit volume mount, which enables
     # persistence. explicitly setting save and appendonly forces ephemeral behavior.
     command: redis-server --save "" --appendonly no
 
 volumes:
   db_volume:
-  vespa_volume: # Created by the container itself
+  # vespa_volume: # Created by the container itself
 
   model_cache_huggingface:
   indexing_huggingface_model_cache:
