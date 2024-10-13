@@ -60,14 +60,14 @@ def fetch_versioned_implementation(module: str, attribute: str) -> Any:
     try:
         return getattr(importlib.import_module(module_full), attribute)
     except ModuleNotFoundError as e:
-        logger.warning(
-            "Failed to fetch versioned implementation for %s.%s: %s",
-            module_full,
-            attribute,
-            e,
-        )
 
         if is_ee:
+            logger.warning(
+                "Failed to fetch versioned implementation for %s.%s: %s",
+                module_full,
+                attribute,
+                e,
+            )
             if "ee.danswer" not in str(e):
                 # If it's a non Danswer related import failure, this is likely because
                 # a dependent library has not been installed. Should raise this failure

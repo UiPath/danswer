@@ -64,6 +64,7 @@ services:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-}
       - POSTGRES_DB=${POSTGRES_DB:-}
       - VESPA_HOST=${VESPA_HOST:-index}
+      - VESPA_FEED_HOST=${VESPA_FEED_HOST:-index}
       - REDIS_HOST=${REDIS_HOST:-cache}
       - WEB_DOMAIN=${WEB_DOMAIN:-} # For frontend redirect auth purpose
       # Don't change the NLP model configs unless you know what you're doing
@@ -163,6 +164,7 @@ services:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-}
       - POSTGRES_DB=${POSTGRES_DB:-}
       - VESPA_HOST=${VESPA_HOST:-index}
+      - VESPA_FEED_HOST=${VESPA_FEED_HOST:-index}
       - REDIS_HOST=${REDIS_HOST:-cache}
       - WEB_DOMAIN=${WEB_DOMAIN:-} # For frontend redirect auth purpose for OAuth2 connectors
       # Don't change the NLP model configs unless you know what you're doing
@@ -229,7 +231,7 @@ services:
       -  NUM_INDEXING_WORKERS=1
       -  APPLY_MIGRATIONS=true
       -  DISABLE_LLM_CHUNK_FILTER=true
-      -  DASK_JOB_CLIENT_ENABLED=true
+      -  DASK_JOB_CLIENT_ENABLED=false
       -  GEN_AI_MAX_TOKENS=
       -  GEN_AI_API_ENDPOINT=${GEN_AI_API_ENDPOINT:-}
       -  GEN_AI_LLM_PROVIDER_TYPE=
@@ -262,7 +264,7 @@ services:
       - api_server
     restart: always
     environment:
-      - INTERNAL_URL=http://host.docker.internal:8080
+      - INTERNAL_URL=http://api_server:8080
       - WEB_DOMAIN=${WEB_DOMAIN:-}
       - THEME_IS_DARK=${THEME_IS_DARK:-}
       - DISABLE_LLM_DOC_RELEVANCE=${DISABLE_LLM_DOC_RELEVANCE:-}

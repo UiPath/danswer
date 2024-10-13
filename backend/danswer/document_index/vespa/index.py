@@ -127,22 +127,25 @@ class VespaIndex(DocumentIndex):
             os.getcwd(), "danswer", "document_index", "vespa", "app_config"
         )
         schema_file = os.path.join(vespa_schema_path, "schemas", "danswer_chunk.sd")
-        services_file = os.path.join(vespa_schema_path, "services.xml")
         overrides_file = os.path.join(vespa_schema_path, "validation-overrides.xml")
-        
-        # if ENVIRONMENT in "DEV":
-        #     hosts_file = os.path.join(vespa_schema_path, "hosts-dev.xml")
-        # elif ENVIRONMENT in "PROD":
-        #     hosts_file = os.path.join(vespa_schema_path, "hosts.xml")
-        # else:
-        #     hosts_file = None
+
+        if ENVIRONMENT in {"DEV", "PROD"}:
+            services_file = os.path.join(vespa_schema_path, "services-ha.xml")
+        else:
+            services_file = os.path.join(vespa_schema_path, "services.xml")
+
+        if ENVIRONMENT in "DEV":
+            hosts_file = os.path.join(vespa_schema_path, "hosts-dev.xml")
+        elif ENVIRONMENT in "PROD":
+            hosts_file = os.path.join(vespa_schema_path, "hosts-prod.xml")
+        else:
+            hosts_file = os.path.join(vespa_schema_path, "hosts.xml")
 
         with open(services_file, "r") as services_f:
             services_template = services_f.read()
 
-        # if hosts_file:
-        #     with open(hosts_file, "r") as hosts_f:
-        #         hosts_template = hosts_f.read()
+        with open(hosts_file, "r") as hosts_f:
+            hosts_template = hosts_f.read()
 
         schema_names = [self.index_name, self.secondary_index_name]
 
@@ -170,16 +173,11 @@ class VespaIndex(DocumentIndex):
         formatted_date = date_in_7_days.strftime("%Y-%m-%d")
 
         overrides = overrides_template.replace(DATE_REPLACEMENT, formatted_date)
-
-        # if hosts_file:
-        #     zip_dict = {
-        #         "services.xml": services.encode("utf-8"),
-        #         "validation-overrides.xml": overrides.encode("utf-8"),
-        #         "hosts.xml": hosts_template.encode("utf-8"),
-        #     }
+        
         zip_dict = {
             "services.xml": services.encode("utf-8"),
             "validation-overrides.xml": overrides.encode("utf-8"),
+            "hosts.xml": hosts_template.encode("utf-8"),
         }
 
         with open(schema_file, "r") as schema_f:
