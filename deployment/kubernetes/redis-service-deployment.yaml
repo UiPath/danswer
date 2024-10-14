@@ -26,6 +26,15 @@ spec:
       labels:
         app: redis
     spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: workloadType
+                operator: In
+                values:
+                - latest
       containers:
       - name: redis
         image: redis:7.4-alpine

@@ -1,12 +1,12 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: inference-model-server-service
+  name: indexing-model-server-service
 spec:
   selector:
-    app: inference-model-server
+    app: indexing-model-server
   ports:
-    - name: inference-model-server-port
+    - name: indexing-model-server-port
       protocol: TCP
       port: 9000
       targetPort: 9000
@@ -15,16 +15,16 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: inference-model-server-deployment
+  name: indexing-model-server-deployment
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: inference-model-server
+      app: indexing-model-server
   template:
     metadata:
       labels:
-        app: inference-model-server
+        app: indexing-model-server
     spec:
       affinity:
         nodeAffinity:
@@ -36,8 +36,8 @@ spec:
                 values:
                 - latest
       containers:
-      - name: inference-model-server
-        image: danswer/danswer-model-server:latest
+      - name: indexing-model-server
+        image: danswer/danswer-model-server:v0.5.28
         imagePullPolicy: IfNotPresent
         command: [ "uvicorn", "model_server.main:app", "--host", "0.0.0.0", "--port", "9000" ]
         ports:
@@ -45,21 +45,35 @@ spec:
         envFrom:
         - configMapRef:
             name: env-configmap
+        env:
+          - name: INDEXING_ONLY
+            value: "True"
         volumeMounts:
-        - name: inference-model-storage
+        - name: indexing-model-storage
           mountPath: /root/.cache
+        resources:
+          requests:
+            nvidia.com/gpu: 1
+          limits:
+            nvidia.com/gpu: 1
       volumes:
-      - name: inference-model-storage
+      - name: indexing-model-storage
         persistentVolumeClaim:
-          claimName: inference-model-pvc
+          claimName: indexing-model-pvc
+      tolerations:
+      - effect: NoSchedule
+        key: sku
+        operator: Equal
+        value: gpu
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: inference-model-pvc
+  name: indexing-model-pvc
 spec:
   accessModes:
     - ReadWriteOnce
   resources:
     requests:
-      storage: 3Gi
+      storage: 10Gi
+

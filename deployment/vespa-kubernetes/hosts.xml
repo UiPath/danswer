@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<hosts>
+  <host name='vespa-configserver-0.vespa-internal.darwin-latest.svc.cluster.local'>
+    <alias>config0</alias>
+  </host>
+  <host name='vespa-configserver-1.vespa-internal.darwin-latest.svc.cluster.local'>
+    <alias>config1</alias>
+  </host>
+  <host name='vespa-configserver-2.vespa-internal.darwin-latest.svc.cluster.local'>
+    <alias>config2</alias>
+  </host>
+  <host name='vespa-admin-0.vespa-internal.darwin-latest.svc.cluster.local'>
+    <alias>admin0</alias>
+  </host>
+  <host name='vespa-feed-container-0.vespa-internal.darwin-latest.svc.cluster.local'>
+    <alias>feed0</alias>
+  </host>
+  <host name='vespa-feed-container-1.vespa-internal.darwin-latest.svc.cluster.local'>
+    <alias>feed1</alias>
+  </host>
+  <host name='vespa-query-container-0.vespa-internal.darwin-latest.svc.cluster.local'>
+    <alias>query0</alias>
+  </host>
+  <host name='vespa-query-container-1.vespa-internal.darwin-latest.svc.cluster.local'>
+    <alias>query1</alias>
+  </host>
+  <host name='vespa-content-0.vespa-internal.darwin-latest.svc.cluster.local'>
+    <alias>content0</alias>
+  </host>
+  <host name='vespa-content-1.vespa-internal.darwin-latest.svc.cluster.local'>
+    <alias>content1</alias>
+  </host>
+  <host name='vespa-content-2.vespa-internal.darwin-latest.svc.cluster.local'>
+    <alias>content2</alias>
+  </host>
+</hosts>

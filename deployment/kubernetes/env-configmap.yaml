@@ -15,12 +15,24 @@ data:
   EMAIL_FROM: ""  # 'your-email@company.com' SMTP_USER missing used instead
   CORS_ALLOWED_ORIGIN: ""
   # Gen AI Settings
+  GEN_AI_MODEL_PROVIDER: "custom"
+  GEN_AI_API_ENDPOINT: "https://alpha.uipath.com/llmgateway_/openai/deployments/gpt-35-turbo/chat/completions?api-version=2023-03-15-preview"
+  GEN_AI_IDENTITY_ENDPOINT: "https://alpha.uipath.com/identity_/connect/token"
+  GEN_AI_CLIENT_ID: "XXX"
+  GEN_AI_CLIENT_SECRET: "XXX"
+  GEN_AI_MODEL_VERSION: ""
+  FAST_GEN_AI_MODEL_VERSION: ""
+  GEN_AI_API_KEY: ""
+  GEN_AI_API_VERSION: ""
+  GEN_AI_LLM_PROVIDER_TYPE: ""
   GEN_AI_MAX_TOKENS: ""
   QA_TIMEOUT: "60"
   MAX_CHUNKS_FED_TO_CHAT: ""
   DISABLE_LLM_DOC_RELEVANCE: ""
-  DISABLE_LLM_CHOOSE_SEARCH: ""
+  DISABLE_LLM_CHOOSE_SEARCH: "true"
   DISABLE_LLM_QUERY_REPHRASE: ""
+  DISABLE_LLM_FILTER_EXTRACTION: "true"
+  DISABLE_LLM_CHUNK_FILTER: "true"
   # Query Options
   DOC_TIME_DECAY: ""
   HYBRID_ALPHA: ""
@@ -30,8 +42,12 @@ data:
   LANGUAGE_CHAT_NAMING_HINT: ""
   QA_PROMPT_OVERRIDE: ""
   # Other Services
-  POSTGRES_HOST: "relational-db-service"
-  VESPA_HOST: "document-index-service"
+  POSTGRES_HOST: "darwin-postgres.postgres.database.azure.com"
+  VESPA_CONFIG_SERVER_HOST: "vespa-configserver"
+  VESPA_HOST: "vespa-query"
+  VESPA_PORT: "8080"
+  VESPA_FEED_HOST: "vespa-feed"
+  VESPA_FEED_PORT: "8080"
   REDIS_HOST: "redis-service"
   # Internet Search Tool
   BING_API_KEY: ""
@@ -48,10 +64,10 @@ data:
   MIN_THREADS_ML_MODELS: ""
   # Indexing Configs
   VESPA_SEARCHER_THREADS: ""
-  NUM_INDEXING_WORKERS: ""
+  NUM_INDEXING_WORKERS: "1"
   ENABLED_CONNECTOR_TYPES: ""
   DISABLE_INDEX_UPDATE_ON_SWAP: ""
-  DASK_JOB_CLIENT_ENABLED: ""
+  DASK_JOB_CLIENT_ENABLED: "true"
   CONTINUE_ON_CONNECTOR_FAILURE: ""
   EXPERIMENTAL_CHECKPOINTING_ENABLED: ""
   CONFLUENCE_CONNECTOR_LABELS_TO_SKIP: ""
@@ -70,8 +86,8 @@ data:
   # Logging
   # Optional Telemetry, please keep it on (nothing sensitive is collected)? <3
   # https://docs.danswer.dev/more/telemetry
-  DISABLE_TELEMETRY: ""
-  LOG_LEVEL: ""
+  DISABLE_TELEMETRY: "true"
+  LOG_LEVEL: "info"
   LOG_ALL_MODEL_INTERACTIONS: ""
   LOG_DANSWER_MODEL_INTERACTIONS: ""
   LOG_VESPA_TIMING_INFORMATION: ""
@@ -81,3 +97,4 @@ data:
   DOMAIN: "localhost"  # for nginx
   # Chat Configs
   HARD_DELETE_CHATS: ""
+  APPLY_MIGRATIONS: "true"

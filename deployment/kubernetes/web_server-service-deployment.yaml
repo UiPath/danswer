@@ -25,15 +25,34 @@ spec:
       labels:
         app: web-server
     spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: workloadType
+                operator: In
+                values:
+                - latest
       containers:
       - name: web-server
-        image: danswer/danswer-web-server:latest
+        image: sfbrdevhelmweacr.azurecr.io/danswer/danswer-web-server:0528-1
         imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 3000
         # There are some extra values since this is shared between services
         # There are no conflicts though, extra env variables are simply ignored
         env:
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              name: danswer-secrets
+              key: postgres_user
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: danswer-secrets
+              key: postgres_password
         - name: REDIS_PASSWORD
           valueFrom:
             secretKeyRef:

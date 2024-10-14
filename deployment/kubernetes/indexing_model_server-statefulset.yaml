@@ -1,30 +1,33 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: inference-model-server-service
+  name: indexing-model-server-service
 spec:
   selector:
-    app: inference-model-server
+    app: indexing-model-server
   ports:
-    - name: inference-model-server-port
+    - name: indexing-model-server-port
       protocol: TCP
       port: 9000
       targetPort: 9000
   type: ClusterIP
 ---
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
-  name: inference-model-server-deployment
+  name: indexing-model-server-statefulset
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
-      app: inference-model-server
+      app: indexing-model-server
+      name: indexing-model-server
+  serviceName: indexing-model-server-service
   template:
     metadata:
       labels:
-        app: inference-model-server
+        app: indexing-model-server
+        name: indexing-model-server
     spec:
       affinity:
         nodeAffinity:
@@ -36,8 +39,8 @@ spec:
                 values:
                 - latest
       containers:
-      - name: inference-model-server
-        image: danswer/danswer-model-server:latest
+      - name: indexing-model-server
+        image: danswer/danswer-model-server:v0.5.28
         imagePullPolicy: IfNotPresent
         command: [ "uvicorn", "model_server.main:app", "--host", "0.0.0.0", "--port", "9000" ]
         ports:
@@ -45,21 +48,25 @@ spec:
         envFrom:
         - configMapRef:
             name: env-configmap
+        env:
+          - name: INDEXING_ONLY
+            value: "True"
         volumeMounts:
-        - name: inference-model-storage
+        - name: indexing-model-storage
           mountPath: /root/.cache
-      volumes:
-      - name: inference-model-storage
-        persistentVolumeClaim:
-          claimName: inference-model-pvc
+      tolerations:
+      - effect: NoSchedule
+        key: darwin
+        operator: Equal
+        value: indexing
+  volumeClaimTemplates:
+  - metadata:
+      name: indexing-model-storage
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      resources:
+        requests:
+          storage: 10Gi
 ---
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: inference-model-pvc
-spec:
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 3Gi
+
+

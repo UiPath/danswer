@@ -26,9 +26,18 @@ spec:
       labels:
         app: indexing-model-server
     spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: workloadType
+                operator: In
+                values:
+                - latest
       containers:
       - name: indexing-model-server
-        image: danswer/danswer-model-server:latest
+        image: danswer/danswer-model-server:v0.5.28
         imagePullPolicy: IfNotPresent
         command: [ "uvicorn", "model_server.main:app", "--host", "0.0.0.0", "--port", "9000" ]
         ports:
