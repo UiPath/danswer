@@ -212,11 +212,11 @@ def handle_regular_answer(
                 use_citations=use_citations,
                 danswerbot_flow=True,
             )
+            logger.info(f"Answer: {answer}")
             if not answer.error_msg:
                 return answer
             else:
                 raise RuntimeError(answer.error_msg)
-
     try:
         # By leaving time_cutoff and favor_recent as None, and setting enable_auto_detect_filters
         # it allows the slack flow to extract out filters from the user query
@@ -265,6 +265,7 @@ def handle_regular_answer(
                 else None,
             )
         )
+        logger.info(f"Answer: {answer}")
     except Exception as e:
         logger.exception(
             f"Unable to process message - did not successfully answer "
@@ -354,6 +355,7 @@ def handle_regular_answer(
         )
 
         if answer.answer:
+            logger.debug("Answer:")
             logger.debug(answer.answer)
         return True
 
@@ -427,6 +429,8 @@ def handle_regular_answer(
         process_message_for_citations=use_citations,
         feedback_reminder_id=feedback_reminder_id,
     )
+
+    logger.info(f"Anser blocks: {answer_blocks}")
 
     # Get the chunks fed to the LLM only, then fill with other docs
     llm_doc_inds = answer.llm_selected_doc_indices or []

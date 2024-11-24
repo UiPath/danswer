@@ -129,7 +129,7 @@ class VespaIndex(DocumentIndex):
         schema_file = os.path.join(vespa_schema_path, "schemas", "danswer_chunk.sd")
         overrides_file = os.path.join(vespa_schema_path, "validation-overrides.xml")
 
-        if ENVIRONMENT in {"DEV", "PROD"}:
+        if ENVIRONMENT in {"DEV", "PROD", "LATEST"}:
             services_file = os.path.join(vespa_schema_path, "services-ha.xml")
         else:
             services_file = os.path.join(vespa_schema_path, "services.xml")
@@ -138,6 +138,8 @@ class VespaIndex(DocumentIndex):
             hosts_file = os.path.join(vespa_schema_path, "hosts-dev.xml")
         elif ENVIRONMENT in "PROD":
             hosts_file = os.path.join(vespa_schema_path, "hosts-prod.xml")
+        elif ENVIRONMENT in "LATEST":
+            hosts_file = os.path.join(vespa_schema_path, "hosts-latest.xml")
         else:
             hosts_file = os.path.join(vespa_schema_path, "hosts.xml")
 

@@ -62,6 +62,7 @@ from danswer.tools.tool_runner import ToolCallKickoff
 from danswer.utils.logger import setup_logger
 from danswer.utils.timing import log_generator_function_time
 from ee.danswer.server.query_and_chat.utils import create_temporary_persona
+from pprint import pprint
 
 logger = setup_logger()
 
@@ -181,6 +182,8 @@ def stream_answer_objects(
         db_session=db_session,
         commit=True,
     )
+    logger.info(f"new_user_message: {new_user_message}")
+    pprint(vars(new_user_message))
 
     prompt_config = PromptConfig.from_model(prompt)
     document_pruning_config = DocumentPruningConfig(
@@ -207,7 +210,8 @@ def stream_answer_objects(
         chunks_below=query_req.chunks_below,
         full_doc=query_req.full_doc,
     )
-
+    logger.info(f"search_tool: {search_tool}")
+    pprint(vars(search_tool))
     answer_config = AnswerStyleConfig(
         citation_config=CitationConfig() if use_citations else None,
         quotes_config=QuotesConfig() if not use_citations else None,
@@ -234,6 +238,8 @@ def stream_answer_objects(
         return_contexts=query_req.return_contexts,
         skip_gen_ai_answer_generation=query_req.skip_gen_ai_answer_generation,
     )
+    logger.info(f"answer_answer_question: {answer}")
+    pprint(vars(answer))
     # won't be any ImageGenerationDisplay responses since that tool is never passed in
     for packet in cast(AnswerObjectIterator, answer.processed_streamed_output):
         # for one-shot flow, don't currently do anything with these
@@ -270,6 +276,7 @@ def stream_answer_objects(
                     applied_time_cutoff=search_response_summary.final_filters.time_cutoff,
                     recency_bias_multiplier=search_response_summary.recency_bias_multiplier,
                 )
+                logger.info(f"initial_response: {initial_response}")
 
                 yield initial_response
 
@@ -314,10 +321,12 @@ def stream_answer_objects(
         db_session=db_session,
         commit=True,
     )
+    logger.info(f"gen_ai_response_message: {gen_ai_response_message}")
 
     msg_detail_response = translate_db_message_to_chat_message_detail(
         gen_ai_response_message
     )
+    logger.info(f"msg_detail_response: {msg_detail_response}")
     yield msg_detail_response
 
 
@@ -375,10 +384,12 @@ def get_search_answer(
 
     answer = ""
     for packet in results:
+        logger.info(f"packet: {packet}")
         if isinstance(packet, QueryRephrase):
             qa_response.rephrase = packet.rephrased_query
         if isinstance(packet, DanswerAnswerPiece) and packet.answer_piece:
             answer += packet.answer_piece
+            logger.info(f"Packet Answer: {answer}")
         elif isinstance(packet, QADocsResponse):
             qa_response.docs = packet
         elif isinstance(packet, LLMRelevanceFilterResponse):
@@ -397,6 +408,7 @@ def get_search_answer(
         elif isinstance(packet, ChatMessageDetail):
             qa_response.chat_message_id = packet.message_id
 
+    logger.info(f"QAResponse: {qa_response}")
     if answer:
         qa_response.answer = answer
 

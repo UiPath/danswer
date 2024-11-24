@@ -50,9 +50,9 @@ class CustomModelServer(LLM):
             'grant_type': 'client_credentials'
         }
 
-        # logger.info(self._identity_url)
-        # logger.info(headers)
-        # logger.info(data)
+        logger.info(self._identity_url)
+        logger.info(headers)
+        logger.info(data)
         response = requests.post(self._identity_url, headers=headers, data=data)
 
         if response.status_code == 200:
@@ -143,7 +143,7 @@ class CustomModelServer(LLM):
             "Authorization": "Bearer " + self.token,
         }
 
-        #print(f"Input: {input}")
+        logger.info(f"Input: {input}")
         chatPrompt = convert_lm_input_to_prompt(input)
 
         json_array = []
@@ -153,7 +153,7 @@ class CustomModelServer(LLM):
             json_obj = {"role": mapped_type, "content": msg.content}
             json_array.append(json_obj)
 
-        print(f"Json Array: {json_array}")
+        logger.info(f"Json Array: {json_array}")
 
         data = {
             "messages": json_array
@@ -164,7 +164,7 @@ class CustomModelServer(LLM):
                 self._endpoint, headers=headers, json=data, timeout=self._timeout
             )
             #print(response)
-            print(response.json())
+            logger.info(response.json())
         except Timeout as error:
             raise Timeout(f"Model inference to {self._endpoint} timed out") from error
 
