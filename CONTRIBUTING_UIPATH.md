@@ -82,6 +82,9 @@ pyenv virtualenv danswer3.11.7
 pyenv activate danswer3.11.7
 python --version
 pyenv virtualenvs
+
+In VS Code CMD+SHIFT+P search for Python:Select Interpreter and select the virtual env name that you have just created or you can directly create a virtual
+env from VSCode itself 
 ```
 
 Install the required python dependencies in vscode terminal where virtualenv is created and activated:
@@ -106,7 +109,7 @@ You may have to deactivate and reactivate your virtualenv for `playwright` to ap
 Install [Node.js and npm](https://docs.npmjs.com/downloading-and-installing-node-js-and-npm) for the frontend.
 Once the above is done, navigate to `danswer/web` run:
 ```bash
-npm i
+npm i --no-audit
 ```
 
 #### Docker containers for external software
@@ -131,11 +134,6 @@ Navigate to `danswer/backend` and run:
 uvicorn model_server.main:app --reload --port 9000
 ```
 
-_For Windows (for compatibility with both PowerShell and Command Prompt):_
-```bash
-powershell -Command "uvicorn model_server.main:app --reload --port 9000"
-```
-
 The first time running Danswer, you will need to run the DB migrations for Postgres.
 After the first time, this is no longer required unless the DB models change.
 
@@ -155,14 +153,6 @@ python ./scripts/dev_run_background_jobs.py
 To run the backend API server, navigate back to `danswer/backend` and run:
 ```bash
 AUTH_TYPE=disabled uvicorn danswer.main:app --reload --port 8080
-```
-
-_For Windows (for compatibility with both PowerShell and Command Prompt):_
-```bash
-powershell -Command "
-    $env:AUTH_TYPE='disabled'
-    uvicorn danswer.main:app --reload --port 8080 
-"
 ```
 
 > **Note:**
