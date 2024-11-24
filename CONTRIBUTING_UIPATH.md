@@ -72,8 +72,15 @@ Currently, we use pip and recommend creating a virtual environment.
 
 For convenience here's a command for it:
 ```bash
-python -m venv .venv
-source .venv/bin/activate
+edit ~/.zshrc file and add below two lines
+eval "$(pyenv init -)"
+eval "$(pyenv init --path)"
+
+pyenv install 3.11
+pyenv shell 3.11.7
+pyenv virtualenv danswer3.11.7
+pyenv activate danswer3.11.7
+pyenv virtualenvs
 ```
 
 > **Note:**
