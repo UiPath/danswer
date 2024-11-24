@@ -83,19 +83,6 @@ pyenv activate danswer3.11.7
 pyenv virtualenvs
 ```
 
-> **Note:**
-> This virtual environment MUST NOT be set up WITHIN the danswer directory if you plan on using mypy within certain IDEs.
-> For simplicity, we recommend setting up the virtual environment outside of the danswer directory.
-
-_For Windows, activate the virtual environment using Command Prompt:_
-```bash
-.venv\Scripts\activate
-```
-If using PowerShell, the command slightly differs:
-```powershell
-.venv\Scripts\Activate.ps1
-```
-
 Install the required python dependencies:
 ```bash
 pip install -r danswer/backend/requirements/default.txt
