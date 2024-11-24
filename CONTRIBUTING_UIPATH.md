@@ -83,7 +83,7 @@ pyenv activate danswer3.11.7
 pyenv virtualenvs
 ```
 
-Install the required python dependencies:
+Install the required python dependencies in vscode terminal where virtualenv is created and activated:
 ```bash
 pip install -r danswer/backend/requirements/default.txt
 pip install -r danswer/backend/requirements/dev.txt
