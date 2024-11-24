@@ -80,6 +80,7 @@ pyenv install 3.11
 pyenv shell 3.11.7
 pyenv virtualenv danswer3.11.7
 pyenv activate danswer3.11.7
+python --version
 pyenv virtualenvs
 ```
 
