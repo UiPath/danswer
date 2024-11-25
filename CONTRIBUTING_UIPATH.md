@@ -117,9 +117,16 @@ You will need Docker installed to run these containers.
 
 First navigate to `danswer/deployment/docker_compose`, then start up Postgres/Vespa/Redis with:
 ```bash
-docker compose -f docker-compose.dev.yml -p danswer-stack up -d index relational_db cache
+docker compose -f docker-compose.dev.yml -p danswer-stack up -d relational_db cache
 ```
 (index refers to Vespa, relational_db refers to Postgres, and cache refers to Redis)
+
+```bash
+* If you want to start clean, cleanup the vespa_var_storage and vespa_log_storage folders
+export VESPA_VAR_STORAGE=/Users/rajivchodisetti/Documents/repos/darwin-latest-31stAug/vespa_data/var
+export VESPA_LOG_STORAGE=/Users/rajivchodisetti/Documents/repos/darwin-latest-31stAug/vespa_data/logs
+docker run --detach --name vespa --hostname vespa-container --volume $VESPA_VAR_STORAGE:/opt/vespa/var  --volume $VESPA_LOG_STORAGE:/opt/vespa/logs --publish 8081:8081  --publish 19071:19071 vespaengine/vespa:8.277.17
+```
 
 
 #### Running Danswer locally
