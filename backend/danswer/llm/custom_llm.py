@@ -75,7 +75,7 @@ class CustomModelServer(LLM):
         identity_url: str | None = GEN_AI_IDENTITY_ENDPOINT,
         client_id: str | None = GEN_AI_CLIENT_ID,
         client_secret: str | None = GEN_AI_CLIENT_SECRET,
-        max_output_tokens: int = int(GEN_AI_MAX_OUTPUT_TOKENS),
+        max_output_tokens: int = GEN_AI_MAX_OUTPUT_TOKENS,
         api_version: str | None = GEN_AI_API_VERSION,
     ):
 
