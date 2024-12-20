@@ -49,6 +49,20 @@ https://github.com/danswer-ai/danswer/assets/25087905/3e19739b-d178-4371-9a38-01
 For more details on the Admin UI to manage connectors and users, check out our 
 <strong><a href="https://www.youtube.com/watch?v=geNzY1nbCnU">Full Video Demo</a></strong>!
 
+## Building images
+For Mac:
+  * docker buildx create --name mybuilder
+  * docker buildx use mybuilder
+  * [Optional] docker buildx ls => This should show * near mybuilder indicating that is in use.
+  * docker buildx inspect --bootstrap     => This should show linux as platform
+  * docker buildx build -f ./backend/Dockerfile -t danswer/danswer-backend:latest  ./backend --platform=linux/amd64 --load
+    Note: We can pass multiple platform options here, but then load doesn't work with multiple platforms in mac and images will not go in docker cache.
+    Afterwards do docker images to verify image is present, docker tag, docker push etc.
+For windows & Linux:
+    * docker build -f ./backend/Dockerfile -t danswer/danswer-backend:latest  ./backend
+
+Do the same step for web images too, dockerfile is present in respective folders.
+
 ## Deployment
 
 Danswer can easily be run locally (even on a laptop) or deployed on a virtual machine with a single
