@@ -1,6 +1,7 @@
 import json
 from collections.abc import Iterator
 
+import re
 import requests
 from langchain.schema.language_model import LanguageModelInput
 from langchain_core.messages import AIMessage
@@ -128,12 +129,6 @@ class CustomModelServer(LLM):
 
     def _execute(self, input: LanguageModelInput) -> AIMessage:
 
-        # print(f"Access Token: {self.token}")
-        # print(f"Endpoint: {self._endpoint}")
-        # print(f"_client_id: {self._client_id}")
-        # print(f"_client_secret: {self._client_secret}")
-        # print(f"_identity_url: {self._identity_url}")
-
         headers = {
             "Content-Type": "application/json",
             "X-UiPath-LlmGateway-RequestedFeature": "ChatWithAssistant",
@@ -149,10 +144,8 @@ class CustomModelServer(LLM):
         messages = chatPrompt.to_messages()
         for msg in messages:
             mapped_type = self._map_type(msg.type)
-            json_obj = {"role": mapped_type, "content": msg.content}
+            json_obj = {"role": mapped_type, "content": self._clean_json_string(msg.content)}
             json_array.append(json_obj)
-
-        #print(f"Json Array: {json_array}")
         
         data = {
             "max_tokens": self._max_output_tokens,
@@ -160,22 +153,47 @@ class CustomModelServer(LLM):
         }
 
         try:
+            print(data)
+            with open("requestdata.json", "w") as fp:
+                json.dump(data, fp)
+
+            #json_str = json.dumps(data, ensure_ascii=False, indent=4)
+            #print(f"Request Data: {json_str}")
+            #json_data = json.loads(json_str)
             response = requests.post(
+                #self._endpoint, headers=headers, data=json_str, timeout=self._timeout
                 self._endpoint, headers=headers, json=data, timeout=self._timeout
             )
-            #print(response)
-            # print(response.json())
         except Timeout as error:
             raise Timeout(f"Model inference to {self._endpoint} timed out") from error
 
         response.raise_for_status()
-        data = json.loads(response.content)
-        # print(data)
+        try:
+            data = json.loads(response.content)
+            print(data)
+        except json.decoder.JSONDecodeError as e:
+            print("Failed to parse JSON:", response.content)
+            raise e
+
         message_content = "No response from LLM server"
         if data['choices']:
             message_content = data['choices'][0]['message']['content']
         # print(message_content)
         return AIMessage(content=message_content)
+
+    def _clean_json_string(self, input_string):
+        input_string = re.sub(r'[\\]*"','"', input_string)
+
+        input_string = input_string.replace('"', "'")
+ 
+        # Remove control characters (ASCII 0-31)
+        input_string = re.sub(r'[^\x00-\x7F]+', '', input_string)
+        input_string = re.sub(r'[\xa0]', '', input_string)
+        
+        # Escape backslashes
+        input_string = input_string.replace("\\", "\\\\")
+        
+        return input_string
 
     # Convert from AI to LLMGateway types, Only basic, no chunks and no tool and function calls
     def _map_type(self, type_str) -> str:
