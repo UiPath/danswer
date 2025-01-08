@@ -76,6 +76,7 @@ edit ~/.zshrc file and add below two lines
 eval "$(pyenv init -)"
 eval "$(pyenv init --path)"
 
+check if xz is installed, if not https://gist.github.com/iandanforth/f3ac42b0963bcbfdf56bb446e9f40a33
 pyenv install 3.11
 pyenv shell 3.11.7
 pyenv virtualenv danswer3.11.7
