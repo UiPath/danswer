@@ -81,6 +81,7 @@ eval "$(pyenv init --path)"
 check if xz is installed, if not https://gist.github.com/iandanforth/f3ac42b0963bcbfdf56bb446e9f40a33
 export LDFLAGS="-L$(brew --prefix xz)/lib $LDFLAGS";  export CPPFLAGS="-I$(brew --prefix xz)/include $CPPFLAGS";  export PKG_CONFIG_PATH="$(brew --prefix xz)/lib/pkgconfig:$PKG_CONFIG_PATH"
 pyenv install 3.11
+#Actual minor version which pyenv will install may differ, so please adjust the below commands accordingly 
 pyenv shell 3.11.7
 pyenv virtualenv danswer3.11.7
 pyenv activate danswer3.11.7
