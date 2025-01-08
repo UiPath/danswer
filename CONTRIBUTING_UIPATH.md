@@ -72,11 +72,14 @@ Currently, we use pip and recommend creating a virtual environment.
 
 For convenience here's a command for it:
 ```bash
+Install brew: https://brew.sh/
+brew install pyenv
 edit ~/.zshrc file and add below two lines
 eval "$(pyenv init -)"
 eval "$(pyenv init --path)"
 
 check if xz is installed, if not https://gist.github.com/iandanforth/f3ac42b0963bcbfdf56bb446e9f40a33
+export LDFLAGS="-L$(brew --prefix xz)/lib $LDFLAGS";  export CPPFLAGS="-I$(brew --prefix xz)/include $CPPFLAGS";  export PKG_CONFIG_PATH="$(brew --prefix xz)/lib/pkgconfig:$PKG_CONFIG_PATH"
 pyenv install 3.11
 pyenv shell 3.11.7
 pyenv virtualenv danswer3.11.7
@@ -84,6 +87,7 @@ pyenv activate danswer3.11.7
 python --version
 pyenv virtualenvs
 
+Install Python VSCode Extenstion: VSCode -> View -> Extensions -> Install Python Extensions from Microsoft
 In VS Code CMD+SHIFT+P search for Python:Select Interpreter and select the virtual env name that you have just created or you can directly create a virtual
 env from VSCode itself 
 ```
