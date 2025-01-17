@@ -11,15 +11,16 @@ services:
       uvicorn danswer.main:app --host 0.0.0.0 --port 8080"
     depends_on:
       - relational_db
-      - index
+      # - index
       - inference_model_server
     restart: always
     ports:
       - "8080:8080"
     environment:
+      - ENVIRONMENT=${ENVIRONMENT:-LOCAL} 
       # Auth Settings
       - AUTH_TYPE=${AUTH_TYPE:-disabled}
-      - SESSION_EXPIRE_TIME_SECONDS=${SESSION_EXPIRE_TIME_SECONDS:-86400}
+      - SESSION_EXPIRE_TIME_SECONDS=${SESSION_EXPIRE_TIME_SECONDS:-86400}   
       - ENCRYPTION_KEY_SECRET=${ENCRYPTION_KEY_SECRET:-}
       - VALID_EMAIL_DOMAINS=${VALID_EMAIL_DOMAINS:-}
       - GOOGLE_OAUTH_CLIENT_ID=${GOOGLE_OAUTH_CLIENT_ID:-}
@@ -72,6 +73,7 @@ services:
       # Other services
       - POSTGRES_HOST=relational_db
       - VESPA_HOST=index
+      - VESPA_FEED_PORT=${VESPA_FEED_PORT:-}
       - WEB_DOMAIN=${WEB_DOMAIN:-}  # For frontend redirect auth purpose
       # Don't change the NLP model configs unless you know what you're doing
       - DOCUMENT_ENCODER_MODEL=${DOCUMENT_ENCODER_MODEL:-}
@@ -114,11 +116,12 @@ services:
     command: /usr/bin/supervisord -c /etc/supervisor/conf.d/supervisord.conf
     depends_on:
       - relational_db
-      - index
+      # - index
       - inference_model_server
       - indexing_model_server
     restart: always
     environment:
+      - ENVIRONMENT=${ENVIRONMENT:-LOCAL}
       - ENCRYPTION_KEY_SECRET=${ENCRYPTION_KEY_SECRET:-}
       # Gen AI Settings (Needed by DanswerBot)
       - GEN_AI_MODEL_PROVIDER=${GEN_AI_MODEL_PROVIDER:-}
@@ -157,6 +160,9 @@ services:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-}
       - POSTGRES_DB=${POSTGRES_DB:-}
       - VESPA_HOST=index
+      - VESPA_PORT=${VESPA_PORT:-}
+      - VESPA_FEED_PORT=${VESPA_FEED_PORT:-}
+      - VESPA_FEED_HOST=${VESPA_FEED_HOST:-}
       - WEB_DOMAIN=${WEB_DOMAIN:-}  # For frontend redirect auth purpose for OAuth2 connectors
       # Don't change the NLP model configs unless you know what you're doing
       - DOCUMENT_ENCODER_MODEL=${DOCUMENT_ENCODER_MODEL:-}
@@ -231,6 +237,7 @@ services:
       - api_server
     restart: always
     environment:
+      - ENVIRONMENT=${ENVIRONMENT:-LOCAL}
       - INTERNAL_URL=http://api_server:8080
       - WEB_DOMAIN=${WEB_DOMAIN:-}
       - THEME_IS_DARK=${THEME_IS_DARK:-}
@@ -240,7 +247,7 @@ services:
 
 
   inference_model_server:
-    image: danswer/danswer-model-server:latest
+    image: danswer/danswer-model-server:v0.4.28
     build:
       context: ../../backend
       dockerfile: Dockerfile.model_server
@@ -253,6 +260,7 @@ services:
       fi"
     restart: on-failure
     environment:
+      - ENVIRONMENT=${ENVIRONMENT:-LOCAL}
       - MIN_THREADS_ML_MODELS=${MIN_THREADS_ML_MODELS:-}
       # Set to debug to get more fine-grained logs
       - LOG_LEVEL=${LOG_LEVEL:-info}
@@ -280,6 +288,7 @@ services:
       fi"
     restart: on-failure
     environment:
+      - ENVIRONMENT=${ENVIRONMENT:-LOCAL}
       - MIN_THREADS_ML_MODELS=${MIN_THREADS_ML_MODELS:-}
       - INDEXING_ONLY=True
       # Set to debug to get more fine-grained logs
@@ -297,6 +306,7 @@ services:
     image: postgres:15.2-alpine
     restart: always
     environment:
+      - ENVIRONMENT=${ENVIRONMENT:-LOCAL}
       - POSTGRES_USER=${POSTGRES_USER:-postgres}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-password}
     ports:
@@ -306,19 +316,19 @@ services:
 
 
   # This container name cannot have an underscore in it due to Vespa expectations of the URL
-  index:
-    image: vespaengine/vespa:8.277.17
-    restart: always
-    ports:
-      - "19071:19071"
-      - "8081:8081"
-    volumes:
-      - vespa_volume:/opt/vespa/var
-    logging:
-      driver: json-file
-      options:
-        max-size: "50m"
-        max-file: "6"
+  # index:
+  #   image: vespaengine/vespa:8.277.17
+  #   restart: always
+  #   ports:
+  #     - "19071:19071"
+  #     - "8081:8081"
+  #   volumes:
+  #     - vespa_volume:/opt/vespa/var
+  #   logging:
+  #     driver: json-file
+  #     options:
+  #       max-size: "50m"
+  #       max-file: "6"
 
 
   nginx:
@@ -330,6 +340,7 @@ services:
       - api_server
       - web_server
     environment:
+      - ENVIRONMENT=${ENVIRONMENT:-LOCAL}
       - DOMAIN=localhost
     ports:
       - "80:80"
@@ -353,6 +364,6 @@ services:
 
 volumes:
   db_volume:
-  vespa_volume:
+  # vespa_volume:
   # Created by the container itself
   model_cache_huggingface:
