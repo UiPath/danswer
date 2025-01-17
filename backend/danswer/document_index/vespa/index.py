@@ -816,12 +816,18 @@ class VespaIndex(DocumentIndex):
         )
         schema_file = os.path.join(vespa_schema_path, "schemas", "danswer_chunk.sd")
         overrides_file = os.path.join(vespa_schema_path, "validation-overrides.xml")
+
+        if ENVIRONMENT in "LOCAL":
+            services_file = os.path.join(vespa_schema_path, "services-local.xml")
+        else:
+            services_file = os.path.join(vespa_schema_path, "services.xml")
+
         if ENVIRONMENT in "DEV":
             hosts_file = os.path.join(vespa_schema_path, "hosts-dev.xml")
-            services_file = os.path.join(vespa_schema_path, "services-dev.xml")
+        elif ENVIRONMENT in "LOCAL":
+            hosts_file = os.path.join(vespa_schema_path, "hosts-local.xml")
         else:
             hosts_file = os.path.join(vespa_schema_path, "hosts.xml")
-            services_file = os.path.join(vespa_schema_path, "services.xml")
 
         with open(services_file, "r") as services_f:
             services_template = services_f.read()
