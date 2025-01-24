@@ -47,6 +47,9 @@ from danswer.db.models import Persona
 from danswer.db.models import SlackBotConfig
 from danswer.db.models import SlackBotResponseType
 from danswer.db.persona import fetch_persona_by_id
+from danswer.db.persona import get_persona_with_docset_and_prompts
+from danswer.db.persona import get_personas
+from danswer.db.users import fetch_user_slack_persona
 from danswer.llm.answering.prompts.citations_prompt import (
     compute_max_document_tokens_for_persona,
 )
@@ -177,6 +180,7 @@ def handle_message(
     channel_config: SlackBotConfig | None,
     client: WebClient,
     feedback_reminder_id: str | None,
+    channel_name: str | None,
     num_retries: int = DANSWER_BOT_NUM_RETRIES,
     answer_generation_timeout: int = DANSWER_BOT_ANSWER_GENERATION_TIMEOUT,
     should_respond_with_error_msgs: bool = DANSWER_BOT_DISPLAY_ERROR_MSGS,
@@ -206,9 +210,88 @@ def handle_message(
     bypass_filters = message_info.bypass_filters
     is_bot_msg = message_info.is_bot_msg
     is_bot_dm = message_info.is_bot_dm
+    persona_name = None
+
+    if channel_name is None:
+        with Session(get_sqlalchemy_engine()) as db_session:
+            user_slack_persona = fetch_user_slack_persona(
+                db_session=db_session, sender_id=sender_id
+            )
+            if user_slack_persona:
+                slack_persona_id = user_slack_persona.persona_id or None
+                persona = get_persona_with_docset_and_prompts(
+                    persona_id=slack_persona_id, db_session=db_session
+                )
+                persona_name = persona.name
+            else:
+                persona = None
+    else:
+        persona = channel_config.persona if channel_config else None
+
+    if is_bot_msg:
+        command = message_info.command
+        if command == "/personas":
+            with Session(get_sqlalchemy_engine()) as db_session:
+                personas = get_personas(
+                    user_id=None, db_session=db_session, include_default=False
+                )
+
+            if not personas:
+                respond_in_thread(
+                    client=client,
+                    channel=channel,
+                    text="No personas are available.",
+                    thread_ts=message_ts_to_respond_to,
+                )
+                return
+
+            buttons = [
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": persona.name},
+                    "value": str(persona.id),
+                    "action_id": f"set_persona_{persona.id}",
+                }
+                for persona in personas
+            ]
+
+            blocks = [
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": "Here are the available personas. Click on one to set it:",
+                    },
+                },
+                {"type": "actions", "elements": buttons},
+            ]
+
+            respond_in_thread(
+                client=client,
+                channel=channel,
+                blocks=blocks,
+                thread_ts=message_ts_to_respond_to,
+            )
+            return
+        elif command == "/current_persona":
+            if persona_name is None:
+                respond_in_thread(
+                    client=client,
+                    channel=channel,
+                    text="No persona is set. Please use the /personas command to set up a persona.",
+                    thread_ts=message_ts_to_respond_to,
+                )
+                return
+            else:
+                respond_in_thread(
+                    client=client,
+                    channel=channel,
+                    text=f"Current persona : {persona_name}",
+                    thread_ts=message_ts_to_respond_to,
+                )
+                return
 
     document_set_names: list[str] | None = None
-    persona = channel_config.persona if channel_config else None
     prompt = None
     if persona:
         document_set_names = [
