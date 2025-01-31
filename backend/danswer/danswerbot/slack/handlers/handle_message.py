@@ -175,6 +175,16 @@ def remove_scheduled_feedback_reminder(
                 "Unable to delete the scheduled message. It must have already been posted"
             )
 
+def contains_questionmark_outside_links(message: str) -> bool:
+    """
+    Checks if the message contains a question mark outside of URLs.
+    """
+    url_pattern = r"<https?://[^\s>]+>|https?://\S+"
+    
+    message_without_links = re.sub(url_pattern, "", message)
+    
+    return "?" in message_without_links
+
 
 def contains_questionmark_outside_links(message: str) -> bool:
     """
@@ -352,9 +362,10 @@ def handle_message(
         if not bypass_filters and "answer_filters" in channel_conf:
             reflexion = "well_answered_postfilter" in channel_conf["answer_filters"]
 
-            if "questionmark_prefilter" in channel_conf[
-                "answer_filters"
-            ] and not contains_questionmark_outside_links(messages[-1].message):
+            if (
+                "questionmark_prefilter" in channel_conf["answer_filters"]
+                and not contains_questionmark_outside_links(messages[-1].message)
+            ):
                 logger.info(
                     "Skipping message since it does not contain a question mark"
                 )
