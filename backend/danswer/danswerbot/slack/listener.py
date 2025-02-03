@@ -197,6 +197,21 @@ def prefilter_requests(req: SocketModeRequest, client: SocketModeClient) -> bool
                 "Cannot respond to DanswerBot command without sender to respond to."
             )
             return False
+    
+    payload = req.payload
+    event = payload.get("event", {})
+    blocks = event.get("blocks", [])
+    for block in blocks:
+        if block.get("type") == "rich_text":
+            for element in block.get("elements", []):
+                if element.get("type") == "rich_text_section":
+                    for sub_element in element.get("elements", []):
+                        if (
+                            sub_element.get("type") == "broadcast"
+                            and sub_element.get("range") == "channel"
+                        ):
+                            logger.info("Broadcast message detected; skipping reply.")
+                            return False
 
     logger.debug(f"Handling Slack request with Payload: '{req.payload}'")
     return True

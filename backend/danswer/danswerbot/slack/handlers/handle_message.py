@@ -1,6 +1,7 @@
 import datetime
 import functools
 import logging
+import re
 from collections.abc import Callable
 from typing import Any
 from typing import cast
@@ -171,6 +172,16 @@ def remove_scheduled_feedback_reminder(
                 "Unable to delete the scheduled message. It must have already been posted"
             )
 
+def contains_questionmark_outside_links(message: str) -> bool:
+    """
+    Checks if the message contains a question mark outside of URLs.
+    """
+    url_pattern = r"<https?://[^\s>]+>|https?://\S+"
+    
+    message_without_links = re.sub(url_pattern, "", message)
+    
+    return "?" in message_without_links
+
 
 def handle_message(
     message_info: SlackMessageInfo,
@@ -249,7 +260,7 @@ def handle_message(
 
             if (
                 "questionmark_prefilter" in channel_conf["answer_filters"]
-                and "?" not in messages[-1].message
+                and not contains_questionmark_outside_links(messages[-1].message)
             ):
                 logger.info(
                     "Skipping message since it does not contain a question mark"
