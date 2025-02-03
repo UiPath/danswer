@@ -1,5 +1,7 @@
 import re
+from bs4 import BeautifulSoup
 from typing import Union
+from danswer.utils.logger import setup_logger
 
 SF_JSON_FILTER = r"Id$|Date$|stamp$|url$"
 
@@ -62,5 +64,31 @@ def _json_to_natural_language(data: Union[dict, list], indent: int = 0) -> str:
 
 def extract_dict_text(raw_dict: dict) -> str:
     processed_dict = _clean_salesforce_dict(raw_dict)
+
+    if 'Resolution' in processed_dict:
+        processed_dict['Resolution'] = clean_html(processed_dict['Resolution'])
+
     natural_language_dict = _json_to_natural_language(processed_dict)
     return natural_language_dict
+
+
+def clean_html(html_content: str) -> str:
+    """
+    Cleans the HTML content by removing tags and returning the plain text, 
+    while preserving the links.
+    :param html_content: HTML content as string
+    :return: Cleaned text with preserved links
+    """
+    soup = BeautifulSoup(html_content, "lxml")
+
+    # Replace <a> tags with their text and the href as a link in brackets
+    for a_tag in soup.find_all('a', href=True):
+        a_tag.insert_before(f"[{a_tag.get_text()}]({a_tag['href']})")
+        a_tag.decompose()
+
+    cleaned_text = soup.get_text(separator="\n", strip=True)
+    
+    # Replace non-breaking spaces (\xa0) with regular spaces
+    cleaned_text = cleaned_text.replace('\xa0', ' ')
+    
+    return cleaned_text

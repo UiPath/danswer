@@ -51,6 +51,7 @@ export type ValidSources =
   | "loopio"
   | "dropbox"
   | "salesforce"
+  | "sfkbarticles"
   | "sharepoint"
   | "teams"
   | "zendesk"
@@ -452,9 +453,10 @@ export interface OCICredentialJson {
   secret_access_key: string;
 }
 export interface SalesforceCredentialJson {
+  sf_client_id: string;
+  sf_client_secret: string;
   sf_username: string;
   sf_password: string;
-  sf_security_token: string;
 }
 
 export interface SharepointCredentialJson {

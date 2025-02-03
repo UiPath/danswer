@@ -102,22 +102,22 @@ const MainSection = () => {
       ) : (
         <>
           <Text className="mb-2">
-            As a first step, please provide the Salesforce admin account&apos;s
-            username, password, and Salesforce security token. You can follow
-            the guide{" "}
-            <a
-              target="_blank"
-              href="https://docs.danswer.dev/connectors/Salesforce"
-              className="text-link"
-            >
-              here
-            </a>{" "}
-            to create get your Salesforce Security Token.
+            As a first step, please provide the Salesforce account's
+            client_id, client_secret, username and password.
           </Text>
           <Card className="mt-2">
             <CredentialForm<SalesforceCredentialJson>
               formBody={
                 <>
+                  <TextFormField
+                    name="sf_client_id"
+                    label="Salesforce Client Id:"
+                  />
+                  <TextFormField
+                    name="sf_client_secret"
+                    label="Salesforce Client Secret:"
+                    type="password"
+                  />
                   <TextFormField
                     name="sf_username"
                     label="Salesforce Username:"
@@ -127,28 +127,27 @@ const MainSection = () => {
                     label="Salesforce Password:"
                     type="password"
                   />
-                  <TextFormField
-                    name="sf_security_token"
-                    label="Salesforce Security Token:"
-                    type="password"
-                  />
                 </>
               }
               validationSchema={Yup.object().shape({
+                sf_client_id: Yup.string().required(
+                  "Please enter your Salesforce Client Id"
+                ),
+                sf_client_secret: Yup.string().required(
+                  "Please enter your Salesforce Client Secret"
+                ),
                 sf_username: Yup.string().required(
                   "Please enter your Salesforce username"
                 ),
                 sf_password: Yup.string().required(
                   "Please enter your Salesforce password"
                 ),
-                sf_security_token: Yup.string().required(
-                  "Please enter your Salesforce security token"
-                ),
               })}
               initialValues={{
+                sf_client_id: "",
+                sf_client_secret: "",
                 sf_username: "",
                 sf_password: "",
-                sf_security_token: "",
               }}
               onSubmit={(isSuccess) => {
                 if (isSuccess) {
@@ -175,7 +174,7 @@ const MainSection = () => {
               connectorIndexingStatuses={SalesforceConnectorIndexingStatuses}
               liveCredential={SalesforceCredential}
               getCredential={(credential) =>
-                credential.credential_json.sf_security_token
+                credential.credential_json.sf_client_secret
               }
               onUpdate={() =>
                 mutate("/api/manage/admin/connector/indexing-status")
@@ -221,30 +220,20 @@ const MainSection = () => {
             // formBody={<></>}
             formBodyBuilder={TextArrayFieldBuilder({
               name: "requested_objects",
-              label: "Specify Salesforce objects to organize by:",
+              label: "Specify the Product Components",
               subtext: (
                 <>
                   <br />
-                  Specify the Salesforce object types you want us to index.{" "}
+                  Specify the product components for which you want to fetch the Salesforce Knowledge Base articles.
                   <br />
                   <br />
-                  Click
-                  <a
-                    href="https://docs.danswer.dev/connectors/salesforce#an_example"
-                    className="text-blue-500"
-                    rel="noopener noreferrer"
-                  >
-                    {" "}
-                    here{" "}
-                  </a>
-                  for an example of how Darwin uses the objects. <br />
-                  <br />
-                  If unsure, don&apos;t specify any objects and Darwin will
-                  default to indexing by &apos;Account&apos;.
+                  Example: <strong>Orchestrator, Activities, Studio, Robot, Automation Hub</strong>.
                   <br />
                   <br />
-                  Hint: Use the singular form of the object name (e.g.,
-                  &apos;Opportunity&apos; instead of &apos;Opportunities&apos;).
+                  By default, it will fetch articles for all the product components.
+                  <br />
+                  <br />
+                  Hint: Use the exact product component name for accurate results.
                 </>
               ),
             })}
@@ -267,8 +256,8 @@ const MainSection = () => {
       ) : (
         <Text>
           Please provide all Salesforce info in Step 1 first! Once you&apos;re
-          done with that, you can then specify which Salesforce objects you want
-          to make searchable.
+          done with that, you can then specify the product components for which 
+          you want to fetch the Salesforce Knowledge Base articles.
         </Text>
       )}
     </>
