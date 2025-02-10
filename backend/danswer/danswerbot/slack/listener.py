@@ -1,3 +1,4 @@
+import re
 import time
 from threading import Event
 from typing import Any
@@ -92,6 +93,10 @@ def prefilter_requests(req: SocketModeRequest, client: SocketModeClient) -> bool
 
         if not msg:
             channel_specific_logger.error("Cannot respond to empty message - skipping")
+            return False
+        
+        if re.search(r"(^|\s)!darwin(\s|$)", msg, re.IGNORECASE):
+            channel_specific_logger.info("Ignoring message containing '!darwin'")
             return False
 
         if (
