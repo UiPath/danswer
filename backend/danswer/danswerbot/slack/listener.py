@@ -95,7 +95,7 @@ def prefilter_requests(req: SocketModeRequest, client: SocketModeClient) -> bool
             channel_specific_logger.error("Cannot respond to empty message - skipping")
             return False
         
-        if re.search(r"(^|\s)!darwin(\s|$)", msg, re.IGNORECASE):
+        if re.search(r"!darwin", msg, re.IGNORECASE):
             channel_specific_logger.info("Ignoring message containing '!darwin'")
             return False
 
