@@ -654,6 +654,15 @@ def handle_message(
             if matching_doc:
                 cited_docs.append((citation.citation_num, matching_doc))
 
+        if not cited_docs:
+            respond_in_thread(
+                client=client,
+                channel=channel,
+                text="Unable to generate an answer as no relevant documents are available.",
+                thread_ts=message_ts_to_respond_to,
+            )
+            return False
+
         cited_docs.sort()
         citations_block = build_sources_blocks(cited_documents=cited_docs)
     elif priority_ordered_docs:
