@@ -2,6 +2,7 @@ import datetime
 import functools
 import logging
 from collections.abc import Callable
+import re
 from typing import Any
 from typing import cast
 from typing import Optional
@@ -175,6 +176,17 @@ def remove_scheduled_feedback_reminder(
             )
 
 
+def contains_questionmark_outside_links(message: str) -> bool:
+    """
+    Checks if the message contains a question mark outside of URLs.
+    """
+    url_pattern = r"<https?://[^\s>]+>|https?://\S+"
+
+    message_without_links = re.sub(url_pattern, "", message)
+
+    return "?" in message_without_links
+
+
 def handle_message(
     message_info: SlackMessageInfo,
     channel_config: SlackBotConfig | None,
@@ -332,7 +344,7 @@ def handle_message(
 
             if (
                 "questionmark_prefilter" in channel_conf["answer_filters"]
-                and "?" not in messages[-1].message
+                and not contains_questionmark_outside_links(messages[-1].message)
             ):
                 logger.info(
                     "Skipping message since it does not contain a question mark"
@@ -658,7 +670,7 @@ def handle_message(
             respond_in_thread(
                 client=client,
                 channel=channel,
-                text="Unable to generate an answer as no relevant documents are available.",
+                text="Could not generate an answer due to a lack of relevant documents. Please try refining your search query with more context.",
                 thread_ts=message_ts_to_respond_to,
             )
             return False
