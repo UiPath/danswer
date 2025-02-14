@@ -582,21 +582,22 @@ def handle_message(
     except SlackApiError as e:
         logger.error(f"Failed to remove Reaction due to: {e}")
 
-    if answer.answer_valid is False:
-        logger.info(
-            "Answer was evaluated to be invalid, throwing it away without responding."
-        )
-        update_emote_react(
-            emoji=DANSWER_FOLLOWUP_EMOJI,
-            channel=message_info.channel_to_respond,
-            message_ts=message_info.msg_to_respond,
-            remove=False,
-            client=client,
-        )
+    #Removing this as we are handling this with citations logic
+    # if answer.answer_valid is False:
+    #     logger.info(
+    #         "Answer was evaluated to be invalid, throwing it away without responding."
+    #     )
+    #     update_emote_react(
+    #         emoji=DANSWER_FOLLOWUP_EMOJI,
+    #         channel=message_info.channel_to_respond,
+    #         message_ts=message_info.msg_to_respond,
+    #         remove=False,
+    #         client=client,
+    #     )
 
-        if answer.answer:
-            logger.debug(answer.answer)
-        return True
+    #     if answer.answer:
+    #         logger.debug(answer.answer)
+    #     return True
 
     retrieval_info = answer.docs
     if not retrieval_info:
