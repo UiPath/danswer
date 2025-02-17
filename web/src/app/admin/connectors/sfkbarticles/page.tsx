@@ -102,8 +102,8 @@ const MainSection = () => {
       ) : (
         <>
           <Text className="mb-2">
-            As a first step, please provide the Salesforce account's
-            client_id, client_secret, username and password.
+           As a first step, please provide the Salesforce account&apos;s
+           client_id, client_secret, username and password.
           </Text>
           <Card className="mt-2">
             <CredentialForm<SfKbArticlesCredentialJson>
