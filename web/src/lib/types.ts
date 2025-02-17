@@ -144,6 +144,10 @@ export interface SalesforceConfig {
   requested_objects?: string[];
 }
 
+export interface SfKbArticlesConfig {
+  requested_objects?: string[];
+}
+
 export interface SharepointConfig {
   sites?: string[];
 }
@@ -451,7 +455,16 @@ export interface OCICredentialJson {
   access_key_id: string;
   secret_access_key: string;
 }
+
 export interface SalesforceCredentialJson {
+  sf_username: string;
+  sf_password: string;
+  sf_security_token: string;
+}
+
+export interface SfKbArticlesCredentialJson {
+  sf_client_id: string;
+  sf_client_secret: string;
   sf_username: string;
   sf_password: string;
   sf_security_token: string;
