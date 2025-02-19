@@ -278,3 +278,9 @@ class SlackTextCleaner:
     def add_zero_width_whitespace_after_tag(message: str) -> str:
         """Add a 0 width whitespace after every @"""
         return message.replace("@", "@\u200B")
+    
+    @staticmethod
+    def handle_bold_syntax_for_slack(text: str) -> str:
+        """ Replace instances of '**' with a single '*'"""
+        corrected_text = text.replace('**', '*')
+        return corrected_text
