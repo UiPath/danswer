@@ -137,7 +137,8 @@ export interface ConfluenceConfig {
 }
 
 export interface JiraConfig {
-  jira_project_url: string;
+  jira_base_url: string;
+  jira_filter: string;
   comment_email_blacklist?: string[];
 }
 
