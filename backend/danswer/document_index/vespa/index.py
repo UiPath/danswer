@@ -704,12 +704,12 @@ def _query_vespa(query_params: Mapping[str, str | int | float]) -> list[Inferenc
     params["hits"] = 50
     filtered_hits_all = query_vespa_helper(params)
 
-    #Only Web Records
+    #Only Web Records and Salesforce KB articles
     params["hits"] = 10
-    params["yql"] = params["yql"] + ' and source_type contains "web"'
-    filtered_hits_web = query_vespa_helper(params)
+    params["yql"] = params["yql"] + ' and (source_type contains "web" or source_type contains "sfkabarticles")'
+    filtered_hits_web_sf = query_vespa_helper(params)
 
-    filtered_hits_final = filtered_hits_web + filtered_hits_all
+    filtered_hits_final = filtered_hits_web_sf + filtered_hits_all
 
     inference_chunks = [_vespa_hit_to_inference_chunk(hit) for hit in filtered_hits_final]
     #inplace sorting based on score

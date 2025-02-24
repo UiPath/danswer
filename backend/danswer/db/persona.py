@@ -10,6 +10,7 @@ from sqlalchemy import or_
 from sqlalchemy import select
 from sqlalchemy import update
 from sqlalchemy.orm import Session
+from sqlalchemy.orm import joinedload
 
 from danswer.auth.schemas import UserRole
 from danswer.db.constants import SLACK_BOT_PERSONA_PREFIX
@@ -621,3 +622,14 @@ def delete_persona_by_name(
     db_session.execute(stmt)
 
     db_session.commit()
+
+
+def get_persona_with_docset_and_prompts(
+    persona_id: int, db_session: Session
+) -> Persona | None:
+    persona = db_session.scalar(
+        select(Persona)
+        .options(joinedload(Persona.document_sets), joinedload(Persona.prompts))
+        .filter_by(id=persona_id, deleted=False)
+    )
+    return persona

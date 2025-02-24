@@ -72,11 +72,11 @@ class CustomModelServer(LLM):
         # Not used here but you probably want a model server that isn't completely open
         api_key: str | None,
         timeout: int,
-        endpoint: str | None = 'https://alpha.uipath.com/llmgateway_/openai/deployments/gpt-35-turbo/chat/completions?api-version=2023-03-15-preview',
+        endpoint: str | None = 'https://alpha.uipath.com/llmgateway_/openai/deployments/gpt-4o-mini-2024-07-18/chat/completions?api-version=2024-06-01',
         identity_url: str | None = GEN_AI_IDENTITY_ENDPOINT,
         client_id: str | None = GEN_AI_CLIENT_ID,
         client_secret: str | None = GEN_AI_CLIENT_SECRET,
-        max_output_tokens: int = GEN_AI_MAX_OUTPUT_TOKENS,
+        max_output_tokens: int = int(GEN_AI_MAX_OUTPUT_TOKENS),
         api_version: str | None = GEN_AI_API_VERSION,
     ):
 
