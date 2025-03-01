@@ -582,7 +582,7 @@ def handle_message(
     except SlackApiError as e:
         logger.error(f"Failed to remove Reaction due to: {e}")
 
-    #Removing this as we are handling this with citations logic
+    # Removing this as we are handling this with citations logic
     # if answer.answer_valid is False:
     #     logger.info(
     #         "Answer was evaluated to be invalid, throwing it away without responding."
@@ -668,13 +668,16 @@ def handle_message(
                 cited_docs.append((citation.citation_num, matching_doc))
 
         if not cited_docs:
-            respond_in_thread(
-                client=client,
+            logger.info("Skipping response: No context documents cited for this query.")
+            update_emote_react(
+                emoji="sweat",
                 channel=channel,
-                text="Could not generate an answer due to a lack of relevant documents. Please try refining your search query with more context.",
-                thread_ts=message_ts_to_respond_to,
+                message_ts=message_ts_to_respond_to,
+                remove=False,
+                client=client,
             )
-            return False
+
+            return True
 
         cited_docs.sort()
         citations_block = build_sources_blocks(cited_documents=cited_docs)
