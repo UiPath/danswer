@@ -678,7 +678,7 @@ def handle_message(
         if not cited_docs:
             logger.info("Skipping response: No context documents cited for this query.")
             update_emote_react(
-                emoji="sweat",
+                emoji="no-idea",
                 channel=channel,
                 message_ts=message_ts_to_respond_to,
                 remove=False,
