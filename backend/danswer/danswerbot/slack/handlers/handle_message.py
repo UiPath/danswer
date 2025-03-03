@@ -71,6 +71,7 @@ logger_base = setup_logger()
 srl = SlackRateLimiter()
 
 RT = TypeVar("RT")  # return type
+MAX_BUTTONS_PER_BLOCK = 25  # Slack limit
 
 
 def rate_limits(
@@ -257,7 +258,7 @@ def handle_message(
                 )
                 return
 
-            buttons = [
+            persona_buttons = [
                 {
                     "type": "button",
                     "text": {"type": "plain_text", "text": persona.name},
@@ -274,9 +275,16 @@ def handle_message(
                         "type": "mrkdwn",
                         "text": "Here are the available personas. Click on one to set it:",
                     },
-                },
-                {"type": "actions", "elements": buttons},
+                }
             ]
+
+            for i in range(0, len(persona_buttons), MAX_BUTTONS_PER_BLOCK):
+                blocks.append(
+                    {
+                        "type": "actions",
+                        "elements": persona_buttons[i : i + MAX_BUTTONS_PER_BLOCK],
+                    }
+                )
 
             respond_in_thread(
                 client=client,
