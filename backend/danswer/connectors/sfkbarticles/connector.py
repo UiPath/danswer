@@ -15,7 +15,7 @@ from danswer.connectors.interfaces import SecondsSinceUnixEpoch
 from danswer.connectors.models import BasicExpertInfo
 from danswer.connectors.models import Document
 from danswer.connectors.models import Section
-from danswer.connectors.salesforce.utils import extract_dict_text
+from danswer.connectors.sfkbarticles.utils import extract_dict_text
 from danswer.utils.logger import setup_logger
 
 ID_PREFIX = "SALESFORCE_"
