@@ -3,7 +3,7 @@ import { SourceIcon } from "@/components/SourceIcon";
 import { SlackChannelConfigCreationForm } from "../SlackChannelConfigCreationForm";
 import { fetchSS } from "@/lib/utilsSS";
 import { ErrorCallout } from "@/components/ErrorCallout";
-import { DocumentSet, SlackChannelConfig } from "@/lib/types";
+import { DocumentSet, SlackChannelConfig, ValidSources } from "@/lib/types";
 import { BackButton } from "@/components/BackButton";
 import { InstantSSRAutoRefresh } from "@/components/SSRAutoRefresh";
 import {
@@ -67,7 +67,8 @@ async function EditslackChannelConfigPage(props: {
       />
     );
   }
-  const documentSets = (await documentSetsResponse.json()) as DocumentSet[];
+  const response = await documentSetsResponse.json();
+  const documentSets = response as DocumentSet[];
 
   if (assistantsFetchError) {
     return (
@@ -79,12 +80,12 @@ async function EditslackChannelConfigPage(props: {
   }
 
   return (
-    <div className="container mx-auto">
+    <div className="max-w-4xl container mx-auto">
       <InstantSSRAutoRefresh />
 
       <BackButton />
       <AdminPageTitle
-        icon={<SourceIcon sourceType={"slack"} iconSize={32} />}
+        icon={<SourceIcon sourceType={ValidSources.Slack} iconSize={32} />}
         title="Edit Slack Channel Config"
       />
 

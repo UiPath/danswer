@@ -12,7 +12,7 @@ export interface UserAnalytics {
   date: string;
 }
 
-export interface DanswerBotAnalytics {
+export interface OnyxBotAnalytics {
   total_queries: number;
   auto_resolved: number;
   date: string;
@@ -25,6 +25,7 @@ export interface AbridgedSearchDoc {
 }
 
 export interface MessageSnapshot {
+  id: number;
   message: string;
   message_type: "user" | "assistant";
   documents: AbridgedSearchDoc[];

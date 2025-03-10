@@ -3,7 +3,7 @@
 import { adminSearch } from "./lib";
 import { MagnifyingGlass } from "@phosphor-icons/react";
 import { useState, useEffect, useCallback } from "react";
-import { DanswerDocument } from "@/lib/search/interfaces";
+import { OnyxDocument } from "@/lib/search/interfaces";
 import { buildDocumentSummaryDisplay } from "@/components/search/DocumentDisplay";
 import { CustomCheckbox } from "@/components/CustomCheckbox";
 import { updateHiddenStatus } from "../lib";
@@ -11,20 +11,20 @@ import { PopupSpec, usePopup } from "@/components/admin/connectors/Popup";
 import { getErrorMsg } from "@/lib/fetchUtils";
 import { ScoreSection } from "../ScoreEditor";
 import { useRouter } from "next/navigation";
-import { HorizontalFilters } from "@/components/search/filtering/Filters";
 import { useFilters } from "@/lib/hooks";
 import { buildFilters } from "@/lib/search/utils";
 import { DocumentUpdatedAtBadge } from "@/components/search/DocumentUpdatedAtBadge";
 import { DocumentSet } from "@/lib/types";
 import { SourceIcon } from "@/components/SourceIcon";
 import { Connector } from "@/lib/connectors/connectors";
+import { HorizontalFilters } from "@/components/filters/SourceSelector";
 
 const DocumentDisplay = ({
   document,
   refresh,
   setPopup,
 }: {
-  document: DanswerDocument;
+  document: OnyxDocument;
   refresh: () => void;
   setPopup: (popupSpec: PopupSpec | null) => void;
 }) => {
@@ -50,7 +50,7 @@ const DocumentDisplay = ({
         </a>
       </div>
       <div className="flex flex-wrap gap-x-2 mt-1 text-xs">
-        <div className="px-1 py-0.5 bg-hover rounded flex">
+        <div className="px-1 py-0.5 bg-accent-background-hovered rounded flex">
           <p className="mr-1 my-auto">Boost:</p>
           <ScoreSection
             documentId={document.document_id}
@@ -77,7 +77,7 @@ const DocumentDisplay = ({
               });
             }
           }}
-          className="px-1 py-0.5 bg-hover hover:bg-hover-light rounded flex cursor-pointer select-none"
+          className="px-1 py-0.5 bg-accent-background-hovered hover:bg-accent-background rounded flex cursor-pointer select-none"
         >
           <div className="my-auto">
             {document.hidden ? (
@@ -117,7 +117,7 @@ export function Explorer({
 
   const [query, setQuery] = useState(initialSearchValue || "");
   const [timeoutId, setTimeoutId] = useState<number | null>(null);
-  const [results, setResults] = useState<DanswerDocument[]>([]);
+  const [results, setResults] = useState<OnyxDocument[]>([]);
 
   const filterManager = useFilters();
 
@@ -169,7 +169,7 @@ export function Explorer({
     <div>
       {popup}
       <div className="justify-center py-2">
-        <div className="flex items-center w-full border-2 border-border rounded-lg px-4 py-2 focus-within:border-accent bg-background-search">
+        <div className="flex items-center w-full border-2 border-border rounded-lg px-4 py-2 focus-within:border-accent bg-background-search dark:bg-transparent">
           <MagnifyingGlass />
           <textarea
             autoFocus
@@ -200,6 +200,9 @@ export function Explorer({
             availableDocumentSets={documentSets}
             existingSources={connectors.map((connector) => connector.source)}
             availableTags={[]}
+            toggleFilters={() => {}}
+            filtersUntoggled={false}
+            tagsOnLeft={true}
           />
         </div>
       </div>
@@ -218,7 +221,7 @@ export function Explorer({
         </div>
       )}
       {!query && (
-        <div className="flex text-emphasis mt-3">
+        <div className="flex text-text-darker mt-3">
           Search for a document above to modify its boost or hide it from
           searches.
         </div>

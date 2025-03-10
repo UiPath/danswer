@@ -6,7 +6,7 @@ import { Credential } from "@/lib/connectors/credentials"; // Import Credential 
 
 export function isLoadState(connector_name: string): boolean {
   // TODO: centralize connector metadata like this somewhere instead of hardcoding it here
-  const loadStateConnectors = ["web", "xenforo"];
+  const loadStateConnectors = ["web", "xenforo", "file", "airtable"];
   if (loadStateConnectors.includes(connector_name)) {
     return true;
   }
@@ -43,6 +43,7 @@ export interface Option {
     currentCredential: Credential<any> | null
   ) => boolean;
   wrapInCollapsible?: boolean;
+  disabled?: boolean | ((currentCredential: Credential<any> | null) => boolean);
 }
 
 export interface SelectOption extends Option {
@@ -60,6 +61,7 @@ export interface ListOption extends Option {
 export interface TextOption extends Option {
   type: "text";
   default?: string;
+  initial?: string | ((currentCredential: Credential<any> | null) => string);
   isTextArea?: boolean;
 }
 
@@ -75,11 +77,6 @@ export interface BooleanOption extends Option {
 
 export interface FileOption extends Option {
   type: "file";
-  default?: string;
-}
-
-export interface ZipOption extends Option {
-  type: "zip";
   default?: string;
 }
 
@@ -101,7 +98,6 @@ export interface TabOption extends Option {
       | NumberOption
       | SelectOption
       | FileOption
-      | ZipOption
       | StringTabOption
     )[];
   }[];
@@ -111,6 +107,7 @@ export interface TabOption extends Option {
 export interface ConnectionConfiguration {
   description: string;
   subtext?: string;
+  initialConnectorName?: string; // a key in the credential to prepopulate the connector name field
   values: (
     | BooleanOption
     | ListOption
@@ -118,7 +115,6 @@ export interface ConnectionConfiguration {
     | NumberOption
     | SelectOption
     | FileOption
-    | ZipOption
     | TabOption
   )[];
   advanced_values: (
@@ -128,7 +124,6 @@ export interface ConnectionConfiguration {
     | NumberOption
     | SelectOption
     | FileOption
-    | ZipOption
     | TabOption
   )[];
   overrideDefaultFreq?: number;
@@ -143,8 +138,7 @@ export const connectorConfigs: Record<
     values: [
       {
         type: "text",
-        query:
-          "Enter the website URL to scrape e.g. https://docs.danswer.dev/:",
+        query: "Enter the website URL to scrape e.g. https://docs.onyx.app/:",
         label: "Base URL",
         name: "base_url",
         optional: false,
@@ -161,7 +155,17 @@ export const connectorConfigs: Record<
         ],
       },
     ],
-    advanced_values: [],
+    advanced_values: [
+      {
+        type: "checkbox",
+        query: "Scroll before scraping:",
+        label: "Scroll before scraping",
+        description:
+          "Enable if the website requires scrolling for the desired content to load",
+        name: "scroll_before_scraping",
+        optional: true,
+      },
+    ],
     overrideDefaultFreq: 60 * 60 * 24,
   },
   github: {
@@ -169,32 +173,61 @@ export const connectorConfigs: Record<
     values: [
       {
         type: "text",
-        query: "Enter the repository owner:",
+        query: "Enter the GitHub username or organization:",
         label: "Repository Owner",
         name: "repo_owner",
         optional: false,
       },
       {
-        type: "text",
-        query: "Enter the repository name:",
-        label: "Repository Name",
-        name: "repo_name",
-        optional: false,
+        type: "tab",
+        name: "github_mode",
+        label: "What should we index from GitHub?",
+        optional: true,
+        tabs: [
+          {
+            value: "repo",
+            label: "Specific Repository",
+            fields: [
+              {
+                type: "text",
+                query: "Enter the repository name(s):",
+                label: "Repository Name(s)",
+                name: "repositories",
+                optional: false,
+                description:
+                  "For multiple repositories, enter comma-separated names (e.g., repo1,repo2,repo3)",
+              },
+            ],
+          },
+          {
+            value: "everything",
+            label: "Everything",
+            fields: [
+              {
+                type: "string_tab",
+                label: "Everything",
+                name: "everything",
+                description:
+                  "This connector will index all repositories the provided credentials have access to!",
+              },
+            ],
+          },
+        ],
       },
       {
         type: "checkbox",
         query: "Include pull requests?",
         label: "Include pull requests?",
-        description: "Index pull requests from this repository",
+        description: "Index pull requests from repositories",
         name: "include_prs",
         optional: true,
       },
       {
         type: "checkbox",
         query: "Include issues?",
-        label: "Include Issues",
+        label: "Include Issues?",
         name: "include_issues",
-        description: "Index issues from this repository",
+        description: "Index issues from repositories",
         optional: true,
       },
     ],
@@ -236,6 +269,24 @@ export const connectorConfigs: Record<
     ],
     advanced_values: [],
   },
+  gitbook: {
+    description: "Configure GitBook connector",
+    values: [
+      {
+        type: "text",
+        query: "Enter the space ID:",
+        label: "Space ID",
+        name: "space_id",
+        optional: false,
+        description:
+          "The ID of the GitBook space to index. This can be found in the URL " +
+          "of a page in the space. For example, if your URL looks like " +
+          "`https://app.gitbook.com/o/ccLx08XZ5wZ54LwdP9QU/s/8JkzVx8QCIGRrmxhGHU8/`, " +
+          "then your space ID is `8JkzVx8QCIGRrmxhGHU8`.",
+      },
+    ],
+    advanced_values: [],
+  },
   google_drive: {
     description: "Configure Google Drive connector",
     values: [
@@ -254,8 +305,8 @@ export const connectorConfigs: Record<
                 label: "Include shared drives?",
                 description: (currentCredential) => {
                   return currentCredential?.credential_json?.google_tokens
-                    ? "This will allow Danswer to index everything in the shared drives you have access to."
-                    : "This will allow Danswer to index everything in your Organization's shared drives.";
+                    ? "This will allow Onyx to index everything in the shared drives you have access to."
+                    : "This will allow Onyx to index everything in your Organization's shared drives.";
                 },
                 name: "include_shared_drives",
                 default: false,
@@ -269,8 +320,8 @@ export const connectorConfigs: Record<
                 },
                 description: (currentCredential) => {
                   return currentCredential?.credential_json?.google_tokens
-                    ? "This will allow Danswer to index everything in your My Drive."
-                    : "This will allow Danswer to index everything in everyone's My Drives.";
+                    ? "This will allow Onyx to index everything in your My Drive."
+                    : "This will allow Onyx to index everything in everyone's My Drives.";
                 },
                 name: "include_my_drives",
                 default: false,
@@ -278,7 +329,7 @@ export const connectorConfigs: Record<
               {
                 type: "checkbox",
                 description:
-                  "This will allow Danswer to index all files shared with you.",
+                  "This will allow Onyx to index all files shared with you.",
                 label: "Include All Files Shared With You?",
                 name: "include_files_shared_with_me",
                 visibleCondition: (values, currentCredential) =>
@@ -343,6 +394,7 @@ export const connectorConfigs: Record<
   },
   confluence: {
     description: "Configure Confluence connector",
+    initialConnectorName: "cloud_name",
     values: [
       {
         type: "checkbox",
@@ -353,6 +405,12 @@ export const connectorConfigs: Record<
         default: true,
         description:
           "Check if this is a Confluence Cloud instance, uncheck for Confluence Server/Data Center",
+        disabled: (currentCredential) => {
+          if (currentCredential?.credential_json?.confluence_refresh_token) {
+            return true;
+          }
+          return false;
+        },
       },
       {
         type: "text",
@@ -360,6 +418,15 @@ export const connectorConfigs: Record<
         label: "Wiki Base URL",
         name: "wiki_base",
         optional: false,
+        initial: (currentCredential) => {
+          return currentCredential?.credential_json?.wiki_base ?? "";
+        },
+        disabled: (currentCredential) => {
+          if (currentCredential?.credential_json?.confluence_refresh_token) {
+            return true;
+          }
+          return false;
+        },
         description:
           "The base URL of your Confluence instance (e.g., https://your-domain.atlassian.net/wiki)",
       },
@@ -443,14 +510,52 @@ export const connectorConfigs: Record<
   },
   jira: {
     description: "Configure Jira connector",
-    subtext: `Specify any link to a Jira page below and click "Index" to Index. Based on the provided link, we will index the ENTIRE PROJECT, not just the specified page. For example, entering https://danswer.atlassian.net/jira/software/projects/DAN/boards/1 and clicking the Index button will index the whole DAN Jira project.`,
+    subtext: `Configure which Jira content to index. You can index everything or specify a particular project.`,
     values: [
       {
         type: "text",
-        query: "Enter the Jira project URL:",
-        label: "Jira Project URL",
-        name: "jira_project_url",
+        query: "Enter the Jira base URL:",
+        label: "Jira Base URL",
+        name: "jira_base_url",
         optional: false,
+        description:
+          "The base URL of your Jira instance (e.g., https://your-domain.atlassian.net)",
+      },
+      {
+        type: "tab",
+        name: "indexing_scope",
+        label: "How Should We Index Your Jira?",
+        optional: true,
+        tabs: [
+          {
+            value: "everything",
+            label: "Everything",
+            fields: [
+              {
+                type: "string_tab",
+                label: "Everything",
+                name: "everything",
+                description:
+                  "This connector will index all issues the provided credentials have access to!",
+              },
+            ],
+          },
+          {
+            value: "project",
+            label: "Project",
+            fields: [
+              {
+                type: "text",
+                query: "Enter the project key:",
+                label: "Project Key",
+                name: "project_key",
+                description:
+                  "The key of a specific project to index (e.g., 'PROJ').",
+              },
+            ],
+          },
+        ],
+        defaultTab: "everything",
       },
       {
         type: "list",
@@ -473,7 +578,7 @@ export const connectorConfigs: Record<
         label: "Requested Objects",
         name: "requested_objects",
         optional: true,
-        description: `Specify the Salesforce object types you want us to index. If unsure, don't specify any objects and Danswer will default to indexing by 'Account'.
+        description: `Specify the Salesforce object types you want us to index. If unsure, don't specify any objects and Onyx will default to indexing by 'Account'.
 
 Hint: Use the singular form of the object name (e.g., 'Opportunity' instead of 'Opportunities').`,
       },
@@ -490,8 +595,10 @@ Hint: Use the singular form of the object name (e.g., 'Opportunity' instead of '
         name: "sites",
         optional: true,
         description: `• If no sites are specified, all sites in your organization will be indexed (Sites.Read.All permission required).
-• Specifying 'https://danswerai.sharepoint.com/sites/support' for example will only index documents within this site.
-• Specifying 'https://danswerai.sharepoint.com/sites/support/subfolder' for example will only index documents within this folder.
+
+• Specifying 'https://onyxai.sharepoint.com/sites/support' for example will only index documents within this site.
+
+• Specifying 'https://onyxai.sharepoint.com/sites/support/subfolder' for example will only index documents within this folder.
 `,
       },
     ],
@@ -506,7 +613,7 @@ Hint: Use the singular form of the object name (e.g., 'Opportunity' instead of '
         label: "Teams",
         name: "teams",
         optional: true,
-        description: `Specify 0 or more Teams to index. For example, specifying the Team 'Support' for the 'danswerai' Org will cause us to only index messages sent in channels belonging to the 'Support' Team. If no Teams are specified, all Teams in your organization will be indexed.`,
+        description: `Specify 0 or more Teams to index. For example, specifying the Team 'Support' for the 'onyxai' Org will cause us to only index messages sent in channels belonging to the 'Support' Team. If no Teams are specified, all Teams in your organization will be indexed.`,
       },
     ],
     advanced_values: [],
@@ -554,15 +661,7 @@ Hint: Use the singular form of the object name (e.g., 'Opportunity' instead of '
   },
   slack: {
     description: "Configure Slack connector",
-    values: [
-      {
-        type: "text",
-        query: "Enter the Slack workspace:",
-        label: "Workspace",
-        name: "workspace",
-        optional: false,
-      },
-    ],
+    values: [],
     advanced_values: [
       {
         type: "list",
@@ -594,7 +693,7 @@ For example, specifying .*-support.* as a "channel" will cause the connector to 
         label: "Base URL",
         name: "base_url",
         optional: false,
-        description: `Specify the base URL for your Slab team. This will look something like: https://danswer.slab.com/`,
+        description: `Specify the base URL for your Slab team. This will look something like: https://onyx.slab.com/`,
       },
     ],
     advanced_values: [],
@@ -750,10 +849,10 @@ For example, specifying .*-support.* as a "channel" will cause the connector to 
     description: "Configure Google Sites connector",
     values: [
       {
-        type: "zip",
+        type: "file",
         query: "Enter the zip path:",
-        label: "Zip Path",
-        name: "zip_path",
+        label: "File Locations",
+        name: "file_locations",
         optional: false,
         description:
           "Upload a zip file containing the HTML of your Google Site",
@@ -787,7 +886,7 @@ For example, specifying .*-support.* as a "channel" will cause the connector to 
     advanced_values: [],
   },
   linear: {
-    description: "Configure Dropbox connector",
+    description: "Configure Linear connector",
     values: [],
     advanced_values: [],
   },
@@ -1048,6 +1147,36 @@ For example, specifying .*-support.* as a "channel" will cause the connector to 
     ],
     advanced_values: [],
   },
+  discord: {
+    description: "Configure Discord connector",
+    values: [],
+    advanced_values: [
+      {
+        type: "list",
+        query: "Enter Server IDs to include:",
+        label: "Server IDs",
+        name: "server_ids",
+        description: `Specify 0 or more server ids to include. Only channels inside them will be used for indexing`,
+        optional: true,
+      },
+      {
+        type: "list",
+        query: "Enter channel names to include:",
+        label: "Channels",
+        name: "channel_names",
+        description: `Specify 0 or more channels to index. For example, specifying the channel "support" will cause us to only index all content within the "#support" channel. If no channels are specified, all channels the bot has access to will be indexed.`,
+        optional: true,
+      },
+      {
+        type: "text",
+        query: "Enter the Start Date:",
+        label: "Start Date",
+        name: "start_date",
+        description: `Only messages after this date will be indexed. Format: YYYY-MM-DD`,
+        optional: true,
+      },
+    ],
+  },
   freshdesk: {
     description: "Configure Freshdesk connector",
     values: [],
@@ -1057,6 +1186,68 @@ For example, specifying .*-support.* as a "channel" will cause the connector to 
     description: "Configure Fireflies connector",
     values: [],
     advanced_values: [],
+  },
+  egnyte: {
+    description: "Configure Egnyte connector",
+    values: [
+      {
+        type: "text",
+        query: "Enter folder path to index:",
+        label: "Folder Path",
+        name: "folder_path",
+        optional: true,
+        description:
+          "The folder path to index (e.g., '/Shared/Documents'). Leave empty to index everything.",
+      },
+    ],
+    advanced_values: [],
+  },
+  airtable: {
+    description: "Configure Airtable connector",
+    values: [
+      {
+        type: "text",
+        query: "Enter the base ID:",
+        label: "Base ID",
+        name: "base_id",
+        optional: false,
+        description: "The ID of the Airtable base to index.",
+      },
+      {
+        type: "text",
+        query: "Enter the table name or ID:",
+        label: "Table Name or Table ID",
+        name: "table_name_or_id",
+        optional: false,
+      },
+      {
+        type: "checkbox",
+        label: "Treat all fields except attachments as metadata",
+        name: "treat_all_non_attachment_fields_as_metadata",
+        description:
+          "Choose this if the primary content to index are attachments and all other columns are metadata for these attachments.",
+        optional: false,
+      },
+    ],
+    advanced_values: [
+      {
+        type: "text",
+        label: "View ID",
+        name: "view_id",
+        optional: true,
+        description:
+          "If you need to link to a specific View, put that ID here e.g. viwVUEJjWPd8XYjh8.",
+      },
+      {
+        type: "text",
+        label: "Share ID",
+        name: "share_id",
+        optional: true,
+        description:
+          "If you need to link to a specific Share, put that ID here e.g. shrkfjEzDmLaDtK83.",
+      },
+    ],
+    overrideDefaultFreq: 60 * 60 * 24,
   },
 };
 export function createConnectorInitialValues(
@@ -1137,6 +1328,7 @@ export interface ConnectorBase<T> {
   indexing_start: Date | null;
   access_type: string;
   groups?: number[];
+  from_beginning?: boolean;
 }
 
 export interface Connector<T> extends ConnectorBase<T> {
@@ -1146,6 +1338,21 @@ export interface Connector<T> extends ConnectorBase<T> {
   time_updated: string;
 }
 
+export interface ConnectorSnapshot {
+  id: number;
+  name: string;
+  source: ValidSources;
+  input_type: ValidInputTypes;
+  // connector_specific_config
+  refresh_freq: number | null;
+  prune_freq: number | null;
+  credential_ids: number[];
+  indexing_start: number | null;
+  time_created: string;
+  time_updated: string;
+  from_beginning?: boolean;
+}
+
 export interface WebConfig {
   base_url: string;
   web_connector_type?: "recursive" | "single" | "sitemap";
@@ -1153,7 +1360,7 @@ export interface WebConfig {
 
 export interface GithubConfig {
   repo_owner: string;
-  repo_name: string;
+  repositories: string; // Comma-separated list of repository names
   include_prs: boolean;
   include_issues: boolean;
 }
@@ -1188,6 +1395,7 @@ export interface ConfluenceConfig {
 
 export interface JiraConfig {
   jira_project_url: string;
+  project_key?: string;
   comment_email_blacklist?: string[];
 }
 

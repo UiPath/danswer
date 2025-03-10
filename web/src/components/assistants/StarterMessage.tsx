@@ -15,6 +15,7 @@ export function StarterMessages({
     <div
       key={-4}
       className={`
+        short:hidden
         mx-auto
         w-full
         ${
@@ -23,7 +24,7 @@ export function StarterMessages({
             : "justify-center max-w-[750px] items-start"
         }
         flex
-        mt-6
+      mt-6
       `}
     >
       {currentPersona?.starter_messages &&
@@ -32,15 +33,40 @@ export function StarterMessages({
             {currentPersona.starter_messages
               .slice(0, isMobile ? 2 : 4)
               .map((starterMessage, i) => (
-                <div key={i} className={`${isMobile ? "w-1/2" : "w-1/4"}`}>
+                <div
+                  key={i}
+                  className={`${
+                    isMobile ? "w-1/2" : "w-1/4"
+                  } flex justify-center`}
+                >
                   <button
                     onClick={() => onSubmit(starterMessage.message)}
-                    className={`relative flex ${
-                      !isMobile && "w-40"
-                    } flex-col gap-2 rounded-2xl shadow-sm border border-border bg-background-starter-message px-3 py-2 text-start align-to text-wrap text-[15px] shadow-xs transition enabled:hover:bg-background-starter-message-hover disabled:cursor-not-allowed line-clamp-3`}
-                    style={{ height: `5.2rem` }}
+                    className={`
+                      relative flex ${!isMobile ? "w-40" : "w-full max-w-52"}
+                      shadow
+                      border-background-300/60
+                      flex-col gap-2 rounded-md
+                      text-input-text hover:text-text
+                      border
+                      dark:bg-transparent
+                      dark:border-neutral-700
+                      dark:hover:bg-background-150
+                      font-normal
+                      px-3 py-2
+                      text-start align-to text-wrap
+                      text-[15px] shadow-xs transition
+                      enabled:hover:bg-background-dark/75
+                      disabled:cursor-not-allowed
+                      overflow-hidden
+                      break-words
+                      truncate
+                      text-ellipsis
+                    `}
+                    style={{ height: "5.6rem" }}
                   >
-                    {starterMessage.name}
+                    <div className="overflow-hidden text-ellipsis line-clamp-3 pr-1 pb-1">
+                      {starterMessage.name}
+                    </div>
                   </button>
                 </div>
               ))}

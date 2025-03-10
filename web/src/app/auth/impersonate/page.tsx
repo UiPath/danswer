@@ -14,12 +14,8 @@ const ImpersonateSchema = Yup.object().shape({
 
 export default function ImpersonatePage() {
   const router = useRouter();
-  const { user, isLoadingUser, isCloudSuperuser } = useUser();
+  const { user, isCloudSuperuser } = useUser();
   const { popup, setPopup } = usePopup();
-
-  if (isLoadingUser) {
-    return null;
-  }
 
   if (!user) {
     redirect("/auth/login");
@@ -115,7 +111,7 @@ export default function ImpersonatePage() {
 
               <button
                 type="submit"
-                className="w-full py-3 bg-accent text-white rounded-lg hover:bg-accent/90 transition-colors"
+                className="w-full py-3 bg-agent text-white rounded-lg hover:bg-accent/90 transition-colors"
               >
                 Impersonate User
               </button>
@@ -124,7 +120,7 @@ export default function ImpersonatePage() {
         </Formik>
 
         <div className="text-sm text-text-500 mt-4 text-center px-4 rounded-md">
-          Note: This feature is only available for @danswer.ai administrators
+          Note: This feature is only available for @onyx.app administrators
         </div>
       </div>
     </AuthFlowContainer>

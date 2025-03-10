@@ -26,10 +26,11 @@ import { FiCopy, FiEdit2, FiRefreshCw, FiX } from "react-icons/fi";
 import { Modal } from "@/components/Modal";
 import { Spinner } from "@/components/Spinner";
 import { deleteApiKey, regenerateApiKey } from "./lib";
-import { DanswerApiKeyForm } from "./DanswerApiKeyForm";
+import { OnyxApiKeyForm } from "./OnyxApiKeyForm";
 import { APIKey } from "./types";
+import CreateButton from "@/components/ui/createButton";
 
-const API_KEY_TEXT = `API Keys allow you to access Danswer APIs programmatically. Click the button below to generate a new API Key.`;
+const API_KEY_TEXT = `API Keys allow you to access Onyx APIs programmatically. Click the button below to generate a new API Key.`;
 
 function NewApiKeyModal({
   apiKey,
@@ -45,9 +46,6 @@ function NewApiKeyModal({
       <div className="px-8 py-8">
         <div className="flex w-full border-b border-border mb-4 pb-4">
           <Title>New API Key</Title>
-          <div onClick={onClose} className="ml-auto p-1 rounded hover:bg-hover">
-            <FiX size={18} />
-          </div>
         </div>
         <div className="h-32">
           <Text className="mb-4">
@@ -58,7 +56,7 @@ function NewApiKeyModal({
           <div className="flex mt-2">
             <b className="my-auto break-all">{apiKey}</b>
             <div
-              className="ml-2 my-auto p-2 hover:bg-hover rounded cursor-pointer"
+              className="ml-2 my-auto p-2 hover:bg-accent-background-hovered rounded cursor-pointer"
               onClick={() => {
                 setCopyClicked(true);
                 navigator.clipboard.writeText(apiKey);
@@ -114,14 +112,10 @@ function Main() {
   }
 
   const newApiKeyButton = (
-    <Button
-      variant="navigate"
-      size="sm"
-      className="mt-3"
+    <CreateButton
       onClick={() => setShowCreateUpdateForm(true)}
-    >
-      Create API Key
-    </Button>
+      text="Create API Key"
+    />
   );
 
   if (apiKeys.length === 0) {
@@ -132,7 +126,7 @@ function Main() {
         {newApiKeyButton}
 
         {showCreateUpdateForm && (
-          <DanswerApiKeyForm
+          <OnyxApiKeyForm
             onCreateApiKey={(apiKey) => {
               setFullApiKey(apiKey.api_key);
             }}
@@ -188,7 +182,7 @@ function Main() {
                   flex 
                   mb-1 
                   w-fit 
-                  hover:bg-hover cursor-pointer
+                  hover:bg-accent-background-hovered cursor-pointer
                   p-2 
                   rounded-lg
                   border-border
@@ -212,7 +206,7 @@ function Main() {
                   flex 
                   mb-1 
                   w-fit 
-                  hover:bg-hover cursor-pointer
+                  hover:bg-accent-background-hovered cursor-pointer
                   p-2 
                   rounded-lg
                   border-border
@@ -260,7 +254,7 @@ function Main() {
       </Table>
 
       {showCreateUpdateForm && (
-        <DanswerApiKeyForm
+        <OnyxApiKeyForm
           onCreateApiKey={(apiKey) => {
             setFullApiKey(apiKey.api_key);
           }}

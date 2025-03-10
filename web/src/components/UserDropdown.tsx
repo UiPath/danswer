@@ -9,13 +9,13 @@ import { checkUserIsNoAuthUser, logout } from "@/lib/user";
 import { Popover } from "./popover/Popover";
 import { LOGOUT_DISABLED } from "@/lib/constants";
 import { SettingsContext } from "./settings/SettingsProvider";
-import { BellIcon, LightSettingsIcon } from "./icons/icons";
+import { BellIcon, LightSettingsIcon, UserIcon } from "./icons/icons";
 import { pageType } from "@/app/chat/sessionSidebar/types";
 import { NavigationItem, Notification } from "@/app/admin/settings/interfaces";
 import DynamicFaIcon, { preloadIcons } from "./icons/DynamicFaIcon";
 import { useUser } from "./user/UserProvider";
 import { usePaidEnterpriseFeaturesEnabled } from "./settings/usePaidEnterpriseFeaturesEnabled";
-import { Notifications } from "./chat_search/Notifications";
+import { Notifications } from "./chat/Notifications";
 import useSWR from "swr";
 import { errorHandlingFetcher } from "@/lib/fetcher";
 
@@ -35,7 +35,7 @@ const DropdownOption: React.FC<DropdownOptionProps> = ({
   openInNewTab,
 }) => {
   const content = (
-    <div className="flex py-3 px-4 cursor-pointer rounded hover:bg-hover-light">
+    <div className="flex py-1.5 text-sm px-2 gap-x-2 text-black text-sm cursor-pointer rounded hover:bg-background-300">
       {icon}
       {label}
     </div>
@@ -56,7 +56,15 @@ const DropdownOption: React.FC<DropdownOptionProps> = ({
   }
 };
 
-export function UserDropdown({ page }: { page?: pageType }) {
+export function UserDropdown({
+  page,
+  toggleUserSettings,
+  hideUserDropdown,
+}: {
+  page?: pageType;
+  toggleUserSettings?: () => void;
+  hideUserDropdown?: boolean;
+}) {
   const { user, isCurator } = useUser();
   const [userInfoVisible, setUserInfoVisible] = useState(false);
   const userInfoRef = useRef<HTMLDivElement>(null);
@@ -108,6 +116,7 @@ export function UserDropdown({ page }: { page?: pageType }) {
   };
 
   const showAdminPanel = !user || user.role === UserRole.ADMIN;
+
   const showCuratorPanel = user && isCurator;
   const showLogout =
     user && !checkUserIsNoAuthUser(user.id) && !LOGOUT_DISABLED;
@@ -124,29 +133,35 @@ export function UserDropdown({ page }: { page?: pageType }) {
         onOpenChange={onOpenChange}
         content={
           <div
+            id="onyx-user-dropdown"
             onClick={() => setUserInfoVisible(!userInfoVisible)}
             className="flex relative cursor-pointer"
           >
             <div
               className="
                 my-auto
-                bg-background-strong
+                bg-background-900
                 ring-2
                 ring-transparent
                 group-hover:ring-background-300/50
                 transition-ring
                 duration-150
-                rounded-lg
+                rounded-full
                 inline-block
                 flex-none
-                px-2
+                w-6
+                h-6
+                flex
+                items-center
+                justify-center
+                text-white
                 text-base
               "
             >
               {user && user.email ? user.email[0].toUpperCase() : "A"}
             </div>
             {notifications && notifications.length > 0 && (
-              <div className="absolute right-0 top-0 w-2 h-2 bg-red-500 rounded-full"></div>
+              <div className="absolute -right-0.5 -top-0.5 w-3 h-3 bg-red-500 rounded-full"></div>
             )}
           </div>
         }
@@ -154,17 +169,17 @@ export function UserDropdown({ page }: { page?: pageType }) {
           <div
             className={`
                 p-2
-                min-w-[200px]
+                ${page != "admin" && showNotifications ? "w-72" : "w-[175px]"}
                 text-strong 
                 text-sm
                 border 
                 border-border 
                 bg-background
+                dark:bg-[#2F2F2F]
                 rounded-lg
                 shadow-lg 
                 flex 
                 flex-col 
-                w-full 
                 max-h-96 
                 overflow-y-auto 
                 p-1
@@ -176,6 +191,12 @@ export function UserDropdown({ page }: { page?: pageType }) {
                 navigateToDropdown={() => setShowNotifications(false)}
                 notifications={notifications || []}
                 refreshNotifications={refreshNotifications}
+              />
+            ) : hideUserDropdown ? (
+              <DropdownOption
+                onClick={() => router.push("/auth/login")}
+                icon={<UserIcon className="h-5w-5 my-auto " />}
+                label="Log In"
               />
             ) : (
               <>
@@ -190,7 +211,6 @@ export function UserDropdown({ page }: { page?: pageType }) {
                         h-4
                         w-4
                         my-auto
-                        mr-2
                         overflow-hidden
                         flex
                         items-center
@@ -209,7 +229,7 @@ export function UserDropdown({ page }: { page?: pageType }) {
                       ) : (
                         <DynamicFaIcon
                           name={item.icon!}
-                          className="h-4 w-4 my-auto mr-2"
+                          className="h-4 w-4 my-auto "
                         />
                       )
                     }
@@ -221,21 +241,25 @@ export function UserDropdown({ page }: { page?: pageType }) {
                 {showAdminPanel ? (
                   <DropdownOption
                     href="/admin/indexing/status"
-                    icon={
-                      <LightSettingsIcon className="h-5 w-5 my-auto mr-2" />
-                    }
+                    icon={<LightSettingsIcon size={16} className="my-auto" />}
                     label="Admin Panel"
                   />
                 ) : (
                   showCuratorPanel && (
                     <DropdownOption
                       href="/admin/indexing/status"
-                      icon={
-                        <LightSettingsIcon className="h-5 w-5 my-auto mr-2" />
-                      }
+                      icon={<LightSettingsIcon size={16} className="my-auto" />}
                       label="Curator Panel"
                     />
                   )
+                )}
+
+                {toggleUserSettings && (
+                  <DropdownOption
+                    onClick={toggleUserSettings}
+                    icon={<UserIcon size={16} className="my-auto" />}
+                    label="User Settings"
+                  />
                 )}
 
                 <DropdownOption
@@ -243,7 +267,7 @@ export function UserDropdown({ page }: { page?: pageType }) {
                     setUserInfoVisible(true);
                     setShowNotifications(true);
                   }}
-                  icon={<BellIcon className="h-5 w-5 my-auto mr-2" />}
+                  icon={<BellIcon size={16} className="my-auto" />}
                   label={`Notifications ${
                     notifications && notifications.length > 0
                       ? `(${notifications.length})`
@@ -261,7 +285,7 @@ export function UserDropdown({ page }: { page?: pageType }) {
                 {showLogout && (
                   <DropdownOption
                     onClick={handleLogout}
-                    icon={<FiLogOut className="my-auto mr-2 text-lg" />}
+                    icon={<FiLogOut size={16} className="my-auto" />}
                     label="Log out"
                   />
                 )}

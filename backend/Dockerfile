@@ -1,19 +1,21 @@
 FROM python:3.11.7-slim-bookworm
 
-LABEL com.danswer.maintainer="founders@danswer.ai"
-LABEL com.danswer.description="This image is the web/frontend container of Danswer which \
-contains code for both the Community and Enterprise editions of Danswer. If you do not \
+LABEL com.danswer.maintainer="founders@onyx.app"
+LABEL com.danswer.description="This image is the web/frontend container of Onyx which \
+contains code for both the Community and Enterprise editions of Onyx. If you do not \
 have a contract or agreement with DanswerAI, you are not permitted to use the Enterprise \
 Edition features outside of personal development or testing purposes. Please reach out to \
-founders@danswer.ai for more information. Please visit https://github.com/danswer-ai/danswer"
+founders@onyx.app for more information. Please visit https://github.com/onyx-dot-app/onyx"
 
-# Default DANSWER_VERSION, typically overriden during builds by GitHub Actions.
-ARG DANSWER_VERSION=0.8-dev
-ENV DANSWER_VERSION=${DANSWER_VERSION} \
-    DANSWER_RUNNING_IN_DOCKER="true"
+# Default ONYX_VERSION, typically overriden during builds by GitHub Actions.
+ARG ONYX_VERSION=0.8-dev
+# DO_NOT_TRACK is used to disable telemetry for Unstructured
+ENV ONYX_VERSION=${ONYX_VERSION} \
+    DANSWER_RUNNING_IN_DOCKER="true" \
+    DO_NOT_TRACK="true"
 
 
-RUN echo "DANSWER_VERSION: ${DANSWER_VERSION}"
+RUN echo "ONYX_VERSION: ${ONYX_VERSION}"
 # Install system dependencies
 # cmake needed for psycopg (postgres)
 # libpq-dev needed for psycopg (postgres)
@@ -26,14 +28,16 @@ RUN apt-get update && \
         curl \
         zip \
         ca-certificates \
-        libgnutls30=3.7.9-2+deb12u3 \
-        libblkid1=2.38.1-5+deb12u1 \
-        libmount1=2.38.1-5+deb12u1 \
-        libsmartcols1=2.38.1-5+deb12u1 \
-        libuuid1=2.38.1-5+deb12u1 \
+        libgnutls30 \
+        libblkid1 \
+        libmount1 \
+        libsmartcols1 \
+        libuuid1 \
         libxmlsec1-dev \
         pkg-config \
-        gcc && \
+        gcc \
+        nano \
+        vim && \
     rm -rf /var/lib/apt/lists/* && \
     apt-get clean
 
@@ -56,7 +60,7 @@ RUN pip install --no-cache-dir --upgrade \
 # Cleanup for CVEs and size reduction
 # https://github.com/tornadoweb/tornado/issues/3107
 # xserver-common and xvfb included by playwright installation but not needed after
-# perl-base is part of the base Python Debian image but not needed for Danswer functionality
+# perl-base is part of the base Python Debian image but not needed for Onyx functionality
 # perl-base could only be removed with --allow-remove-essential
 RUN apt-get update && \
     apt-get remove -y --allow-remove-essential \
@@ -72,6 +76,7 @@ RUN apt-get update && \
     apt-get autoremove -y && \
     rm -rf /var/lib/apt/lists/* && \
     rm -f /usr/local/lib/python3.11/site-packages/tornado/test/test.key
+
 
 # Pre-downloading models for setups with limited egress
 RUN python -c "from tokenizers import Tokenizer; \
@@ -91,14 +96,15 @@ COPY ./ee /app/ee
 COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 
 # Set up application files
-COPY ./danswer /app/danswer
+COPY ./onyx /app/onyx
 COPY ./shared_configs /app/shared_configs
 COPY ./alembic /app/alembic
 COPY ./alembic_tenants /app/alembic_tenants
 COPY ./alembic.ini /app/alembic.ini
 COPY supervisord.conf /usr/etc/supervisord.conf
 
-# Escape hatch
+# Escape hatch scripts
+COPY ./scripts/debugging /app/scripts/debugging
 COPY ./scripts/force_delete_connector_by_id.py /app/scripts/force_delete_connector_by_id.py
 
 # Put logo in assets

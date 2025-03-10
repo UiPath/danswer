@@ -1,11 +1,13 @@
 import {
   CombinedSettings,
   EnterpriseSettings,
-  GatingType,
+  ApplicationStatus,
   Settings,
+  QueryHistoryType,
 } from "@/app/admin/settings/interfaces";
 import {
   CUSTOM_ANALYTICS_ENABLED,
+  HOST_URL,
   SERVER_SIDE_ONLY__PAID_ENTERPRISE_FEATURES_ENABLED,
 } from "@/lib/constants";
 import { fetchSS } from "@/lib/utilsSS";
@@ -43,18 +45,22 @@ export async function fetchSettingsSS(): Promise<CombinedSettings | null> {
     if (!results[0].ok) {
       if (results[0].status === 403 || results[0].status === 401) {
         settings = {
-          product_gating: GatingType.NONE,
+          auto_scroll: true,
+          application_status: ApplicationStatus.ACTIVE,
           gpu_enabled: false,
-          chat_page_enabled: true,
-          search_page_enabled: true,
-          default_page: "search",
           maximum_chat_retention_days: null,
           notifications: [],
           needs_reindexing: false,
+          anonymous_user_enabled: false,
+          pro_search_enabled: true,
+          temperature_override_enabled: true,
+          query_history_type: QueryHistoryType.NORMAL,
         };
       } else {
         throw new Error(
-          `fetchStandardSettingsSS failed: status=${results[0].status} body=${await results[0].text()}`
+          `fetchStandardSettingsSS failed: status=${
+            results[0].status
+          } body=${await results[0].text()}`
         );
       }
     } else {
@@ -66,7 +72,9 @@ export async function fetchSettingsSS(): Promise<CombinedSettings | null> {
       if (!results[1].ok) {
         if (results[1].status !== 403 && results[1].status !== 401) {
           throw new Error(
-            `fetchEnterpriseSettingsSS failed: status=${results[1].status} body=${await results[1].text()}`
+            `fetchEnterpriseSettingsSS failed: status=${
+              results[1].status
+            } body=${await results[1].text()}`
           );
         }
       } else {
@@ -79,12 +87,18 @@ export async function fetchSettingsSS(): Promise<CombinedSettings | null> {
       if (!results[2].ok) {
         if (results[2].status !== 403) {
           throw new Error(
-            `fetchCustomAnalyticsScriptSS failed: status=${results[2].status} body=${await results[2].text()}`
+            `fetchCustomAnalyticsScriptSS failed: status=${
+              results[2].status
+            } body=${await results[2].text()}`
           );
         }
       } else {
         customAnalyticsScript = await results[2].json();
       }
+    }
+
+    if (settings.pro_search_enabled == null) {
+      settings.pro_search_enabled = true;
     }
 
     const webVersion = getWebVersion();
@@ -94,6 +108,7 @@ export async function fetchSettingsSS(): Promise<CombinedSettings | null> {
       enterpriseSettings,
       customAnalyticsScript,
       webVersion,
+      webDomain: HOST_URL,
     };
 
     return combinedSettings;

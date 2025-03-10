@@ -103,42 +103,6 @@ export function EmbeddingModelSelection({
     { refreshInterval: 5000 } // 5 seconds
   );
 
-  const { data: connectors } = useSWR<Connector<any>[]>(
-    "/api/manage/connector",
-    errorHandlingFetcher,
-    { refreshInterval: 5000 } // 5 seconds
-  );
-
-  const onConfirmSelection = async (model: EmbeddingModelDescriptor) => {
-    const response = await fetch(
-      "/api/search-settings/set-new-search-settings",
-      {
-        method: "POST",
-        body: JSON.stringify({ ...model, index_name: null }),
-        headers: {
-          "Content-Type": "application/json",
-        },
-      }
-    );
-    if (response.ok) {
-      setShowTentativeModel(null);
-      mutate("/api/search-settings/get-secondary-search-settings");
-      if (!connectors || !connectors.length) {
-        setShowAddConnectorPopup(true);
-      }
-    } else {
-      alert(`Failed to update embedding model - ${await response.text()}`);
-    }
-  };
-
-  const onSelectOpenSource = async (model: HostedEmbeddingModel) => {
-    if (selectedProvider?.model_name === INVALID_OLD_MODEL) {
-      await onConfirmSelection(model);
-    } else {
-      setShowTentativeOpenProvider(model);
-    }
-  };
-
   return (
     <div className="p-2">
       {alreadySelectedModel && (
@@ -235,8 +199,8 @@ export function EmbeddingModelSelection({
           onClick={() => setModelTab(null)}
           className={`mr-4 p-2 font-bold  ${
             !modelTab
-              ? "rounded bg-background-900 text-text-100 underline"
-              : " hover:underline bg-background-100"
+              ? "rounded bg-neutral-900 dark:bg-neutral-950 text-neutral-100 dark:text-neutral-300 underline"
+              : " hover:underline bg-neutral-100 dark:bg-neutral-900"
           }`}
         >
           Current
@@ -246,8 +210,8 @@ export function EmbeddingModelSelection({
             onClick={() => setModelTab("cloud")}
             className={`mx-2 p-2 font-bold  ${
               modelTab == "cloud"
-                ? "rounded bg-background-900 text-text-100 underline"
-                : " hover:underline bg-background-100"
+                ? "rounded bg-neutral-900 dark:bg-neutral-950 text-neutral-100 dark:text-neutral-300 underline"
+                : " hover:underline bg-neutral-100 dark:bg-neutral-900"
             }`}
           >
             Cloud-based
@@ -258,8 +222,8 @@ export function EmbeddingModelSelection({
             onClick={() => setModelTab("open")}
             className={` mx-2 p-2 font-bold  ${
               modelTab == "open"
-                ? "rounded bg-background-900 text-text-100 underline"
-                : "hover:underline bg-background-100"
+                ? "rounded bg-neutral-900 dark:bg-neutral-950 text-neutral-100 dark:text-neutral-300 underline"
+                : "hover:underline bg-neutral-100 dark:bg-neutral-900"
             }`}
           >
             Self-hosted
@@ -270,7 +234,9 @@ export function EmbeddingModelSelection({
       {modelTab == "open" && (
         <OpenEmbeddingPage
           selectedProvider={selectedProvider}
-          onSelectOpenSource={onSelectOpenSource}
+          onSelectOpenSource={(model: HostedEmbeddingModel) => {
+            setShowTentativeOpenProvider(model);
+          }}
         />
       )}
 

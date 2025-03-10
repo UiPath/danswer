@@ -4,15 +4,21 @@ from collections.abc import Callable
 
 import pytest
 
-from danswer.connectors.google_drive.connector import GoogleDriveConnector
-from danswer.connectors.google_utils.shared_constants import (
+from onyx.connectors.google_drive.connector import GoogleDriveConnector
+from onyx.connectors.google_utils.shared_constants import (
+    DB_CREDENTIALS_AUTHENTICATION_METHOD,
+)
+from onyx.connectors.google_utils.shared_constants import (
     DB_CREDENTIALS_DICT_SERVICE_ACCOUNT_KEY,
 )
-from danswer.connectors.google_utils.shared_constants import (
+from onyx.connectors.google_utils.shared_constants import (
     DB_CREDENTIALS_DICT_TOKEN_KEY,
 )
-from danswer.connectors.google_utils.shared_constants import (
+from onyx.connectors.google_utils.shared_constants import (
     DB_CREDENTIALS_PRIMARY_ADMIN_KEY,
+)
+from onyx.connectors.google_utils.shared_constants import (
+    GoogleOAuthAuthenticationMethod,
 )
 from tests.load_env_vars import load_env_vars
 
@@ -56,7 +62,9 @@ def parse_credentials(env_str: str) -> dict:
 
 
 @pytest.fixture
-def google_drive_oauth_connector_factory() -> Callable[..., GoogleDriveConnector]:
+def google_drive_oauth_uploaded_connector_factory() -> (
+    Callable[..., GoogleDriveConnector]
+):
     def _connector_factory(
         primary_admin_email: str,
         include_shared_drives: bool,
@@ -78,10 +86,10 @@ def google_drive_oauth_connector_factory() -> Callable[..., GoogleDriveConnector
 
         json_string = os.environ[_USER_TO_OAUTH_CREDENTIALS_MAP[primary_admin_email]]
         refried_json_string = json.dumps(parse_credentials(json_string))
-
         credentials_json = {
             DB_CREDENTIALS_DICT_TOKEN_KEY: refried_json_string,
             DB_CREDENTIALS_PRIMARY_ADMIN_KEY: primary_admin_email,
+            DB_CREDENTIALS_AUTHENTICATION_METHOD: GoogleOAuthAuthenticationMethod.UPLOADED.value,
         }
         connector.load_credentials(credentials_json)
         return connector
@@ -122,6 +130,7 @@ def google_drive_service_acct_connector_factory() -> (
             {
                 DB_CREDENTIALS_DICT_SERVICE_ACCOUNT_KEY: refried_json_string,
                 DB_CREDENTIALS_PRIMARY_ADMIN_KEY: primary_admin_email,
+                DB_CREDENTIALS_AUTHENTICATION_METHOD: GoogleOAuthAuthenticationMethod.UPLOADED.value,
             }
         )
         return connector

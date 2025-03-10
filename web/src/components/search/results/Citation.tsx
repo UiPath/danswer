@@ -1,13 +1,34 @@
-import { CustomTooltip } from "@/components/tooltip/CustomTooltip";
 import { ReactNode } from "react";
+import { CompactDocumentCard, CompactQuestionCard } from "../DocumentDisplay";
+import { LoadedOnyxDocument, OnyxDocument } from "@/lib/search/interfaces";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { openDocument } from "@/lib/search/utils";
+import { SubQuestionDetail } from "@/app/chat/interfaces";
 
-// NOTE: This is the preivous version of the citations which works just fine
+export interface DocumentCardProps {
+  document: LoadedOnyxDocument;
+  updatePresentingDocument: (document: OnyxDocument) => void;
+  icon?: React.ReactNode;
+  url?: string;
+}
+export interface QuestionCardProps {
+  question: SubQuestionDetail;
+  openQuestion: (question: SubQuestionDetail) => void;
+}
+
 export function Citation({
   children,
-  link,
+  document_info,
+  question_info,
   index,
 }: {
-  link?: string;
+  document_info?: DocumentCardProps;
+  question_info?: QuestionCardProps;
   children?: JSX.Element | string | null | ReactNode;
   index?: number;
 }) {
@@ -15,41 +36,53 @@ export function Citation({
     ? children?.toString().split("[")[1].split("]")[0]
     : index;
 
-  if (link != "") {
-    return (
-      <CustomTooltip
-        citation
-        content={<div className="inline-block p-0 m-0 truncate">{link}</div>}
-      >
-        <a
-          onMouseDown={() => (link ? window.open(link, "_blank") : undefined)}
-          className="cursor-pointer inline ml-1 align-middle"
-        >
-          <span className="group relative -top-1 text-sm text-gray-500 dark:text-gray-400 selection:bg-indigo-300 selection:text-black dark:selection:bg-indigo-900 dark:selection:text-white">
-            <span
-              className="inline-flex bg-background-200 group-hover:bg-background-300 items-center justify-center h-3.5 min-w-3.5 px-1 text-center text-xs rounded-full border-1 border-gray-400 ring-1 ring-gray-400 divide-gray-300 dark:divide-gray-700 dark:ring-gray-700 dark:border-gray-700 transition duration-150"
-              data-number="3"
-            >
-              {innerText}
-            </span>
-          </span>
-        </a>
-      </CustomTooltip>
-    );
-  } else {
-    return (
-      <CustomTooltip content={<div>This doc doesn&apos;t have a link!</div>}>
-        <div className="inline-block cursor-help leading-none inline ml-1 align-middle">
-          <span className="group relative -top-1 text-gray-500 dark:text-gray-400 selection:bg-indigo-300 selection:text-black dark:selection:bg-indigo-900 dark:selection:text-white">
-            <span
-              className="inline-flex bg-background-200 group-hover:bg-background-300 items-center justify-center h-3.5 min-w-3.5 flex-none px-1 text-center text-xs rounded-full border-1 border-gray-400 ring-1 ring-gray-400 divide-gray-300 dark:divide-gray-700 dark:ring-gray-700 dark:border-gray-700 transition duration-150"
-              data-number="3"
-            >
-              {innerText}
-            </span>
-          </span>
-        </div>
-      </CustomTooltip>
-    );
+  if (!document_info && !question_info) {
+    return <>{children}</>;
   }
+  return (
+    <TooltipProvider delayDuration={0}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span
+            onClick={() => {
+              document_info?.document
+                ? openDocument(
+                    document_info.document,
+                    document_info.updatePresentingDocument
+                  )
+                : question_info?.question
+                  ? question_info.openQuestion(question_info.question)
+                  : null;
+            }}
+            className="inline-flex items-center cursor-pointer transition-all duration-200 ease-in-out"
+          >
+            <span
+              className="flex items-center justify-center  px-1 h-4 text-[10px] font-medium text-text-700 bg-background-100 rounded-full border border-background-300 hover:bg-background-200 hover:text-text-900 shadow-sm"
+              style={{ transform: "translateY(-10%)", lineHeight: "1" }}
+            >
+              {innerText}
+            </span>
+          </span>
+        </TooltipTrigger>
+        <TooltipContent
+          className="border border-neutral-300  hover:text-neutral-900 bg-neutral-100 dark:!bg-[#000] dark:border-neutral-700"
+          width="mb-2 max-w-lg"
+        >
+          {document_info?.document ? (
+            <CompactDocumentCard
+              updatePresentingDocument={document_info.updatePresentingDocument}
+              url={document_info.url}
+              icon={document_info.icon}
+              document={document_info.document}
+            />
+          ) : (
+            <CompactQuestionCard
+              question={question_info?.question!}
+              openQuestion={question_info?.openQuestion!}
+            />
+          )}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
 }

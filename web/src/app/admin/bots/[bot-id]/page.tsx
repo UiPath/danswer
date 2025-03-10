@@ -22,7 +22,6 @@ function SlackBotEditPage({
   const unwrappedParams = use(params);
   const { popup, setPopup } = usePopup();
 
-  console.log("unwrappedParams", unwrappedParams);
   const {
     data: slackBot,
     isLoading: isSlackBotLoading,
@@ -78,30 +77,6 @@ function SlackBotEditPage({
         refreshSlackBot={refreshSlackBot}
       />
       <Separator />
-
-      <div className="my-8" />
-
-      <Link
-        className="
-          flex
-          py-2
-          px-4
-          mt-2
-          border
-          border-border
-          h-fit
-          cursor-pointer
-          hover:bg-hover
-          text-sm
-          w-80
-        "
-        href={`/admin/bots/new?slack_bot_id=${unwrappedParams["bot-id"]}`}
-      >
-        <div className="mx-auto flex">
-          <FiPlusSquare className="my-auto mr-2" />
-          New Slack Channel Configuration
-        </div>
-      </Link>
 
       <div className="mt-8">
         <SlackChannelConfigsTable

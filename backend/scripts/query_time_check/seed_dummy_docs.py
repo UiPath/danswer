@@ -11,19 +11,20 @@ Then run test_query_times.py to test query times.
 import random
 from datetime import datetime
 
-from danswer.access.models import DocumentAccess
-from danswer.configs.constants import DocumentSource
-from danswer.connectors.models import Document
-from danswer.db.engine import get_session_context_manager
-from danswer.db.search_settings import get_current_search_settings
-from danswer.document_index.vespa.index import VespaIndex
-from danswer.indexing.models import ChunkEmbedding
-from danswer.indexing.models import DocMetadataAwareIndexChunk
-from danswer.indexing.models import IndexChunk
-from danswer.utils.timing import log_function_time
+from onyx.access.models import DocumentAccess
+from onyx.configs.constants import DocumentSource
+from onyx.connectors.models import Document
+from onyx.db.engine import get_session_context_manager
+from onyx.db.search_settings import get_current_search_settings
+from onyx.document_index.document_index_utils import get_multipass_config
+from onyx.document_index.vespa.index import VespaIndex
+from onyx.indexing.indexing_pipeline import IndexBatchParams
+from onyx.indexing.models import ChunkEmbedding
+from onyx.indexing.models import DocMetadataAwareIndexChunk
+from onyx.indexing.models import IndexChunk
+from onyx.utils.timing import log_function_time
 from shared_configs.configs import POSTGRES_DEFAULT_SCHEMA
 from shared_configs.model_server_models import Embedding
-
 
 TOTAL_DOC_SETS = 8
 TOTAL_ACL_ENTRIES_PER_CATEGORY = 80
@@ -68,6 +69,9 @@ def generate_dummy_chunk(
             mini_chunk_embeddings=[],
         ),
         title_embedding=generate_random_embedding(embedding_dim),
+        large_chunk_id=None,
+        large_chunk_reference_ids=[],
+        image_file_name=None,
     )
 
     document_set_names = []
@@ -103,7 +107,15 @@ def generate_dummy_chunk(
 def do_insertion(
     vespa_index: VespaIndex, all_chunks: list[DocMetadataAwareIndexChunk]
 ) -> None:
-    insertion_records = vespa_index.index(all_chunks)
+    insertion_records = vespa_index.index(
+        chunks=all_chunks,
+        index_batch_params=IndexBatchParams(
+            doc_id_to_previous_chunk_cnt={},
+            doc_id_to_new_chunk_cnt={},
+            tenant_id=POSTGRES_DEFAULT_SCHEMA,
+            large_chunks_enabled=False,
+        ),
+    )
     print(f"Indexed {len(insertion_records)} documents.")
     print(
         f"New documents: {sum(1 for record in insertion_records if not record.already_existed)}"
@@ -123,10 +135,16 @@ def seed_dummy_docs(
 ) -> None:
     with get_session_context_manager() as db_session:
         search_settings = get_current_search_settings(db_session)
+        multipass_config = get_multipass_config(search_settings)
         index_name = search_settings.index_name
-        embedding_dim = search_settings.model_dim
+        embedding_dim = search_settings.final_embedding_dim
 
-    vespa_index = VespaIndex(index_name=index_name, secondary_index_name=None)
+    vespa_index = VespaIndex(
+        index_name=index_name,
+        secondary_index_name=None,
+        large_chunks_enabled=multipass_config.enable_large_chunks,
+        secondary_large_chunks_enabled=None,
+    )
     print(index_name)
 
     all_chunks = []

@@ -20,7 +20,7 @@ def run_jobs() -> None:
     cmd_worker_primary = [
         "celery",
         "-A",
-        "danswer.background.celery.versioned_apps.primary",
+        "onyx.background.celery.versioned_apps.primary",
         "worker",
         "--pool=threads",
         "--concurrency=6",
@@ -34,7 +34,7 @@ def run_jobs() -> None:
     cmd_worker_light = [
         "celery",
         "-A",
-        "danswer.background.celery.versioned_apps.light",
+        "onyx.background.celery.versioned_apps.light",
         "worker",
         "--pool=threads",
         "--concurrency=16",
@@ -42,13 +42,13 @@ def run_jobs() -> None:
         "--loglevel=INFO",
         "--hostname=light@%n",
         "-Q",
-        "vespa_metadata_sync,connector_deletion,doc_permissions_upsert",
+        "vespa_metadata_sync,connector_deletion,doc_permissions_upsert,checkpoint_cleanup",
     ]
 
     cmd_worker_heavy = [
         "celery",
         "-A",
-        "danswer.background.celery.versioned_apps.heavy",
+        "onyx.background.celery.versioned_apps.heavy",
         "worker",
         "--pool=threads",
         "--concurrency=6",
@@ -62,7 +62,7 @@ def run_jobs() -> None:
     cmd_worker_indexing = [
         "celery",
         "-A",
-        "danswer.background.celery.versioned_apps.indexing",
+        "onyx.background.celery.versioned_apps.indexing",
         "worker",
         "--pool=threads",
         "--concurrency=1",
@@ -72,10 +72,23 @@ def run_jobs() -> None:
         "--queues=connector_indexing",
     ]
 
+    cmd_worker_monitoring = [
+        "celery",
+        "-A",
+        "onyx.background.celery.versioned_apps.monitoring",
+        "worker",
+        "--pool=threads",
+        "--concurrency=1",
+        "--prefetch-multiplier=1",
+        "--loglevel=INFO",
+        "--hostname=monitoring@%n",
+        "--queues=monitoring",
+    ]
+
     cmd_beat = [
         "celery",
         "-A",
-        "danswer.background.celery.versioned_apps.beat",
+        "onyx.background.celery.versioned_apps.beat",
         "beat",
         "--loglevel=INFO",
     ]
@@ -97,6 +110,13 @@ def run_jobs() -> None:
         cmd_worker_indexing, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
     )
 
+    worker_monitoring_process = subprocess.Popen(
+        cmd_worker_monitoring,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+
     beat_process = subprocess.Popen(
         cmd_beat, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
     )
@@ -114,18 +134,23 @@ def run_jobs() -> None:
     worker_indexing_thread = threading.Thread(
         target=monitor_process, args=("INDEX", worker_indexing_process)
     )
+    worker_monitoring_thread = threading.Thread(
+        target=monitor_process, args=("MONITORING", worker_monitoring_process)
+    )
     beat_thread = threading.Thread(target=monitor_process, args=("BEAT", beat_process))
 
     worker_primary_thread.start()
     worker_light_thread.start()
     worker_heavy_thread.start()
     worker_indexing_thread.start()
+    worker_monitoring_thread.start()
     beat_thread.start()
 
     worker_primary_thread.join()
     worker_light_thread.join()
     worker_heavy_thread.join()
     worker_indexing_thread.join()
+    worker_monitoring_thread.join()
     beat_thread.join()
 
 

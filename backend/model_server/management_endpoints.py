@@ -1,20 +1,19 @@
-import torch
 from fastapi import APIRouter
 from fastapi import Response
+
+from model_server.constants import GPUStatus
+from model_server.utils import get_gpu_type
 
 router = APIRouter(prefix="/api")
 
 
 @router.get("/health")
-def healthcheck() -> Response:
+async def healthcheck() -> Response:
     return Response(status_code=200)
 
 
 @router.get("/gpu-status")
-def gpu_status() -> dict[str, bool | str]:
-    if torch.cuda.is_available():
-        return {"gpu_available": True, "type": "cuda"}
-    elif torch.backends.mps.is_available():
-        return {"gpu_available": True, "type": "mps"}
-    else:
-        return {"gpu_available": False, "type": "none"}
+async def route_gpu_status() -> dict[str, bool | str]:
+    gpu_type = get_gpu_type()
+    gpu_available = gpu_type != GPUStatus.NONE
+    return {"gpu_available": gpu_available, "type": gpu_type}

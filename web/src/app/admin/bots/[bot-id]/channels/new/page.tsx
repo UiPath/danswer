@@ -2,7 +2,7 @@ import { AdminPageTitle } from "@/components/admin/Title";
 import { SlackChannelConfigCreationForm } from "../SlackChannelConfigCreationForm";
 import { fetchSS } from "@/lib/utilsSS";
 import { ErrorCallout } from "@/components/ErrorCallout";
-import { DocumentSet } from "@/lib/types";
+import { DocumentSet, ValidSources } from "@/lib/types";
 import { BackButton } from "@/components/BackButton";
 import { fetchAssistantsSS } from "@/lib/assistants/fetchAssistantsSS";
 import {
@@ -56,11 +56,11 @@ async function NewChannelConfigPage(props: {
   }
 
   return (
-    <div className="container mx-auto">
+    <div className="container max-w-4xl mx-auto">
       <BackButton />
       <AdminPageTitle
-        icon={<SourceIcon iconSize={32} sourceType={"slack"} />}
-        title="Configure DanswerBot for Slack Channel"
+        icon={<SourceIcon iconSize={32} sourceType={ValidSources.Slack} />}
+        title="Configure OnyxBot for Slack Channel"
       />
 
       <SlackChannelConfigCreationForm

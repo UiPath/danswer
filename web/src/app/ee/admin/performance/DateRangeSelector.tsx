@@ -1,4 +1,4 @@
-import * as React from "react";
+import React, { memo, useMemo, useState } from "react";
 import { Calendar } from "@/components/ui/calendar";
 import {
   Popover,
@@ -10,8 +10,6 @@ import { cn } from "@/lib/utils";
 import { CalendarIcon } from "lucide-react";
 import { format } from "date-fns";
 import { getXDaysAgo } from "./dateUtils";
-import { Separator } from "@/components/ui/separator";
-import { useState } from "react";
 
 export const THIRTY_DAYS = "30d";
 
@@ -26,7 +24,7 @@ export type DateRange =
     }
   | undefined;
 
-export function DateRangeSelector({
+export const DateRangeSelector = memo(function DateRangeSelector({
   value,
   onValueChange,
 }: {
@@ -85,8 +83,16 @@ export function DateRangeSelector({
             defaultMonth={value?.from}
             selected={value}
             onSelect={(range) => {
-              if (range?.from && range?.to) {
-                onValueChange({ from: range.from, to: range.to });
+              if (range?.from) {
+                if (range.to) {
+                  // Normal range selection when initialized with a range
+                  onValueChange({ from: range.from, to: range.to });
+                } else {
+                  // Single date selection when initilized without a range
+                  const to = new Date(range.from);
+                  const from = new Date(to.setDate(to.getDate() - 1));
+                  onValueChange({ from, to });
+                }
               }
             }}
             numberOfMonths={2}
@@ -99,7 +105,6 @@ export function DateRangeSelector({
                 className="w-full justify-start"
                 onClick={() => {
                   onValueChange(preset.value);
-                  setIsOpen(false);
                 }}
               >
                 {preset.label}
@@ -110,4 +115,4 @@ export function DateRangeSelector({
       </Popover>
     </div>
   );
-}
+});

@@ -4,9 +4,9 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from danswer.llm.llm_provider_options import BEDROCK_PROVIDER_NAME
-from danswer.llm.llm_provider_options import fetch_available_well_known_llms
-from danswer.llm.llm_provider_options import WellKnownLLMProviderDescriptor
+from onyx.llm.llm_provider_options import BEDROCK_PROVIDER_NAME
+from onyx.llm.llm_provider_options import fetch_available_well_known_llms
+from onyx.llm.llm_provider_options import WellKnownLLMProviderDescriptor
 
 
 @pytest.fixture
@@ -23,6 +23,9 @@ def bedrock_provider() -> WellKnownLLMProviderDescriptor:
     return provider
 
 
+@pytest.mark.xfail(
+    reason="Credentials not yet available due to compliance work needed",
+)
 def test_bedrock_llm_configuration(
     client: TestClient, bedrock_provider: WellKnownLLMProviderDescriptor
 ) -> None:

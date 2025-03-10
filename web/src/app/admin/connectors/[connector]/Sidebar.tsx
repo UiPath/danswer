@@ -2,7 +2,7 @@ import { useFormContext } from "@/components/context/FormContext";
 import { HeaderTitle } from "@/components/header/HeaderTitle";
 
 import { SettingsIcon } from "@/components/icons/icons";
-import { Logo } from "@/components/Logo";
+import { Logo } from "@/components/logo/Logo";
 import { SettingsContext } from "@/components/settings/SettingsProvider";
 import { credentialTemplates } from "@/lib/connectors/credentials";
 import Link from "next/link";
@@ -62,11 +62,11 @@ export default function Sidebar() {
   ];
 
   return (
-    <div className="flex flex-none w-[250px] bg-background text-default">
+    <div className="flex flex-none w-[250px] text-default">
       <div
         className={`
                   fixed
-                  bg-background-100
+                  bg-background-sidebar
                   h-screen
                   transition-all
                   bg-opacity-80
@@ -85,7 +85,7 @@ export default function Sidebar() {
               {enterpriseSettings && enterpriseSettings.application_name ? (
                 <HeaderTitle>{enterpriseSettings.application_name}</HeaderTitle>
               ) : (
-                <HeaderTitle>Danswer</HeaderTitle>
+                <HeaderTitle>Onyx</HeaderTitle>
               )}
             </div>
           </div>
@@ -96,7 +96,7 @@ export default function Sidebar() {
             <div className="mx-auto w-full max-w-2xl px-4 py-8">
               <div className="relative">
                 {connector != "file" && (
-                  <div className="absolute h-[85%] left-[6px] top-[8px] bottom-0 w-0.5 bg-gray-300"></div>
+                  <div className="absolute h-[85%] left-[6px] top-[8px] bottom-0 w-0.5 bg-background-300"></div>
                 )}
                 {settingSteps.map((step, index) => {
                   const allowed =
@@ -119,7 +119,7 @@ export default function Sidebar() {
                       <div className="flex-shrink-0 mr-4 z-10">
                         <div
                           className={`rounded-full h-3.5 w-3.5 flex items-center justify-center ${
-                            allowed ? "bg-blue-500" : "bg-gray-300"
+                            allowed ? "bg-blue-500" : "bg-background-300"
                           }`}
                         >
                           {formStep === index && (
@@ -129,7 +129,7 @@ export default function Sidebar() {
                       </div>
                       <div
                         className={`${
-                          index <= formStep ? "text-gray-800" : "text-gray-500"
+                          index <= formStep ? "text-text-800" : "text-text-500"
                         }`}
                       >
                         {step}

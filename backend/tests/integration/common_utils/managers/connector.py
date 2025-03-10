@@ -3,10 +3,10 @@ from uuid import uuid4
 
 import requests
 
-from danswer.connectors.models import InputType
-from danswer.db.enums import AccessType
-from danswer.server.documents.models import ConnectorUpdateRequest
-from danswer.server.documents.models import DocumentSource
+from onyx.connectors.models import InputType
+from onyx.db.enums import AccessType
+from onyx.server.documents.models import ConnectorUpdateRequest
+from onyx.server.documents.models import DocumentSource
 from tests.integration.common_utils.constants import API_SERVER_URL
 from tests.integration.common_utils.constants import GENERAL_HEADERS
 from tests.integration.common_utils.test_models import DATestConnector
@@ -30,7 +30,10 @@ class ConnectorManager:
             name=name,
             source=source,
             input_type=input_type,
-            connector_specific_config=connector_specific_config or {},
+            connector_specific_config=(
+                connector_specific_config
+                or ({"file_locations": []} if source == DocumentSource.FILE else {})
+            ),
             access_type=access_type,
             groups=groups or [],
         )

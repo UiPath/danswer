@@ -11,8 +11,9 @@ import { CopyButton } from "@/components/CopyButton";
 import { SEARCH_PARAM_NAMES } from "../searchParams";
 import { usePopup } from "@/components/admin/connectors/Popup";
 import { structureValue } from "@/lib/llm/utils";
-import { LlmOverride } from "@/lib/hooks";
+import { LlmDescriptor } from "@/lib/hooks";
 import { Separator } from "@/components/ui/separator";
+import { AdvancedOptionsToggle } from "@/components/AdvancedOptionsToggle";
 
 function buildShareLink(chatSessionId: string) {
   const baseUrl = `${window.location.protocol}//${window.location.host}`;
@@ -34,10 +35,10 @@ async function generateShareLink(chatSessionId: string) {
   return null;
 }
 
-async function generateCloneLink(
+async function generateSeedLink(
   message?: string,
   assistantId?: number,
-  modelOverride?: LlmOverride
+  modelOverride?: LlmDescriptor
 ) {
   const baseUrl = `${window.location.protocol}//${window.location.host}`;
   const model = modelOverride
@@ -91,7 +92,7 @@ export function ShareChatSessionModal({
   onClose: () => void;
   message?: string;
   assistantId?: number;
-  modelOverride?: LlmOverride;
+  modelOverride?: LlmDescriptor;
 }) {
   const [shareLink, setShareLink] = useState<string>(
     existingSharedStatus === ChatSessionSharedStatus.Public
@@ -99,14 +100,15 @@ export function ShareChatSessionModal({
       : ""
   );
   const { popup, setPopup } = usePopup();
+  const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
 
   return (
     <>
       {popup}
-      <Modal onOutsideClick={onClose} width="max-w-3xl">
+      <Modal onOutsideClick={onClose} width="w-full max-w-3xl">
         <>
           <div className="flex mb-4">
-            <h2 className="text-2xl text-emphasis font-bold flex my-auto">
+            <h2 className="text-2xl text-text-darker font-bold flex my-auto">
               Share link to Chat
             </h2>
           </div>
@@ -115,9 +117,8 @@ export function ShareChatSessionModal({
             {shareLink ? (
               <div>
                 <Text>
-                  This chat session is currently shared. Anyone at your
-                  organization can view the message history using the following
-                  link:
+                  This chat session is currently shared. Anyone in your team can
+                  view the message history using the following link:
                 </Text>
 
                 <div className="flex mt-2">
@@ -157,10 +158,8 @@ export function ShareChatSessionModal({
             ) : (
               <div>
                 <Callout type="warning" title="Warning" className="mb-4">
-                  Ensure that all content in the chat is safe to share with the
-                  whole organization. The content of the retrieved documents
-                  will not be visible, but the names of cited documents as well
-                  as the AI and human messages will be visible.
+                  Please make sure that all content in this chat is safe to
+                  share with the whole team.
                 </Callout>
                 <div className="flex w-full justify-between">
                   <Button
@@ -183,7 +182,7 @@ export function ShareChatSessionModal({
                       }
                     }}
                     size="sm"
-                    variant="submit"
+                    variant="secondary"
                   >
                     Generate and Copy Share Link
                   </Button>
@@ -193,48 +192,56 @@ export function ShareChatSessionModal({
           </div>
 
           <Separator className="my-4" />
-          <div className="mb-4">
-            <Callout type="notice" title="Clone Chat">
-              Generate a link to clone this chat session with the current query.
-              This allows others to start a new chat with the same initial
-              message and settings.
-            </Callout>
-          </div>
-          <div className="flex w-full justify-between">
-            <Button
-              icon={FiCopy}
-              onClick={async () => {
-                // NOTE: for "insecure" non-https setup, the `navigator.clipboard.writeText` may fail
-                // as the browser may not allow the clipboard to be accessed.
-                try {
-                  const cloneLink = await generateCloneLink(
-                    message,
-                    assistantId,
-                    modelOverride
-                  );
-                  if (!cloneLink) {
-                    setPopup({
-                      message: "Failed to generate clone link",
-                      type: "error",
-                    });
-                  } else {
-                    navigator.clipboard.writeText(cloneLink);
-                    setPopup({
-                      message: "Link copied to clipboard!",
-                      type: "success",
-                    });
-                  }
-                } catch (e) {
-                  console.error(e);
-                  alert("Failed to generate or copy link.");
-                }
-              }}
-              size="sm"
-              variant="secondary"
-            >
-              Generate and Copy Clone Link
-            </Button>
-          </div>
+
+          <AdvancedOptionsToggle
+            showAdvancedOptions={showAdvancedOptions}
+            setShowAdvancedOptions={setShowAdvancedOptions}
+            title="Advanced Options"
+          />
+
+          {showAdvancedOptions && (
+            <>
+              <div className="mb-4">
+                <Callout type="notice" title="Seed New Chat">
+                  Generate a link to a new chat session with the same settings
+                  as this chat (including the assistant and model).
+                </Callout>
+              </div>
+              <div className="flex w-full justify-between">
+                <Button
+                  icon={FiCopy}
+                  onClick={async () => {
+                    try {
+                      const seedLink = await generateSeedLink(
+                        message,
+                        assistantId,
+                        modelOverride
+                      );
+                      if (!seedLink) {
+                        setPopup({
+                          message: "Failed to generate seed link",
+                          type: "error",
+                        });
+                      } else {
+                        navigator.clipboard.writeText(seedLink);
+                        setPopup({
+                          message: "Link copied to clipboard!",
+                          type: "success",
+                        });
+                      }
+                    } catch (e) {
+                      console.error(e);
+                      alert("Failed to generate or copy link.");
+                    }
+                  }}
+                  size="sm"
+                  variant="secondary"
+                >
+                  Generate and Copy Seed Link
+                </Button>
+              </div>
+            </>
+          )}
         </>
       </Modal>
     </>

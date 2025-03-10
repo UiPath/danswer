@@ -9,13 +9,15 @@ from uuid import uuid4
 
 from sqlalchemy.orm import Session
 
-from danswer.db.engine import get_sqlalchemy_engine
-from danswer.db.enums import IndexingStatus
-from danswer.db.index_attempt import create_index_attempt
-from danswer.db.index_attempt import create_index_attempt_error
-from danswer.db.models import IndexAttempt
-from danswer.db.search_settings import get_current_search_settings
-from danswer.server.documents.models import DocumentSource
+from onyx.connectors.models import ConnectorFailure
+from onyx.connectors.models import DocumentFailure
+from onyx.db.engine import get_sqlalchemy_engine
+from onyx.db.enums import IndexingStatus
+from onyx.db.index_attempt import create_index_attempt
+from onyx.db.index_attempt import create_index_attempt_error
+from onyx.db.models import IndexAttempt
+from onyx.db.search_settings import get_current_search_settings
+from onyx.server.documents.models import DocumentSource
 from tests.integration.common_utils.constants import NUM_DOCS
 from tests.integration.common_utils.managers.api_key import APIKeyManager
 from tests.integration.common_utils.managers.cc_pair import CCPairManager
@@ -101,10 +103,15 @@ def test_connector_deletion(reset: None, vespa_client: vespa_fixture) -> None:
 
         create_index_attempt_error(
             index_attempt_id=new_attempt.id,
-            batch=1,
-            docs=[],
-            exception_msg="",
-            exception_traceback="",
+            connector_credential_pair_id=cc_pair_1.id,
+            failure=ConnectorFailure(
+                failure_message="Test error",
+                failed_document=DocumentFailure(
+                    document_id=cc_pair_1.documents[0].id,
+                    document_link=None,
+                ),
+                failed_entity=None,
+            ),
             db_session=db_session,
         )
 
@@ -127,10 +134,15 @@ def test_connector_deletion(reset: None, vespa_client: vespa_fixture) -> None:
         )
         create_index_attempt_error(
             index_attempt_id=attempt_id,
-            batch=1,
-            docs=[],
-            exception_msg="",
-            exception_traceback="",
+            connector_credential_pair_id=cc_pair_1.id,
+            failure=ConnectorFailure(
+                failure_message="Test error",
+                failed_document=DocumentFailure(
+                    document_id=cc_pair_1.documents[0].id,
+                    document_link=None,
+                ),
+                failed_entity=None,
+            ),
             db_session=db_session,
         )
 

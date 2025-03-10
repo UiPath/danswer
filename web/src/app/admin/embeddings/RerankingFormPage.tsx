@@ -15,6 +15,7 @@ import {
 } from "./interfaces";
 import { FiExternalLink } from "react-icons/fi";
 import {
+  AmazonIcon,
   CohereIcon,
   LiteLLMIcon,
   MixedBreadIcon,
@@ -30,6 +31,10 @@ interface RerankingDetailsFormProps {
   originalRerankingDetails: RerankingDetails;
   modelTab: "open" | "cloud" | null;
   setModelTab: Dispatch<SetStateAction<"open" | "cloud" | null>>;
+  onValidationChange?: (
+    isValid: boolean,
+    errors: Record<string, string>
+  ) => void;
 }
 
 const RerankingDetailsForm = forwardRef<
@@ -43,6 +48,7 @@ const RerankingDetailsForm = forwardRef<
       currentRerankingDetails,
       modelTab,
       setModelTab,
+      onValidationChange,
     },
     ref
   ) => {
@@ -55,25 +61,77 @@ const RerankingDetailsForm = forwardRef<
     const combinedSettings = useContext(SettingsContext);
     const gpuEnabled = combinedSettings?.settings.gpu_enabled;
 
+    // Define the validation schema
+    const validationSchema = Yup.object().shape({
+      rerank_model_name: Yup.string().nullable(),
+      rerank_provider_type: Yup.mixed<RerankerProvider>()
+        .nullable()
+        .oneOf(Object.values(RerankerProvider))
+        .optional(),
+      rerank_api_key: Yup.string()
+        .nullable()
+        .test(
+          "required-if-cohere",
+          "API Key is required for Cohere reranking",
+          function (value) {
+            const { rerank_provider_type } = this.parent;
+            return (
+              rerank_provider_type !== RerankerProvider.COHERE ||
+              (value !== null && value !== "")
+            );
+          }
+        ),
+      rerank_api_url: Yup.string()
+        .url("Must be a valid URL")
+        .matches(/^https?:\/\//, "URL must start with http:// or https://")
+        .nullable()
+        .test(
+          "required-if-litellm",
+          "API URL is required for LiteLLM reranking",
+          function (value) {
+            const { rerank_provider_type } = this.parent;
+            return (
+              rerank_provider_type !== RerankerProvider.LITELLM ||
+              (value !== null && value !== "")
+            );
+          }
+        ),
+    });
+
     return (
       <Formik
         innerRef={ref}
         initialValues={currentRerankingDetails}
-        validationSchema={Yup.object().shape({
-          rerank_model_name: Yup.string().nullable(),
-          rerank_provider_type: Yup.mixed<RerankerProvider>()
-            .nullable()
-            .oneOf(Object.values(RerankerProvider))
-            .optional(),
-          api_key: Yup.string().nullable(),
-          num_rerank: Yup.number().min(1, "Must be at least 1"),
-          rerank_api_url: Yup.string()
-            .url("Must be a valid URL")
-            .matches(/^https?:\/\//, "URL must start with http:// or https://")
-            .nullable(),
-        })}
+        validationSchema={validationSchema}
         onSubmit={async (_, { setSubmitting }) => {
           setSubmitting(false);
+        }}
+        validate={(values) => {
+          // Update parent component with values
+          setRerankingDetails(values);
+
+          // Run validation and report errors
+          if (onValidationChange) {
+            // We'll return an empty object here since Yup will handle the actual validation
+            // But we need to check if there are any validation errors
+            const errors: Record<string, string> = {};
+            try {
+              // Manually validate against the schema
+              validationSchema.validateSync(values, { abortEarly: false });
+              onValidationChange(true, {});
+            } catch (validationError) {
+              if (validationError instanceof Yup.ValidationError) {
+                validationError.inner.forEach((err) => {
+                  if (err.path) {
+                    errors[err.path] = err.message;
+                  }
+                });
+                onValidationChange(false, errors);
+              }
+            }
+          }
+
+          return {}; // Return empty object as Formik will handle the errors
         }}
         enableReinitialize={true}
       >
@@ -116,8 +174,8 @@ const RerankingDetailsForm = forwardRef<
                     onClick={() => setModelTab("cloud")}
                     className={`mr-2 p-2 font-bold  ${
                       modelTab == "cloud"
-                        ? "rounded bg-background-900 text-text-100 underline"
-                        : " hover:underline bg-background-100"
+                        ? "rounded bg-neutral-900 dark:bg-neutral-950 text-neutral-100 dark:text-neutral-300 underline"
+                        : " hover:underline bg-neutral-100 dark:bg-neutral-900"
                     }`}
                   >
                     Cloud-based
@@ -129,8 +187,8 @@ const RerankingDetailsForm = forwardRef<
                     onClick={() => setModelTab("open")}
                     className={` mx-2 p-2 font-bold  ${
                       modelTab == "open"
-                        ? "rounded bg-background-900 text-text-100 underline"
-                        : "hover:underline bg-background-100"
+                        ? "rounded bg-neutral-900 dark:bg-neutral-950 text-neutral-100 dark:text-neutral-300 underline"
+                        : "hover:underline bg-neutral-100 dark:bg-neutral-900"
                     }`}
                   >
                     Self-hosted
@@ -140,7 +198,7 @@ const RerankingDetailsForm = forwardRef<
                   <div className="px-2">
                     <button
                       onClick={() => resetRerankingValues()}
-                      className="mx-2 p-2 font-bold   rounded bg-background-100 text-text-900 hover:underline"
+                      className={`mx-2 p-2 font-bold rounded bg-neutral-100 dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100 hover:underline`}
                     >
                       Remove Reranking
                     </button>
@@ -177,12 +235,17 @@ const RerankingDetailsForm = forwardRef<
                         key={`${card.rerank_provider_type}-${card.modelName}`}
                         className={`p-4 border rounded-lg cursor-pointer transition-all duration-200 ${
                           isSelected
-                            ? "border-blue-500 bg-blue-50 shadow-md"
-                            : "border-gray-200 hover:border-blue-300 hover:shadow-sm"
+                            ? "border-blue-800 bg-blue-50 dark:bg-blue-950 dark:border-blue-700 shadow-md"
+                            : "border-background-200 hover:border-blue-300 hover:shadow-sm dark:border-neutral-700 dark:hover:border-blue-300"
                         }`}
                         onClick={() => {
                           if (
                             card.rerank_provider_type == RerankerProvider.COHERE
+                          ) {
+                            setIsApiKeyModalOpen(true);
+                          } else if (
+                            card.rerank_provider_type ==
+                            RerankerProvider.BEDROCK
                           ) {
                             setIsApiKeyModalOpen(true);
                           } else if (
@@ -221,6 +284,9 @@ const RerankingDetailsForm = forwardRef<
                             ) : card.rerank_provider_type ===
                               RerankerProvider.COHERE ? (
                               <CohereIcon size={24} className="mr-2" />
+                            ) : card.rerank_provider_type ===
+                              RerankerProvider.BEDROCK ? (
+                              <AmazonIcon size={24} className="mr-2" />
                             ) : (
                               <MixedBreadIcon size={24} className="mr-2" />
                             )}
@@ -240,10 +306,10 @@ const RerankingDetailsForm = forwardRef<
                             </a>
                           )}
                         </div>
-                        <p className="text-sm text-gray-600 mb-2">
+                        <p className="text-sm text-text-600 mb-2">
                           {card.description}
                         </p>
-                        <div className="text-xs text-gray-500">
+                        <div className="text-xs text-text-500">
                           {card.cloud ? "Cloud-based" : "Self-hosted"}
                         </div>
                       </div>
@@ -380,7 +446,10 @@ const RerankingDetailsForm = forwardRef<
                         placeholder={
                           values.rerank_api_key
                             ? "*".repeat(values.rerank_api_key.length)
-                            : undefined
+                            : values.rerank_provider_type ===
+                                RerankerProvider.BEDROCK
+                              ? "aws_ACCESSKEY_SECRETKEY_REGION"
+                              : "Enter your API key"
                         }
                         onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
                           const value = e.target.value;
@@ -391,7 +460,12 @@ const RerankingDetailsForm = forwardRef<
                           setFieldValue("api_key", value);
                         }}
                         type="password"
-                        label="Cohere API Key"
+                        label={
+                          values.rerank_provider_type ===
+                          RerankerProvider.BEDROCK
+                            ? "AWS Credentials in format: aws_ACCESSKEY_SECRETKEY_REGION"
+                            : "Cohere API Key"
+                        }
                         name="rerank_api_key"
                       />
                       <div className="flex w-full justify-end mt-4">

@@ -1,16 +1,12 @@
 "use client";
 
 import React from "react";
-import useSWR from "swr";
-import { FetchError, errorHandlingFetcher } from "@/lib/fetcher";
+import { FetchError } from "@/lib/fetcher";
 import { ErrorCallout } from "@/components/ErrorCallout";
 import { LoadingAnimation } from "@/components/Loading";
-import { usePopup } from "@/components/admin/connectors/Popup";
-import { ConnectorIndexingStatus } from "@/lib/types";
-import {
-  usePublicCredentials,
-  useConnectorCredentialIndexingStatus,
-} from "@/lib/hooks";
+import { PopupSpec, usePopup } from "@/components/admin/connectors/Popup";
+import { ValidSources } from "@/lib/types";
+import { usePublicCredentials } from "@/lib/hooks";
 import Title from "@/components/ui/title";
 import { DriveJsonUploadSection, DriveAuthSection } from "./Credential";
 import {
@@ -18,35 +14,39 @@ import {
   GoogleDriveCredentialJson,
   GoogleDriveServiceAccountCredentialJson,
 } from "@/lib/connectors/credentials";
-import { GoogleDriveConfig } from "@/lib/connectors/connectors";
 import { useUser } from "@/components/user/UserProvider";
+import {
+  useGoogleAppCredential,
+  useGoogleServiceAccountKey,
+  useGoogleCredentials,
+  useConnectorsByCredentialId,
+  checkCredentialsFetched,
+  filterUploadedCredentials,
+  checkConnectorsExist,
+  refreshAllGoogleData,
+} from "@/lib/googleConnector";
 
-const GDriveMain = ({}: {}) => {
-  const { isLoadingUser, isAdmin, user } = useUser();
+const GDriveMain = ({
+  setPopup,
+}: {
+  setPopup: (popup: PopupSpec | null) => void;
+}) => {
+  const { isAdmin, user } = useUser();
 
+  // Get app credential and service account key
   const {
     data: appCredentialData,
     isLoading: isAppCredentialLoading,
     error: isAppCredentialError,
-  } = useSWR<{ client_id: string }, FetchError>(
-    "/api/manage/admin/connector/google-drive/app-credential",
-    errorHandlingFetcher
-  );
+  } = useGoogleAppCredential("google_drive");
 
   const {
     data: serviceAccountKeyData,
     isLoading: isServiceAccountKeyLoading,
     error: isServiceAccountKeyError,
-  } = useSWR<{ service_account_email: string }, FetchError>(
-    "/api/manage/admin/connector/google-drive/service-account-key",
-    errorHandlingFetcher
-  );
+  } = useGoogleServiceAccountKey("google_drive");
 
-  const {
-    data: connectorIndexingStatuses,
-    isLoading: isConnectorIndexingStatusesLoading,
-    error: connectorIndexingStatusesError,
-  } = useConnectorCredentialIndexingStatus();
+  // Get all public credentials
   const {
     data: credentialsData,
     isLoading: isCredentialsLoading,
@@ -54,24 +54,51 @@ const GDriveMain = ({}: {}) => {
     refreshCredentials,
   } = usePublicCredentials();
 
-  const { popup, setPopup } = usePopup();
+  // Get Google Drive-specific credentials
+  const {
+    data: googleDriveCredentials,
+    isLoading: isGoogleDriveCredentialsLoading,
+    error: googleDriveCredentialsError,
+  } = useGoogleCredentials(ValidSources.GoogleDrive);
 
-  const appCredentialSuccessfullyFetched =
-    appCredentialData ||
-    (isAppCredentialError && isAppCredentialError.status === 404);
-  const serviceAccountKeySuccessfullyFetched =
-    serviceAccountKeyData ||
-    (isServiceAccountKeyError && isServiceAccountKeyError.status === 404);
+  // Filter uploaded credentials and get credential ID
+  const { credential_id, uploadedCredentials } = filterUploadedCredentials(
+    googleDriveCredentials
+  );
 
-  if (isLoadingUser) {
-    return <></>;
-  }
+  // Get connectors for the credential ID
+  const {
+    data: googleDriveConnectors,
+    isLoading: isGoogleDriveConnectorsLoading,
+    error: googleDriveConnectorsError,
+    refreshConnectorsByCredentialId,
+  } = useConnectorsByCredentialId(credential_id);
 
+  // Check if credentials were successfully fetched
+  const {
+    appCredentialSuccessfullyFetched,
+    serviceAccountKeySuccessfullyFetched,
+  } = checkCredentialsFetched(
+    appCredentialData,
+    isAppCredentialError,
+    serviceAccountKeyData,
+    isServiceAccountKeyError
+  );
+
+  // Handle refresh of all data
+  const handleRefresh = () => {
+    refreshCredentials();
+    refreshConnectorsByCredentialId();
+    refreshAllGoogleData(ValidSources.GoogleDrive);
+  };
+
+  // Loading state
   if (
     (!appCredentialSuccessfullyFetched && isAppCredentialLoading) ||
     (!serviceAccountKeySuccessfullyFetched && isServiceAccountKeyLoading) ||
-    (!connectorIndexingStatuses && isConnectorIndexingStatusesLoading) ||
-    (!credentialsData && isCredentialsLoading)
+    (!credentialsData && isCredentialsLoading) ||
+    (!googleDriveCredentials && isGoogleDriveCredentialsLoading) ||
+    (!googleDriveConnectors && isGoogleDriveConnectorsLoading)
   ) {
     return (
       <div className="mx-auto">
@@ -80,12 +107,15 @@ const GDriveMain = ({}: {}) => {
     );
   }
 
+  // Error states
   if (credentialsError || !credentialsData) {
     return <ErrorCallout errorTitle="Failed to load credentials." />;
   }
 
-  if (connectorIndexingStatusesError || !connectorIndexingStatuses) {
-    return <ErrorCallout errorTitle="Failed to load connectors." />;
+  if (googleDriveCredentialsError || !googleDriveCredentials) {
+    return (
+      <ErrorCallout errorTitle="Failed to load Google Drive credentials." />
+    );
   }
 
   if (
@@ -97,60 +127,67 @@ const GDriveMain = ({}: {}) => {
     );
   }
 
-  const googleDrivePublicCredential:
+  if (googleDriveConnectorsError) {
+    return (
+      <ErrorCallout errorTitle="Failed to load Google Drive associated connectors." />
+    );
+  }
+
+  // Check if connectors exist
+  const connectorAssociated = checkConnectorsExist(googleDriveConnectors);
+
+  // Get the uploaded OAuth credential
+  const googleDrivePublicUploadedCredential:
     | Credential<GoogleDriveCredentialJson>
     | undefined = credentialsData.find(
     (credential) =>
       credential.credential_json?.google_tokens &&
       credential.admin_public &&
-      credential.source === "google_drive"
+      credential.source === "google_drive" &&
+      credential.credential_json.authentication_method !== "oauth_interactive"
   );
+
+  // Get the service account credential
   const googleDriveServiceAccountCredential:
     | Credential<GoogleDriveServiceAccountCredentialJson>
     | undefined = credentialsData.find(
-    (credential) => credential.credential_json?.google_service_account_key
-  );
-
-  const googleDriveConnectorIndexingStatuses: ConnectorIndexingStatus<
-    GoogleDriveConfig,
-    GoogleDriveCredentialJson
-  >[] = connectorIndexingStatuses.filter(
-    (connectorIndexingStatus) =>
-      connectorIndexingStatus.connector.source === "google_drive"
+    (credential) =>
+      credential.credential_json?.google_service_account_key &&
+      credential.source === "google_drive"
   );
 
   return (
     <>
-      {popup}
-      <Title className="mb-2 mt-6 ml-auto mr-auto">
-        Step 1: Provide your Credentials
-      </Title>
+      <Title className="mb-2 mt-6">Step 1: Provide your Credentials</Title>
       <DriveJsonUploadSection
         setPopup={setPopup}
         appCredentialData={appCredentialData}
         serviceAccountCredentialData={serviceAccountKeyData}
         isAdmin={isAdmin}
+        onSuccess={handleRefresh}
       />
 
-      {isAdmin && (
-        <>
-          <Title className="mb-2 mt-6 ml-auto mr-auto">
-            Step 2: Authenticate with Danswer
-          </Title>
-          <DriveAuthSection
-            setPopup={setPopup}
-            refreshCredentials={refreshCredentials}
-            googleDrivePublicCredential={googleDrivePublicCredential}
-            googleDriveServiceAccountCredential={
-              googleDriveServiceAccountCredential
-            }
-            appCredentialData={appCredentialData}
-            serviceAccountKeyData={serviceAccountKeyData}
-            connectorExists={googleDriveConnectorIndexingStatuses.length > 0}
-            user={user}
-          />
-        </>
-      )}
+      {isAdmin &&
+        (appCredentialData?.client_id ||
+          serviceAccountKeyData?.service_account_email) && (
+          <>
+            <Title className="mb-2 mt-6">Step 2: Authenticate with Onyx</Title>
+            <DriveAuthSection
+              setPopup={setPopup}
+              refreshCredentials={handleRefresh}
+              googleDrivePublicUploadedCredential={
+                googleDrivePublicUploadedCredential
+              }
+              googleDriveServiceAccountCredential={
+                googleDriveServiceAccountCredential
+              }
+              appCredentialData={appCredentialData}
+              serviceAccountKeyData={serviceAccountKeyData}
+              connectorAssociated={connectorAssociated}
+              user={user}
+            />
+          </>
+        )}
     </>
   );
 };

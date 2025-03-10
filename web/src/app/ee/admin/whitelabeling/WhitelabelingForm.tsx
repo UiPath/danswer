@@ -55,6 +55,7 @@ export function WhitelabelingForm() {
     <div>
       <Formik
         initialValues={{
+          auto_scroll: settings?.settings?.auto_scroll || false,
           application_name: enterpriseSettings?.application_name || null,
           use_custom_logo: enterpriseSettings?.use_custom_logo || false,
           use_custom_logotype: enterpriseSettings?.use_custom_logotype || false,
@@ -71,7 +72,11 @@ export function WhitelabelingForm() {
             enterpriseSettings?.enable_consent_screen || false,
         }}
         validationSchema={Yup.object().shape({
-          application_name: Yup.string().nullable(),
+          auto_scroll: Yup.boolean().nullable(),
+          application_name: Yup.string()
+            .trim()
+            .min(1, "Application name cannot be empty")
+            .nullable(),
           use_custom_logo: Yup.boolean().required(),
           use_custom_logotype: Yup.boolean().required(),
           custom_header_content: Yup.string().nullable(),
@@ -135,8 +140,8 @@ export function WhitelabelingForm() {
             <TextFormField
               label="Application Name"
               name="application_name"
-              subtext={`The custom name you are giving Danswer for your organization. This will replace 'Danswer' everywhere in the UI.`}
-              placeholder="Custom name which will replace 'Danswer'"
+              subtext={`The custom name you are giving Onyx for your team. This will replace 'Onyx' everywhere in the UI.`}
+              placeholder="Custom name which will replace 'Onyx'"
               disabled={isSubmitting}
             />
 
@@ -176,7 +181,7 @@ export function WhitelabelingForm() {
               </div>
             ) : (
               <SubLabel>
-                Specify your own logo to replace the standard Danswer logo.
+                Specify your own logo to replace the standard Onyx logo.
               </SubLabel>
             )}
 
@@ -197,12 +202,12 @@ export function WhitelabelingForm() {
                 <Text>
                   Read{" "}
                   <Link
-                    href={"https://docs.danswer.dev/enterprise_edition/theming"}
+                    href={"https://docs.onyx.app/enterprise_edition/theming"}
                     className="text-link cursor-pointer"
                   >
                     the docs
                   </Link>{" "}
-                  to see whitelabelling examples in action.
+                  to see whitelabeling examples in action.
                 </Text>
 
                 <TextFormField
@@ -232,7 +237,7 @@ export function WhitelabelingForm() {
                     values.enable_consent_screen
                       ? `The title for the consent screen that will be displayed for each user on their initial visit to the application. If left blank, title will default to "Terms of Use".`
                       : `The title for the popup that will be displayed for each user on their initial visit to the application. If left blank AND Custom Popup Content is specified, will use "Welcome to ${
-                          values.application_name || "Danswer"
+                          values.application_name || "Onyx"
                         }!".`
                   }
                   placeholder={

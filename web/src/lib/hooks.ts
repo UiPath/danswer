@@ -4,18 +4,35 @@ import {
   DocumentBoostStatus,
   Tag,
   UserGroup,
+  ConnectorStatus,
+  CCPairBasicInfo,
+  ValidSources,
 } from "@/lib/types";
 import useSWR, { mutate, useSWRConfig } from "swr";
 import { errorHandlingFetcher } from "./fetcher";
-import { useContext, useEffect, useState } from "react";
+import { useContext, useEffect, useMemo, useState } from "react";
 import { DateRangePickerValue } from "@/app/ee/admin/performance/DateRangeSelector";
-import { SourceMetadata } from "./search/interfaces";
-import { destructureValue } from "./llm/utils";
+import { Filters, SourceMetadata } from "./search/interfaces";
+import {
+  destructureValue,
+  findProviderForModel,
+  structureValue,
+} from "./llm/utils";
 import { ChatSession } from "@/app/chat/interfaces";
-import { UsersResponse } from "./users/interfaces";
+import { AllUsersResponse } from "./types";
 import { Credential } from "./connectors/credentials";
 import { SettingsContext } from "@/components/settings/SettingsProvider";
-import { PersonaCategory } from "@/app/admin/assistants/interfaces";
+import { Persona, PersonaLabel } from "@/app/admin/assistants/interfaces";
+import {
+  isAnthropic,
+  LLMProviderDescriptor,
+} from "@/app/admin/configuration/llm/interfaces";
+
+import { getSourceMetadata } from "./sources";
+import { AuthType, NEXT_PUBLIC_CLOUD_ENABLED } from "./constants";
+import { useUser } from "@/components/user/UserProvider";
+import { SEARCH_TOOL_ID } from "@/app/chat/tools/constants";
+import { updateTemperatureOverrideForChatSession } from "@/app/chat/lib";
 
 const CREDENTIAL_URL = "/api/manage/admin/credential";
 
@@ -65,13 +82,16 @@ export const useObjectState = <T>(
 };
 
 const INDEXING_STATUS_URL = "/api/manage/admin/connector/indexing-status";
+const CONNECTOR_STATUS_URL = "/api/manage/admin/connector/status";
 
 export const useConnectorCredentialIndexingStatus = (
   refreshInterval = 30000, // 30 seconds
   getEditable = false
 ) => {
   const { mutate } = useSWRConfig();
-  const url = `${INDEXING_STATUS_URL}${getEditable ? "?get_editable=true" : ""}`;
+  const url = `${INDEXING_STATUS_URL}${
+    getEditable ? "?get_editable=true" : ""
+  }`;
   const swrResponse = useSWR<ConnectorIndexingStatus<any, any>[]>(
     url,
     errorHandlingFetcher,
@@ -84,16 +104,98 @@ export const useConnectorCredentialIndexingStatus = (
   };
 };
 
-export const useCategories = () => {
+export const useConnectorStatus = (refreshInterval = 30000) => {
   const { mutate } = useSWRConfig();
-  const swrResponse = useSWR<PersonaCategory[]>(
-    "/api/persona/categories",
-    errorHandlingFetcher
+  const url = CONNECTOR_STATUS_URL;
+  const swrResponse = useSWR<ConnectorStatus<any, any>[]>(
+    url,
+    errorHandlingFetcher,
+    { refreshInterval: refreshInterval }
   );
 
   return {
     ...swrResponse,
-    refreshCategories: () => mutate("/api/persona/categories"),
+    refreshIndexingStatus: () => mutate(url),
+  };
+};
+
+export const useBasicConnectorStatus = () => {
+  const url = "/api/manage/connector-status";
+  const swrResponse = useSWR<CCPairBasicInfo[]>(url, errorHandlingFetcher);
+  return {
+    ...swrResponse,
+    refreshIndexingStatus: () => mutate(url),
+  };
+};
+
+export const useLabels = () => {
+  const { mutate } = useSWRConfig();
+  const { data: labels, error } = useSWR<PersonaLabel[]>(
+    "/api/persona/labels",
+    errorHandlingFetcher
+  );
+
+  const refreshLabels = async () => {
+    return mutate("/api/persona/labels");
+  };
+
+  const createLabel = async (name: string) => {
+    const response = await fetch("/api/persona/labels", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+
+    if (response.ok) {
+      const newLabel = await response.json();
+      mutate("/api/persona/labels", [...(labels || []), newLabel], false);
+    }
+
+    return response;
+  };
+
+  const updateLabel = async (id: number, name: string) => {
+    const response = await fetch(`/api/admin/persona/label/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ label_name: name }),
+    });
+
+    if (response.ok) {
+      mutate(
+        "/api/persona/labels",
+        labels?.map((label) => (label.id === id ? { ...label, name } : label)),
+        false
+      );
+    }
+
+    return response;
+  };
+
+  const deleteLabel = async (id: number) => {
+    const response = await fetch(`/api/admin/persona/label/${id}`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+    });
+
+    if (response.ok) {
+      mutate(
+        "/api/persona/labels",
+        labels?.filter((label) => label.id !== id),
+        false
+      );
+    }
+
+    return response;
+  };
+
+  return {
+    labels,
+    error,
+    refreshLabels,
+    createLabel,
+    updateLabel,
+    deleteLabel,
   };
 };
 
@@ -112,6 +214,14 @@ export interface FilterManager {
   setSelectedDocumentSets: React.Dispatch<React.SetStateAction<string[]>>;
   selectedTags: Tag[];
   setSelectedTags: React.Dispatch<React.SetStateAction<Tag[]>>;
+  getFilterString: () => string;
+  buildFiltersFromQueryString: (
+    filterString: string,
+    availableSources: ValidSources[],
+    availableDocumentSets: string[],
+    availableTags: Tag[]
+  ) => void;
+  clearFilters: () => void;
 }
 
 export function useFilters(): FilterManager {
@@ -122,7 +232,106 @@ export function useFilters(): FilterManager {
   );
   const [selectedTags, setSelectedTags] = useState<Tag[]>([]);
 
+  const getFilterString = () => {
+    const params = new URLSearchParams();
+
+    if (timeRange) {
+      params.set("from", timeRange.from.toISOString());
+      params.set("to", timeRange.to.toISOString());
+    }
+
+    if (selectedSources.length > 0) {
+      const sourcesParam = selectedSources
+        .map((source) => encodeURIComponent(source.internalName))
+        .join(",");
+      params.set("sources", sourcesParam);
+    }
+
+    if (selectedDocumentSets.length > 0) {
+      const docSetsParam = selectedDocumentSets
+        .map((ds) => encodeURIComponent(ds))
+        .join(",");
+      params.set("documentSets", docSetsParam);
+    }
+
+    if (selectedTags.length > 0) {
+      const tagsParam = selectedTags
+        .map((tag) => encodeURIComponent(tag.tag_value))
+        .join(",");
+      params.set("tags", tagsParam);
+    }
+
+    const queryString = params.toString();
+    return queryString ? `&${queryString}` : "";
+  };
+
+  const clearFilters = () => {
+    setTimeRange(null);
+    setSelectedSources([]);
+    setSelectedDocumentSets([]);
+    setSelectedTags([]);
+  };
+
+  function buildFiltersFromQueryString(
+    filterString: string,
+    availableSources: ValidSources[],
+    availableDocumentSets: string[],
+    availableTags: Tag[]
+  ): void {
+    const params = new URLSearchParams(filterString);
+
+    // Parse the "from" parameter as a DateRangePickerValue
+    let newTimeRange: DateRangePickerValue | null = null;
+    const fromParam = params.get("from");
+    const toParam = params.get("to");
+    if (fromParam && toParam) {
+      const fromDate = new Date(fromParam);
+      const toDate = new Date(toParam);
+      if (!isNaN(fromDate.getTime()) && !isNaN(toDate.getTime())) {
+        newTimeRange = { from: fromDate, to: toDate, selectValue: "" };
+      }
+    }
+
+    // Parse sources
+    const availableSourcesMetadata = availableSources.map(getSourceMetadata);
+    let newSelectedSources: SourceMetadata[] = [];
+    const sourcesParam = params.get("sources");
+    if (sourcesParam) {
+      const sourceNames = sourcesParam.split(",").map(decodeURIComponent);
+      newSelectedSources = availableSourcesMetadata.filter((source) =>
+        sourceNames.includes(source.internalName)
+      );
+    }
+
+    // Parse document sets
+    let newSelectedDocSets: string[] = [];
+    const docSetsParam = params.get("documentSets");
+    if (docSetsParam) {
+      const docSetNames = docSetsParam.split(",").map(decodeURIComponent);
+      newSelectedDocSets = availableDocumentSets.filter((ds) =>
+        docSetNames.includes(ds)
+      );
+    }
+
+    // Parse tags
+    let newSelectedTags: Tag[] = [];
+    const tagsParam = params.get("tags");
+    if (tagsParam) {
+      const tagValues = tagsParam.split(",").map(decodeURIComponent);
+      newSelectedTags = availableTags.filter((tag) =>
+        tagValues.includes(tag.tag_value)
+      );
+    }
+
+    // Update filter manager's values instead of returning
+    setTimeRange(newTimeRange);
+    setSelectedSources(newSelectedSources);
+    setSelectedDocumentSets(newSelectedDocSets);
+    setSelectedTags(newSelectedTags);
+  }
+
   return {
+    clearFilters,
     timeRange,
     setTimeRange,
     selectedSources,
@@ -131,13 +340,19 @@ export function useFilters(): FilterManager {
     setSelectedDocumentSets,
     selectedTags,
     setSelectedTags,
+    getFilterString,
+    buildFiltersFromQueryString,
   };
 }
 
-export const useUsers = () => {
-  const url = "/api/manage/users";
+interface UseUsersParams {
+  includeApiKeys: boolean;
+}
 
-  const swrResponse = useSWR<UsersResponse>(url, errorHandlingFetcher);
+export const useUsers = ({ includeApiKeys }: UseUsersParams) => {
+  const url = `/api/manage/users?include_api_keys=${includeApiKeys}`;
+
+  const swrResponse = useSWR<AllUsersResponse>(url, errorHandlingFetcher);
 
   return {
     ...swrResponse,
@@ -145,83 +360,274 @@ export const useUsers = () => {
   };
 };
 
-export interface LlmOverride {
+export interface LlmDescriptor {
   name: string;
   provider: string;
   modelName: string;
 }
 
-export interface LlmOverrideManager {
-  llmOverride: LlmOverride;
-  setLlmOverride: React.Dispatch<React.SetStateAction<LlmOverride>>;
-  globalDefault: LlmOverride;
-  setGlobalDefault: React.Dispatch<React.SetStateAction<LlmOverride>>;
-  temperature: number | null;
-  setTemperature: React.Dispatch<React.SetStateAction<number | null>>;
-  updateModelOverrideForChatSession: (chatSession?: ChatSession) => void;
+export interface LlmManager {
+  currentLlm: LlmDescriptor;
+  updateCurrentLlm: (newOverride: LlmDescriptor) => void;
+  temperature: number;
+  updateTemperature: (temperature: number) => void;
+  updateModelOverrideBasedOnChatSession: (chatSession?: ChatSession) => void;
+  imageFilesPresent: boolean;
+  updateImageFilesPresent: (present: boolean) => void;
+  liveAssistant: Persona | null;
+  maxTemperature: number;
 }
-export function useLlmOverride(
-  globalModel?: string | null,
-  currentChatSession?: ChatSession,
-  defaultTemperature?: number
-): LlmOverrideManager {
-  const [globalDefault, setGlobalDefault] = useState<LlmOverride>(
-    globalModel != null
-      ? destructureValue(globalModel)
-      : {
-          name: "",
-          provider: "",
-          modelName: "",
-        }
-  );
-  const [llmOverride, setLlmOverride] = useState<LlmOverride>(
-    currentChatSession && currentChatSession.current_alternate_model
-      ? destructureValue(currentChatSession.current_alternate_model)
-      : {
-          name: "",
-          provider: "",
-          modelName: "",
-        }
-  );
 
-  const updateModelOverrideForChatSession = (chatSession?: ChatSession) => {
-    setLlmOverride(
-      chatSession && chatSession.current_alternate_model
-        ? destructureValue(chatSession.current_alternate_model)
-        : globalDefault
-    );
+// Things to test
+// 1. User override
+// 2. User preference (defaults to system wide default if no preference set)
+// 3. Current assistant
+// 4. Current chat session
+// 5. Live assistant
+
+/*
+LLM Override is as follows (i.e. this order)
+- User override (explicitly set in the chat input bar)
+- User preference (defaults to system wide default if no preference set)
+
+On switching to an existing or new chat session or a different assistant:
+- If we have a live assistant after any switch with a model override, use that- otherwise use the above hierarchy
+
+Thus, the input should be
+- User preference
+- LLM Providers (which contain the system wide default)
+- Current assistant
+
+Changes take place as
+- liveAssistant or currentChatSession changes (and the associated model override is set)
+- (updateCurrentLlm) User explicitly setting a model override (and we explicitly override and set the userSpecifiedOverride which we'll use in place of the user preferences unless overridden by an assistant)
+
+If we have a live assistant, we should use that model override
+
+Relevant test: `llm_ordering.spec.ts`.
+
+Temperature override is set as follows:
+- For existing chat sessions:
+  - If the user has previously overridden the temperature for a specific chat session, 
+    that value is persisted and used when the user returns to that chat.
+  - This persistence applies even if the temperature was set before sending the first message in the chat.
+- For new chat sessions:
+  - If the search tool is available, the default temperature is set to 0.
+  - If the search tool is not available, the default temperature is set to 0.5.
+
+This approach ensures that user preferences are maintained for existing chats while 
+providing appropriate defaults for new conversations based on the available tools.
+*/
+
+export function useLlmManager(
+  llmProviders: LLMProviderDescriptor[],
+  currentChatSession?: ChatSession,
+  liveAssistant?: Persona
+): LlmManager {
+  const { user } = useUser();
+
+  const [userHasManuallyOverriddenLLM, setUserHasManuallyOverriddenLLM] =
+    useState(false);
+  const [chatSession, setChatSession] = useState<ChatSession | null>(null);
+  const [currentLlm, setCurrentLlm] = useState<LlmDescriptor>({
+    name: "",
+    provider: "",
+    modelName: "",
+  });
+
+  const llmUpdate = () => {
+    /* Should be called when the live assistant or current chat session changes */
+
+    // separate function so we can `return` to break out
+    const _llmUpdate = () => {
+      // if the user has overridden in this session and just switched to a brand
+      // new session, use their manually specified model
+      if (userHasManuallyOverriddenLLM && !currentChatSession) {
+        return;
+      }
+
+      if (currentChatSession?.current_alternate_model) {
+        setCurrentLlm(
+          getValidLlmDescriptor(currentChatSession.current_alternate_model)
+        );
+      } else if (liveAssistant?.llm_model_version_override) {
+        setCurrentLlm(
+          getValidLlmDescriptor(liveAssistant.llm_model_version_override)
+        );
+      } else if (userHasManuallyOverriddenLLM) {
+        // if the user has an override and there's nothing special about the
+        // current chat session, use the override
+        return;
+      } else if (user?.preferences?.default_model) {
+        setCurrentLlm(getValidLlmDescriptor(user.preferences.default_model));
+      } else {
+        const defaultProvider = llmProviders.find(
+          (provider) => provider.is_default_provider
+        );
+
+        if (defaultProvider) {
+          setCurrentLlm({
+            name: defaultProvider.name,
+            provider: defaultProvider.provider,
+            modelName: defaultProvider.default_model_name,
+          });
+        }
+      }
+    };
+
+    _llmUpdate();
+    setChatSession(currentChatSession || null);
   };
 
-  const [temperature, setTemperature] = useState<number | null>(
-    defaultTemperature != undefined ? defaultTemperature : 0
-  );
+  const getValidLlmDescriptor = (
+    modelName: string | null | undefined
+  ): LlmDescriptor => {
+    if (modelName) {
+      const model = destructureValue(modelName);
+      if (!(model.modelName && model.modelName.length > 0)) {
+        const provider = llmProviders.find((p) =>
+          p.model_names.includes(modelName)
+        );
+        if (provider) {
+          return {
+            modelName: modelName,
+            name: provider.name,
+            provider: provider.provider,
+          };
+        }
+      }
 
-  useEffect(() => {
-    setGlobalDefault(
-      globalModel != null
-        ? destructureValue(globalModel)
-        : {
-            name: "",
-            provider: "",
-            modelName: "",
-          }
+      const provider = llmProviders.find((p) =>
+        p.model_names.includes(model.modelName)
+      );
+
+      if (provider) {
+        return { ...model, name: provider.name };
+      }
+    }
+    return { name: "", provider: "", modelName: "" };
+  };
+
+  const [imageFilesPresent, setImageFilesPresent] = useState(false);
+
+  const updateImageFilesPresent = (present: boolean) => {
+    setImageFilesPresent(present);
+  };
+
+  // Manually set the LLM
+  const updateCurrentLlm = (newLlm: LlmDescriptor) => {
+    const provider =
+      newLlm.provider || findProviderForModel(llmProviders, newLlm.modelName);
+    const structuredValue = structureValue(
+      newLlm.name,
+      provider,
+      newLlm.modelName
     );
-  }, [globalModel]);
+    setCurrentLlm(getValidLlmDescriptor(structuredValue));
+    setUserHasManuallyOverriddenLLM(true);
+  };
+
+  const updateModelOverrideBasedOnChatSession = (chatSession?: ChatSession) => {
+    if (chatSession && chatSession.current_alternate_model?.length > 0) {
+      setCurrentLlm(getValidLlmDescriptor(chatSession.current_alternate_model));
+    }
+  };
+
+  const [temperature, setTemperature] = useState<number>(() => {
+    llmUpdate();
+
+    if (currentChatSession?.current_temperature_override != null) {
+      return Math.min(
+        currentChatSession.current_temperature_override,
+        isAnthropic(currentLlm.provider, currentLlm.modelName) ? 1.0 : 2.0
+      );
+    } else if (
+      liveAssistant?.tools.some((tool) => tool.name === SEARCH_TOOL_ID)
+    ) {
+      return 0;
+    }
+    return 0.5;
+  });
+
+  const maxTemperature = useMemo(() => {
+    return isAnthropic(currentLlm.provider, currentLlm.modelName) ? 1.0 : 2.0;
+  }, [currentLlm]);
 
   useEffect(() => {
-    setTemperature(defaultTemperature !== undefined ? defaultTemperature : 0);
-  }, [defaultTemperature]);
+    if (isAnthropic(currentLlm.provider, currentLlm.modelName)) {
+      const newTemperature = Math.min(temperature, 1.0);
+      setTemperature(newTemperature);
+      if (chatSession?.id) {
+        updateTemperatureOverrideForChatSession(chatSession.id, newTemperature);
+      }
+    }
+  }, [currentLlm]);
+
+  useEffect(() => {
+    llmUpdate();
+
+    if (!chatSession && currentChatSession) {
+      if (temperature) {
+        updateTemperatureOverrideForChatSession(
+          currentChatSession.id,
+          temperature
+        );
+      }
+      return;
+    }
+
+    if (currentChatSession?.current_temperature_override) {
+      setTemperature(currentChatSession.current_temperature_override);
+    } else if (
+      liveAssistant?.tools.some((tool) => tool.name === SEARCH_TOOL_ID)
+    ) {
+      setTemperature(0);
+    } else {
+      setTemperature(0.5);
+    }
+  }, [liveAssistant, currentChatSession]);
+
+  const updateTemperature = (temperature: number) => {
+    if (isAnthropic(currentLlm.provider, currentLlm.modelName)) {
+      setTemperature((prevTemp) => Math.min(temperature, 1.0));
+    } else {
+      setTemperature(temperature);
+    }
+    if (chatSession) {
+      updateTemperatureOverrideForChatSession(chatSession.id, temperature);
+    }
+  };
 
   return {
-    updateModelOverrideForChatSession,
-    llmOverride,
-    setLlmOverride,
-    globalDefault,
-    setGlobalDefault,
+    updateModelOverrideBasedOnChatSession,
+    currentLlm,
+    updateCurrentLlm,
     temperature,
-    setTemperature,
+    updateTemperature,
+    imageFilesPresent,
+    updateImageFilesPresent,
+    liveAssistant: liveAssistant ?? null,
+    maxTemperature,
   };
 }
+
+export function useAuthType(): AuthType | null {
+  const { data, error } = useSWR<{ auth_type: AuthType }>(
+    "/api/auth/type",
+    errorHandlingFetcher
+  );
+
+  if (NEXT_PUBLIC_CLOUD_ENABLED) {
+    return "cloud";
+  }
+
+  if (error || !data) {
+    return null;
+  }
+
+  return data.auth_type;
+}
+
 /* 
 EE Only APIs
 */
@@ -262,8 +668,11 @@ export const useUserGroups = (): {
 
 const MODEL_DISPLAY_NAMES: { [key: string]: string } = {
   // OpenAI models
-  "o1-mini": "O1 Mini",
-  "o1-preview": "O1 Preview",
+  "o1-2025-12-17": "o1 (December 2025)",
+  "o3-mini": "o3 Mini",
+  "o1-mini": "o1 Mini",
+  "o1-preview": "o1 Preview",
+  o1: "o1",
   "gpt-4": "GPT 4",
   "gpt-4o": "GPT 4o",
   "gpt-4o-2024-08-06": "GPT 4o (Structured Outputs)",
@@ -283,6 +692,25 @@ const MODEL_DISPLAY_NAMES: { [key: string]: string } = {
   "gpt-3.5-turbo-16k-0613": "GPT 3.5 Turbo 16k (June 2023)",
   "gpt-3.5-turbo-0301": "GPT 3.5 Turbo (March 2023)",
 
+  // Amazon models
+  "amazon.nova-micro@v1": "Amazon Nova Micro",
+  "amazon.nova-lite@v1": "Amazon Nova Lite",
+  "amazon.nova-pro@v1": "Amazon Nova Pro",
+
+  // Meta models
+  "llama-3.2-90b-vision-instruct": "Llama 3.2 90B",
+  "llama-3.2-11b-vision-instruct": "Llama 3.2 11B",
+  "llama-3.3-70b-instruct": "Llama 3.3 70B",
+
+  // Microsoft models
+  "phi-3.5-mini-instruct": "Phi 3.5 Mini",
+  "phi-3.5-moe-instruct": "Phi 3.5 MoE",
+  "phi-3.5-vision-instruct": "Phi 3.5 Vision",
+  "phi-4": "Phi 4",
+
+  // Deepseek Models
+  "deepseek-r1": "DeepSeek R1",
+
   // Anthropic models
   "claude-3-opus-20240229": "Claude 3 Opus",
   "claude-3-sonnet-20240229": "Claude 3 Sonnet",
@@ -290,8 +718,35 @@ const MODEL_DISPLAY_NAMES: { [key: string]: string } = {
   "claude-2.1": "Claude 2.1",
   "claude-2.0": "Claude 2.0",
   "claude-instant-1.2": "Claude Instant 1.2",
-  "claude-3-5-sonnet-20240620": "Claude 3.5 Sonnet",
-  "claude-3-5-sonnet-20241022": "Claude 3.5 Sonnet (New)",
+  "claude-3-5-sonnet-20240620": "Claude 3.5 Sonnet (June 2024)",
+  "claude-3-5-sonnet-20241022": "Claude 3.5 Sonnet",
+  "claude-3-7-sonnet-20250219": "Claude 3.7 Sonnet",
+  "claude-3-5-sonnet-v2@20241022": "Claude 3.5 Sonnet",
+  "claude-3.5-sonnet-v2@20241022": "Claude 3.5 Sonnet",
+  "claude-3-5-haiku-20241022": "Claude 3.5 Haiku",
+  "claude-3-5-haiku@20241022": "Claude 3.5 Haiku",
+  "claude-3.5-haiku@20241022": "Claude 3.5 Haiku",
+  "claude-3.7-sonnet@202502019": "Claude 3.7 Sonnet",
+  "claude-3-7-sonnet-202502019": "Claude 3.7 Sonnet",
+
+  // Google Models
+  "gemini-1.5-pro": "Gemini 1.5 Pro",
+  "gemini-1.5-flash": "Gemini 1.5 Flash",
+  "gemini-1.5-pro-001": "Gemini 1.5 Pro",
+  "gemini-1.5-flash-001": "Gemini 1.5 Flash",
+  "gemini-1.5-pro-002": "Gemini 1.5 Pro (v2)",
+  "gemini-1.5-flash-002": "Gemini 1.5 Flash (v2)",
+  "gemini-2.0-flash-exp": "Gemini 2.0 Flash (Experimental)",
+  "gemini-2.0-flash-001": "Gemini 2.0 Flash",
+  "gemini-2.0-flash-lite-preview-02-05": "Gemini 2.0 Flash Lite (Prv)",
+  "gemini-2.0-flash-thinking-exp-01-02": "Gemini 2.0 Flash Thinking (Exp)",
+  "gemini-2.0-pro-exp-02-05": "Gemini 2.0 Pro (Exp)",
+  "gemini-2.0-flash": "Gemini 2.0 Flash",
+  "gemini-2.0-flash-thinking-exp-01-21": "Gemini 2.0 Flash Thinking",
+  // Mistral Models
+  "mistral-large-2411": "Mistral Large 24.11",
+  "mistral-large@2411": "Mistral Large 24.11",
+  "ministral-3b": "Ministral 3B",
 
   // Bedrock models
   "meta.llama3-1-70b-instruct-v1:0": "Llama 3.1 70B",
@@ -312,6 +767,8 @@ const MODEL_DISPLAY_NAMES: { [key: string]: string } = {
   "anthropic.claude-v2:1": "Claude v2.1",
   "anthropic.claude-v2": "Claude v2",
   "anthropic.claude-v1": "Claude v1",
+  "anthropic.claude-3-7-sonnet-20250219-v1:0": "Claude 3.7 Sonnet",
+  "us.anthropic.claude-3-7-sonnet-20250219-v1:0": "Claude 3.7 Sonnet",
   "anthropic.claude-3-opus-20240229-v1:0": "Claude 3 Opus",
   "anthropic.claude-3-haiku-20240307-v1:0": "Claude 3 Haiku",
   "anthropic.claude-3-5-sonnet-20240620-v1:0": "Claude 3.5 Sonnet",
@@ -328,17 +785,24 @@ const MODEL_DISPLAY_NAMES: { [key: string]: string } = {
 };
 
 export function getDisplayNameForModel(modelName: string): string {
+  if (modelName.startsWith("bedrock/")) {
+    const parts = modelName.split("/");
+    const lastPart = parts[parts.length - 1];
+    return MODEL_DISPLAY_NAMES[lastPart] || lastPart;
+  }
+
   return MODEL_DISPLAY_NAMES[modelName] || modelName;
 }
 
 export const defaultModelsByProvider: { [name: string]: string[] } = {
-  openai: ["gpt-4", "gpt-4o", "gpt-4o-mini", "o1-mini", "o1-preview"],
+  openai: ["gpt-4", "gpt-4o", "gpt-4o-mini", "o3-mini", "o1-mini", "o1"],
   bedrock: [
     "meta.llama3-1-70b-instruct-v1:0",
     "meta.llama3-1-8b-instruct-v1:0",
     "anthropic.claude-3-opus-20240229-v1:0",
     "mistral.mistral-large-2402-v1:0",
     "anthropic.claude-3-5-sonnet-20241022-v2:0",
+    "anthropic.claude-3-7-sonnet-20250219-v1:0",
   ],
   anthropic: ["claude-3-opus-20240229", "claude-3-5-sonnet-20241022"],
 };

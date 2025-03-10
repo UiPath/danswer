@@ -1,8 +1,15 @@
 import {
   AnswerPiecePacket,
-  DanswerDocument,
+  OnyxDocument,
   Filters,
+  DocumentInfoPacket,
   StreamStopInfo,
+  ProSearchPacket,
+  SubQueryPiece,
+  AgentAnswerPiece,
+  SubQuestionPiece,
+  ExtendedToolResponse,
+  RefinedAnswerImprovement,
 } from "@/lib/search/interfaces";
 import { handleSSEStream } from "@/lib/search/streamingUtils";
 import { ChatState, FeedbackType } from "./types";
@@ -18,11 +25,15 @@ import {
   RetrievalType,
   StreamingError,
   ToolCallMetadata,
+  AgenticMessageResponseIDInfo,
 } from "./interfaces";
 import { Persona } from "../admin/assistants/interfaces";
 import { ReadonlyURLSearchParams } from "next/navigation";
 import { SEARCH_PARAM_NAMES } from "./searchParams";
 import { Settings } from "../admin/settings/interfaces";
+import { INTERNET_SEARCH_TOOL_ID } from "./tools/constants";
+import { SEARCH_TOOL_ID } from "./tools/constants";
+import { IIMAGE_GENERATION_TOOL_ID } from "./tools/constants";
 
 interface ChatRetentionInfo {
   chatRetentionDays: number;
@@ -37,10 +48,10 @@ export function getChatRetentionInfo(
 ): ChatRetentionInfo {
   // If `maximum_chat_retention_days` isn't set- never display retention warning.
   const chatRetentionDays = settings.maximum_chat_retention_days || 10000;
-  const createdDate = new Date(chatSession.time_created);
+  const updatedDate = new Date(chatSession.time_updated);
   const today = new Date();
   const daysFromCreation = Math.ceil(
-    (today.getTime() - createdDate.getTime()) / (1000 * 3600 * 24)
+    (today.getTime() - updatedDate.getTime()) / (1000 * 3600 * 24)
   );
   const daysUntilExpiration = chatRetentionDays - daysFromCreation;
   const showRetentionWarning =
@@ -54,7 +65,7 @@ export function getChatRetentionInfo(
   };
 }
 
-export async function updateModelOverrideForChatSession(
+export async function updateLlmOverrideForChatSession(
   chatSessionId: string,
   newAlternateModel: string
 ) {
@@ -66,6 +77,23 @@ export async function updateModelOverrideForChatSession(
     body: JSON.stringify({
       chat_session_id: chatSessionId,
       new_alternate_model: newAlternateModel,
+    }),
+  });
+  return response;
+}
+
+export async function updateTemperatureOverrideForChatSession(
+  chatSessionId: string,
+  newTemperature: number
+) {
+  const response = await fetch("/api/chat/update-chat-session-temperature", {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      chat_session_id: chatSessionId,
+      temperature_override: newTemperature,
     }),
   });
   return response;
@@ -89,7 +117,7 @@ export async function createChatSession(
     }
   );
   if (!createChatSessionResponse.ok) {
-    console.log(
+    console.error(
       `Failed to create chat session - ${createChatSessionResponse.status}`
     );
     throw Error("Failed to create chat session");
@@ -98,15 +126,37 @@ export async function createChatSession(
   return chatSessionResponseJson.chat_session_id;
 }
 
+export const isPacketType = (data: any): data is PacketType => {
+  return (
+    data.hasOwnProperty("answer_piece") ||
+    data.hasOwnProperty("top_documents") ||
+    data.hasOwnProperty("tool_name") ||
+    data.hasOwnProperty("file_ids") ||
+    data.hasOwnProperty("error") ||
+    data.hasOwnProperty("message_id") ||
+    data.hasOwnProperty("stop_reason") ||
+    data.hasOwnProperty("user_message_id") ||
+    data.hasOwnProperty("reserved_assistant_message_id")
+  );
+};
+
 export type PacketType =
   | ToolCallMetadata
   | BackendMessage
   | AnswerPiecePacket
+  | DocumentInfoPacket
   | DocumentsResponse
   | FileChatDisplay
   | StreamingError
   | MessageResponseIDInfo
-  | StreamStopInfo;
+  | StreamStopInfo
+  | ProSearchPacket
+  | SubQueryPiece
+  | AgentAnswerPiece
+  | SubQuestionPiece
+  | ExtendedToolResponse
+  | RefinedAnswerImprovement
+  | AgenticMessageResponseIDInfo;
 
 export async function* sendMessage({
   regenerate,
@@ -126,6 +176,7 @@ export async function* sendMessage({
   useExistingUserMessage,
   alternateAssistantId,
   signal,
+  useLanggraph,
 }: {
   regenerate: boolean;
   message: string;
@@ -144,10 +195,10 @@ export async function* sendMessage({
   useExistingUserMessage?: boolean;
   alternateAssistantId?: number;
   signal?: AbortSignal;
+  useLanggraph?: boolean;
 }): AsyncGenerator<PacketType, void, unknown> {
   const documentsAreSelected =
     selectedDocumentIds && selectedDocumentIds.length > 0;
-
   const body = JSON.stringify({
     alternate_assistant_id: alternateAssistantId,
     chat_session_id: chatSessionId,
@@ -185,6 +236,7 @@ export async function* sendMessage({
           }
         : null,
     use_existing_user_message: useExistingUserMessage,
+    use_agentic_search: useLanggraph ?? false,
   });
 
   const response = await fetch(`/api/chat/send-message`, {
@@ -200,10 +252,10 @@ export async function* sendMessage({
     throw new Error(`HTTP error! status: ${response.status}`);
   }
 
-  yield* handleSSEStream<PacketType>(response);
+  yield* handleSSEStream<PacketType>(response, signal);
 }
 
-export async function nameChatSession(chatSessionId: string, message: string) {
+export async function nameChatSession(chatSessionId: string) {
   const response = await fetch("/api/chat/rename-chat-session", {
     method: "PUT",
     headers: {
@@ -212,7 +264,6 @@ export async function nameChatSession(chatSessionId: string, message: string) {
     body: JSON.stringify({
       chat_session_id: chatSessionId,
       name: null,
-      first_message: message,
     }),
   });
   return response;
@@ -263,7 +314,6 @@ export async function renameChatSession(
     body: JSON.stringify({
       chat_session_id: chatSessionId,
       name: newName,
-      first_message: null,
     }),
   });
   return response;
@@ -276,6 +326,16 @@ export async function deleteChatSession(chatSessionId: string) {
       method: "DELETE",
     }
   );
+  return response;
+}
+
+export async function deleteAllChatSessions() {
+  const response = await fetch(`/api/chat/delete-all-chat-sessions`, {
+    method: "DELETE",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  });
   return response;
 }
 
@@ -335,7 +395,7 @@ export function getCitedDocumentsFromMessage(message: Message) {
     return [];
   }
 
-  const documentsWithCitationKey: [string, DanswerDocument][] = [];
+  const documentsWithCitationKey: [string, OnyxDocument][] = [];
   Object.entries(message.citations).forEach(([citationKey, documentDbId]) => {
     const matchingDocument = message.documents!.find(
       (document) => document.db_doc_id === documentDbId
@@ -354,12 +414,12 @@ export function groupSessionsByDateRange(chatSessions: ChatSession[]) {
   const groups: Record<string, ChatSession[]> = {
     Today: [],
     "Previous 7 Days": [],
-    "Previous 30 Days": [],
-    "Over 30 days ago": [],
+    "Previous 30 days": [],
+    "Over 30 days": [],
   };
 
   chatSessions.forEach((chatSession) => {
-    const chatSessionDate = new Date(chatSession.time_created);
+    const chatSessionDate = new Date(chatSession.time_updated);
 
     const diffTime = today.getTime() - chatSessionDate.getTime();
     const diffDays = diffTime / (1000 * 3600 * 24); // Convert time difference to days
@@ -369,9 +429,9 @@ export function groupSessionsByDateRange(chatSessions: ChatSession[]) {
     } else if (diffDays <= 7) {
       groups["Previous 7 Days"].push(chatSession);
     } else if (diffDays <= 30) {
-      groups["Previous 30 Days"].push(chatSession);
+      groups["Previous 30 days"].push(chatSession);
     } else {
-      groups["Over 30 days ago"].push(chatSession);
+      groups["Over 30 days"].push(chatSession);
     }
   });
 
@@ -409,15 +469,20 @@ export function processRawChatHistory(
     } else {
       retrievalType = RetrievalType.None;
     }
+    const subQuestions = messageInfo.sub_questions?.map((q) => ({
+      ...q,
+      is_complete: true,
+    }));
 
     const message: Message = {
       messageId: messageInfo.message_id,
       message: messageInfo.message,
       type: messageInfo.message_type as "user" | "assistant",
       files: messageInfo.files,
-      alternateAssistantID: messageInfo.alternate_assistant_id
-        ? Number(messageInfo.alternate_assistant_id)
-        : null,
+      alternateAssistantID:
+        messageInfo.alternate_assistant_id !== null
+          ? Number(messageInfo.alternate_assistant_id)
+          : null,
       // only include these fields if this is an assistant message so that
       // this is identical to what is computed at streaming time
       ...(messageInfo.message_type === "assistant"
@@ -433,6 +498,10 @@ export function processRawChatHistory(
       childrenMessageIds: [],
       latestChildMessageId: messageInfo.latest_child_message,
       overridden_model: messageInfo.overridden_model,
+      sub_questions: subQuestions,
+      isImprovement:
+        (messageInfo.refined_answer_improvement as unknown as boolean) || false,
+      is_agentic: messageInfo.is_agentic,
     };
 
     messages.set(messageInfo.message_id, message);
@@ -481,6 +550,7 @@ export function buildLatestMessageChain(
     }
   }
 
+  //
   // remove system message
   if (finalMessageList.length > 0 && finalMessageList[0].type === "system") {
     finalMessageList = finalMessageList.slice(1);
@@ -562,14 +632,14 @@ export function personaIncludesRetrieval(selectedPersona: Persona) {
   return selectedPersona.tools.some(
     (tool) =>
       tool.in_code_tool_id &&
-      ["SearchTool", "InternetSearchTool"].includes(tool.in_code_tool_id)
+      [SEARCH_TOOL_ID, INTERNET_SEARCH_TOOL_ID].includes(tool.in_code_tool_id)
   );
 }
 
 export function personaIncludesImage(selectedPersona: Persona) {
   return selectedPersona.tools.some(
     (tool) =>
-      tool.in_code_tool_id && tool.in_code_tool_id == "ImageGenerationTool"
+      tool.in_code_tool_id && tool.in_code_tool_id == IIMAGE_GENERATION_TOOL_ID
   );
 }
 
@@ -641,14 +711,15 @@ export async function useScrollonStream({
   endDivRef,
   debounceNumber,
   mobile,
+  enableAutoScroll,
 }: {
   chatState: ChatState;
   scrollableDivRef: RefObject<HTMLDivElement>;
-  waitForScrollRef: RefObject<boolean>;
   scrollDist: MutableRefObject<number>;
   endDivRef: RefObject<HTMLDivElement>;
   debounceNumber: number;
   mobile?: boolean;
+  enableAutoScroll?: boolean;
 }) {
   const mobileDistance = 900; // distance that should "engage" the scroll
   const desktopDistance = 500; // distance that should "engage" the scroll
@@ -661,6 +732,10 @@ export async function useScrollonStream({
   const previousScroll = useRef<number>(0);
 
   useEffect(() => {
+    if (!enableAutoScroll) {
+      return;
+    }
+
     if (chatState != "input" && scrollableDivRef && scrollableDivRef.current) {
       const newHeight: number = scrollableDivRef.current?.scrollTop!;
       const heightDifference = newHeight - previousScroll.current;
@@ -718,7 +793,7 @@ export async function useScrollonStream({
 
   // scroll on end of stream if within distance
   useEffect(() => {
-    if (scrollableDivRef?.current && chatState == "input") {
+    if (scrollableDivRef?.current && chatState == "input" && enableAutoScroll) {
       if (scrollDist.current < distance - 50) {
         scrollableDivRef?.current?.scrollBy({
           left: 0,

@@ -17,72 +17,82 @@ interface FullSearchBarProps {
   showingSidebar: boolean;
 }
 
+import {
+  TooltipProvider,
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+} from "@/components/ui/tooltip";
 import { useRef } from "react";
 import { SendIcon } from "../icons/icons";
 import { Separator } from "@/components/ui/separator";
 import { CustomTooltip } from "../tooltip/CustomTooltip";
 import KeyboardSymbol from "@/lib/browserUtilities";
-import { HorizontalSourceSelector } from "./filtering/Filters";
 import { CCPairBasicInfo, DocumentSet, Tag } from "@/lib/types";
+import { HorizontalSourceSelector } from "./filtering/HorizontalSourceSelector";
 
 export const AnimatedToggle = ({
   isOn,
   handleToggle,
+  direction = "top",
 }: {
   isOn: boolean;
   handleToggle: () => void;
+  direction?: "bottom" | "top";
 }) => {
   const commandSymbol = KeyboardSymbol();
   const containerRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
 
   return (
-    <CustomTooltip
-      light
-      large
-      content={
-        <div className="bg-white my-auto p-6 rounded-lg w-full">
-          <h2 className="text-xl text-text-800 font-bold mb-2">
-            Agentic Search
-          </h2>
-          <p className="text-text-700 text-sm mb-4">
-            Our most powerful search, have an AI agent guide you to pinpoint
-            exactly what you&apos;re looking for.
-          </p>
-          <Separator />
-          <h2 className="text-xl text-text-800 font-bold mb-2">Fast Search</h2>
-          <p className="text-text-700 text-sm mb-4">
-            Get quality results immediately, best suited for instant access to
-            your documents.
-          </p>
-          <p className="mt-2 flex text-xs">Shortcut: ({commandSymbol}/)</p>
-        </div>
-      }
-    >
-      <div
-        ref={containerRef}
-        className="my-auto ml-auto flex justify-end items-center cursor-pointer"
-        onClick={handleToggle}
-      >
-        <div ref={contentRef} className="flex items-center">
-          {/* Toggle switch */}
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
           <div
-            className={`
-            w-10 h-6 flex items-center rounded-full p-1 transition-all duration-300 ease-in-out 
-            ${isOn ? "bg-toggled-background" : "bg-untoggled-background"}
-          `}
+            ref={containerRef}
+            className="my-auto ml-auto flex justify-end items-center cursor-pointer"
+            onClick={handleToggle}
           >
-            <div
-              className={`
-              bg-white w-4 h-4 rounded-full shadow-md transform transition-all duration-300 ease-in-out
-              ${isOn ? "translate-x-4" : ""}
-            `}
-            ></div>
+            <div ref={contentRef} className="flex items-center">
+              <div
+                className={`
+                w-10 h-6 flex items-center rounded-full p-1 transition-all duration-300 ease-in-out 
+                ${isOn ? "bg-toggled-background" : "bg-untoggled-background"}
+              `}
+              >
+                <div
+                  className={`
+                  bg-white w-4 h-4 rounded-full shadow-md transform transition-all duration-300 ease-in-out
+                  ${isOn ? "translate-x-4" : ""}
+                `}
+                ></div>
+              </div>
+              <p className="ml-2 text-sm">Pro</p>
+            </div>
           </div>
-          <p className="ml-2 text-sm">Agentic</p>
-        </div>
-      </div>
-    </CustomTooltip>
+        </TooltipTrigger>
+        <TooltipContent side={direction} backgroundColor="bg-background-200">
+          <div className="bg-white my-auto p-6 rounded-lg max-w-sm">
+            <h2 className="text-xl text-text-800 font-bold mb-2">
+              Agentic Search
+            </h2>
+            <p className="text-text-700 text-sm mb-4">
+              Our most powerful search, have an AI agent guide you to pinpoint
+              exactly what you&apos;re looking for.
+            </p>
+            <Separator />
+            <h2 className="text-xl text-text-800 font-bold mb-2">
+              Fast Search
+            </h2>
+            <p className="text-text-700 text-sm mb-4">
+              Get quality results immediately, best suited for instant access to
+              your documents.
+            </p>
+            <p className="mt-2 flex text-xs">Shortcut: ({commandSymbol}/)</p>
+          </div>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   );
 };
 
@@ -211,12 +221,12 @@ export const FullSearchBar = ({
               className="flex my-auto cursor-pointer"
             >
               <SendIcon
-                size={28}
-                className={`text-emphasis ${
-                  disabled || !query
-                    ? "bg-disabled-submit-background"
-                    : "bg-submit-background"
-                } text-white p-1 rounded-full`}
+                size={22}
+                className={`text-neutral-50 dark:text-neutral-900 p-1 my-auto rounded-full ${
+                  query
+                    ? "bg-neutral-900 dark:bg-neutral-50"
+                    : "bg-neutral-500 dark:bg-neutral-400"
+                }`}
               />
             </button>
           </div>
@@ -258,7 +268,7 @@ export const SearchBar = ({ query, setQuery, onSearch }: SearchBarProps) => {
   return (
     <div className="flex text-text-chatbar justify-center">
       <div className="flex items-center w-full opacity-100 border-2 border-border rounded-lg px-4 py-2 focus-within:border-accent bg-background-search">
-        <MagnifyingGlass className="text-emphasis" />
+        <MagnifyingGlass className="text-text-darker" />
         <textarea
           autoFocus
           className="flex-grow ml-2 h-6 placeholder:text-text-chatbar-subtle outline-none placeholder-default overflow-hidden whitespace-normal resize-none"

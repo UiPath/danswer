@@ -6,16 +6,12 @@ import { UserGroupCreationForm } from "./UserGroupCreationForm";
 import { usePopup } from "@/components/admin/connectors/Popup";
 import { useState } from "react";
 import { ThreeDotsLoader } from "@/components/Loading";
-import {
-  useConnectorCredentialIndexingStatus,
-  useUserGroups,
-  useUsers,
-} from "@/lib/hooks";
+import { useConnectorStatus, useUserGroups, useUsers } from "@/lib/hooks";
 import { AdminPageTitle } from "@/components/admin/Title";
 import { Button } from "@/components/ui/button";
 
 import { useUser } from "@/components/user/UserProvider";
-import { Separator } from "@/components/ui/separator";
+import CreateButton from "@/components/ui/createButton";
 
 const Main = () => {
   const { popup, setPopup } = usePopup();
@@ -27,18 +23,15 @@ const Main = () => {
     data: ccPairs,
     isLoading: isCCPairsLoading,
     error: ccPairsError,
-  } = useConnectorCredentialIndexingStatus();
+  } = useConnectorStatus();
 
   const {
     data: users,
     isLoading: userIsLoading,
     error: usersError,
-  } = useUsers();
+  } = useUsers({ includeApiKeys: true });
 
-  const { isLoadingUser, isAdmin } = useUser();
-  if (isLoadingUser) {
-    return <></>;
-  }
+  const { isAdmin } = useUser();
 
   if (isLoading || isCCPairsLoading || userIsLoading) {
     return <ThreeDotsLoader />;
@@ -60,18 +53,13 @@ const Main = () => {
     <>
       {popup}
       {isAdmin && (
-        <div className="my-3">
-          <Button
-            size="sm"
-            variant="navigate"
-            onClick={() => setShowForm(true)}
-          >
-            Create New User Group
-          </Button>
-        </div>
+        <CreateButton
+          onClick={() => setShowForm(true)}
+          text="Create New User Group"
+        />
       )}
       {data.length > 0 && (
-        <div>
+        <div className="mt-2">
           <UserGroupsTable
             userGroups={data}
             setPopup={setPopup}

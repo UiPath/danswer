@@ -1,4 +1,4 @@
-import React, { Dispatch, FC, SetStateAction } from "react";
+import React, { Dispatch, FC, SetStateAction, useEffect } from "react";
 import { AdminBooleanFormField } from "@/components/credentials/CredentialFields";
 import { FileUpload } from "@/components/admin/connectors/FileUpload";
 import { TabOption } from "@/lib/connectors/connectors";
@@ -16,12 +16,11 @@ import {
   TabsList,
   TabsTrigger,
 } from "@/components/ui/fully_wrapped_tabs";
+import { useFormikContext } from "formik";
 
 interface TabsFieldProps {
   tabField: TabOption;
   values: any;
-  selectedFiles: File[];
-  setSelectedFiles: Dispatch<SetStateAction<File[]>>;
   connector: ConfigurableSources;
   currentCredential: Credential<any> | null;
 }
@@ -29,8 +28,6 @@ interface TabsFieldProps {
 const TabsField: FC<TabsFieldProps> = ({
   tabField,
   values,
-  selectedFiles,
-  setSelectedFiles,
   connector,
   currentCredential,
 }) => {
@@ -101,8 +98,6 @@ const TabsField: FC<TabsFieldProps> = ({
                     key={subField.name}
                     field={subField}
                     values={values}
-                    selectedFiles={selectedFiles}
-                    setSelectedFiles={setSelectedFiles}
                     connector={connector}
                     currentCredential={currentCredential}
                   />
@@ -119,8 +114,6 @@ const TabsField: FC<TabsFieldProps> = ({
 interface RenderFieldProps {
   field: any;
   values: any;
-  selectedFiles: File[];
-  setSelectedFiles: Dispatch<SetStateAction<File[]>>;
   connector: ConfigurableSources;
   currentCredential: Credential<any> | null;
 }
@@ -128,11 +121,11 @@ interface RenderFieldProps {
 export const RenderField: FC<RenderFieldProps> = ({
   field,
   values,
-  selectedFiles,
-  setSelectedFiles,
   connector,
   currentCredential,
 }) => {
+  const { setFieldValue } = useFormikContext<any>(); // Get Formik's context functions
+
   const label =
     typeof field.label === "function"
       ? field.label(currentCredential)
@@ -141,14 +134,28 @@ export const RenderField: FC<RenderFieldProps> = ({
     typeof field.description === "function"
       ? field.description(currentCredential)
       : field.description;
+  const disabled =
+    typeof field.disabled === "function"
+      ? field.disabled(currentCredential)
+      : (field.disabled ?? false);
+  const initialValue =
+    typeof field.initial === "function"
+      ? field.initial(currentCredential)
+      : (field.initial ?? "");
+
+  // if initialValue exists, prepopulate the field with it
+  useEffect(() => {
+    const field_value = values[field.name];
+    if (initialValue && field_value === undefined) {
+      setFieldValue(field.name, initialValue);
+    }
+  }, [field.name, initialValue, setFieldValue, values]);
 
   if (field.type === "tab") {
     return (
       <TabsField
         tabField={field}
         values={values}
-        selectedFiles={selectedFiles}
-        setSelectedFiles={setSelectedFiles}
         connector={connector}
         currentCredential={currentCredential}
       />
@@ -157,15 +164,10 @@ export const RenderField: FC<RenderFieldProps> = ({
 
   const fieldContent = (
     <>
-      {field.type === "file" ? (
-        <FileUpload
-          name={field.name}
-          selectedFiles={selectedFiles}
-          setSelectedFiles={setSelectedFiles}
-        />
-      ) : field.type === "zip" ? (
+      {field.type === "zip" || field.type === "file" ? (
         <FileInput
           name={field.name}
+          isZip={field.type === "zip"}
           label={label}
           optional={field.optional}
           description={description}
@@ -193,6 +195,8 @@ export const RenderField: FC<RenderFieldProps> = ({
           subtext={description}
           name={field.name}
           label={label}
+          disabled={disabled}
+          onChange={(e) => setFieldValue(field.name, e.target.value)}
         />
       ) : field.type === "text" ? (
         <TextFormField
@@ -203,6 +207,8 @@ export const RenderField: FC<RenderFieldProps> = ({
           name={field.name}
           isTextArea={field.isTextArea || false}
           defaultHeight={"h-15"}
+          disabled={disabled}
+          onChange={(e) => setFieldValue(field.name, e.target.value)}
         />
       ) : field.type === "string_tab" ? (
         <div className="text-center">{description}</div>

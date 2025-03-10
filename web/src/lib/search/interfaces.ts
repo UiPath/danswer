@@ -15,6 +15,54 @@ export const SearchType = {
 };
 export type SearchType = (typeof SearchType)[keyof typeof SearchType];
 
+export interface ProSearchPacket {
+  sub_question?: string;
+  answer_piece?: string;
+  sub_query?: string;
+  tool_response?: ToolResponse;
+  level: number;
+  level_question_num: number;
+}
+
+export interface RefinedAnswerImprovement {
+  refined_answer_improvement: boolean;
+}
+
+export interface AgentAnswerPiece {
+  answer_piece: string;
+  level: number;
+  level_question_num: number;
+  answer_type: "agent_sub_answer" | "agent_level_answer";
+}
+
+export interface SubQuestionPiece {
+  sub_question: string;
+  level: number;
+  level_question_num: number;
+}
+
+export interface SubQueryPiece {
+  sub_query: string;
+  level: number;
+  level_question_num: number;
+  query_id: number;
+}
+
+export interface SubQuestionSearchDoc {
+  context_docs: OnyxDocument[];
+  level_question_num: number;
+  level: number;
+}
+
+export interface ToolResponse {
+  id?: string | null;
+  response?: any;
+}
+export interface ExtendedToolResponse extends ToolResponse {
+  level: number;
+  level_question_num: number;
+}
+
 export interface AnswerPiecePacket {
   answer_piece: string;
 }
@@ -26,6 +74,9 @@ export enum StreamStopReason {
 
 export interface StreamStopInfo {
   stop_reason: StreamStopReason;
+  level?: number;
+  level_question_num?: number;
+  stream_type?: "sub_answer" | "sub_questions" | "main_answer";
 }
 
 export interface ErrorMessagePacket {
@@ -45,7 +96,7 @@ export interface QuotesInfoPacket {
   quotes: Quote[];
 }
 
-export interface DanswerDocument {
+export interface OnyxDocument {
   document_id: string;
   link: string;
   source_type: ValidSources;
@@ -63,16 +114,20 @@ export interface DanswerDocument {
   validationState?: null | "good" | "bad";
 }
 
-export interface SearchDanswerDocument extends DanswerDocument {
+export interface LoadedOnyxDocument extends OnyxDocument {
+  icon: React.FC<{ size?: number; className?: string }>;
+}
+
+export interface SearchOnyxDocument extends OnyxDocument {
   is_relevant: boolean;
   relevance_explanation: string;
 }
 
-export interface FilteredDanswerDocument extends DanswerDocument {
+export interface FilteredOnyxDocument extends OnyxDocument {
   included: boolean;
 }
 export interface DocumentInfoPacket {
-  top_documents: DanswerDocument[];
+  top_documents: OnyxDocument[];
   predicted_flow: FlowType | null;
   predicted_search: SearchType | null;
   time_cutoff: string | null;
@@ -97,7 +152,7 @@ export interface SearchResponse {
   suggestedFlowType: FlowType | null;
   answer: string | null;
   quotes: Quote[] | null;
-  documents: SearchDanswerDocument[] | null;
+  documents: SearchOnyxDocument[] | null;
   selectedDocIndices: number[] | null;
   error: string | null;
   messageId: number | null;
@@ -121,6 +176,7 @@ export interface SourceMetadata {
   shortDescription?: string;
   internalName: ValidSources;
   adminUrl: string;
+  oauthSupported?: boolean;
 }
 
 export interface SearchDefaultOverrides {
@@ -145,7 +201,7 @@ export interface SearchRequestArgs {
   updateDocumentRelevance: (relevance: any) => void;
   updateCurrentAnswer: (val: string) => void;
   updateQuotes: (quotes: Quote[]) => void;
-  updateDocs: (documents: DanswerDocument[]) => void;
+  updateDocs: (documents: OnyxDocument[]) => void;
   updateSelectedDocIndices: (docIndices: number[]) => void;
   updateSuggestedSearchType: (searchType: SearchType) => void;
   updateSuggestedFlowType: (flowType: FlowType) => void;

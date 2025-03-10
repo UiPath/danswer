@@ -14,8 +14,7 @@ import Text from "@/components/ui/text";
 import Title from "@/components/ui/title";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
-import { useConnectorCredentialIndexingStatus } from "@/lib/hooks";
-import { ConnectorIndexingStatus, DocumentSet } from "@/lib/types";
+import { DocumentSet } from "@/lib/types";
 import { useState } from "react";
 import { useDocumentSets } from "./hooks";
 import { ConnectorTitle } from "@/components/admin/connectors/ConnectorTitle";
@@ -41,6 +40,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import CreateButton from "@/components/ui/createButton";
 
 const numToDisplay = 50;
 
@@ -55,7 +55,7 @@ const EditRow = ({
 
   if (!isEditable) {
     return (
-      <div className="text-emphasis font-medium my-auto p-1">
+      <div className="text-text-darkerfont-medium my-auto p-1">
         {documentSet.name}
       </div>
     );
@@ -68,7 +68,7 @@ const EditRow = ({
           <TooltipTrigger asChild>
             <div
               className={`
-              text-emphasis font-medium my-auto p-1 hover:bg-hover-light flex items-center select-none
+              text-text-darkerfont-medium my-auto p-1 hover:bg-accent-background flex items-center select-none
               ${documentSet.is_up_to_date ? "cursor-pointer" : "cursor-default"}
             `}
               style={{ wordBreak: "normal", overflowWrap: "break-word" }}
@@ -83,7 +83,7 @@ const EditRow = ({
             </div>
           </TooltipTrigger>
           {!documentSet.is_up_to_date && (
-            <TooltipContent maxWidth="max-w-sm">
+            <TooltipContent width="max-w-sm">
               <div className="flex break-words break-keep whitespace-pre-wrap items-start">
                 <InfoIcon className="mr-2 mt-0.5" />
                 Cannot update while syncing! Wait for the sync to finish, then
@@ -99,7 +99,6 @@ const EditRow = ({
 
 interface DocumentFeedbackTableProps {
   documentSets: DocumentSet[];
-  ccPairs: ConnectorIndexingStatus<any, any>[];
   refresh: () => void;
   refreshEditable: () => void;
   setPopup: (popupSpec: PopupSpec | null) => void;
@@ -214,7 +213,7 @@ const DocumentSetTable = ({
                       </Badge>
                     ) : (
                       <Badge
-                        variant={isEditable ? "in_progress" : "outline"}
+                        variant={isEditable ? "private" : "default"}
                         icon={FiLock}
                       >
                         Private
@@ -275,6 +274,7 @@ const Main = () => {
     error: documentSetsError,
     refreshDocumentSets,
   } = useDocumentSets();
+
   const {
     data: editableDocumentSets,
     isLoading: isEditableDocumentSetsLoading,
@@ -282,17 +282,7 @@ const Main = () => {
     refreshDocumentSets: refreshEditableDocumentSets,
   } = useDocumentSets(true);
 
-  const {
-    data: ccPairs,
-    isLoading: isCCPairsLoading,
-    error: ccPairsError,
-  } = useConnectorCredentialIndexingStatus();
-
-  if (
-    isDocumentSetsLoading ||
-    isCCPairsLoading ||
-    isEditableDocumentSetsLoading
-  ) {
+  if (isDocumentSetsLoading || isEditableDocumentSetsLoading) {
     return <ThreeDotsLoader />;
   }
 
@@ -304,25 +294,25 @@ const Main = () => {
     return <div>Error: {editableDocumentSetsError}</div>;
   }
 
-  if (ccPairsError || !ccPairs) {
-    return <div>Error: {ccPairsError}</div>;
-  }
-
   return (
     <div className="mb-8">
       {popup}
       <Text className="mb-3">
         <b>Document Sets</b> allow you to group logically connected documents
         into a single bundle. These can then be used as a filter when performing
-        searches to control the scope of information Danswer searches over.
+        searches to control the scope of information Onyx searches over.
       </Text>
 
       <div className="mb-3"></div>
 
       <div className="flex mb-6">
-        <Link href="/admin/documents/sets/new">
+        <CreateButton
+          href="/admin/documents/sets/new"
+          text="New Document Set"
+        />
+        {/* <Link href="/admin/documents/sets/new">
           <Button variant="navigate">New Document Set</Button>
-        </Link>
+        </Link> */}
       </div>
 
       {documentSets.length > 0 && (
@@ -331,7 +321,6 @@ const Main = () => {
           <DocumentSetTable
             documentSets={documentSets}
             editableDocumentSets={editableDocumentSets}
-            ccPairs={ccPairs}
             refresh={refreshDocumentSets}
             refreshEditable={refreshEditableDocumentSets}
             setPopup={setPopup}

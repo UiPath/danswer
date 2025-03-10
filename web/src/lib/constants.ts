@@ -18,9 +18,7 @@ export const NEXT_PUBLIC_DO_NOT_USE_TOGGLE_OFF_DANSWER_POWERED =
   process.env.NEXT_PUBLIC_DO_NOT_USE_TOGGLE_OFF_DANSWER_POWERED?.toLowerCase() ===
   "true";
 
-export const NEXT_PUBLIC_NEW_CHAT_DIRECTS_TO_SAME_PERSONA =
-  process.env.NEXT_PUBLIC_NEW_CHAT_DIRECTS_TO_SAME_PERSONA?.toLowerCase() ===
-  "true";
+export const TENANT_ID_COOKIE_NAME = "onyx_tid";
 
 export const GMAIL_AUTH_IS_ADMIN_COOKIE_NAME = "gmail_auth_is_admin";
 
@@ -38,8 +36,9 @@ export const LOGOUT_DISABLED =
 
 // Default sidebar open is true if the environment variable is not set
 export const NEXT_PUBLIC_DEFAULT_SIDEBAR_OPEN =
-  process.env.NEXT_PUBLIC_DEFAULT_SIDEBAR_OPEN?.toLowerCase() === "true" ??
-  true;
+  process.env.NEXT_PUBLIC_DEFAULT_SIDEBAR_OPEN?.toLowerCase() === "false"
+    ? false
+    : true;
 
 export const TOGGLED_CONNECTORS_COOKIE_NAME = "toggled_connectors";
 
@@ -76,3 +75,19 @@ export const REGISTRATION_URL =
 
 export const SERVER_SIDE_ONLY__CLOUD_ENABLED =
   process.env.NEXT_PUBLIC_CLOUD_ENABLED?.toLowerCase() === "true";
+
+export const NEXT_PUBLIC_FORGOT_PASSWORD_ENABLED =
+  process.env.NEXT_PUBLIC_FORGOT_PASSWORD_ENABLED?.toLowerCase() === "true";
+
+export const NEXT_PUBLIC_TEST_ENV =
+  process.env.NEXT_PUBLIC_TEST_ENV?.toLowerCase() === "true";
+
+export const NEXT_PUBLIC_ENABLE_CHROME_EXTENSION =
+  process.env.NEXT_PUBLIC_ENABLE_CHROME_EXTENSION?.toLowerCase() === "true";
+
+export const NEXT_PUBLIC_INCLUDE_ERROR_POPUP_SUPPORT_LINK =
+  process.env.NEXT_PUBLIC_INCLUDE_ERROR_POPUP_SUPPORT_LINK?.toLowerCase() ===
+  "true";
+
+export const NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY =
+  process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY;

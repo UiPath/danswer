@@ -1,6 +1,6 @@
 import { Button } from "@/components/Button";
 import { PopupSpec } from "@/components/admin/connectors/Popup";
-import { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useSWRConfig } from "swr";
 import * as Yup from "yup";
 import { useRouter } from "next/navigation";
@@ -17,13 +17,18 @@ import {
   GoogleDriveCredentialJson,
   GoogleDriveServiceAccountCredentialJson,
 } from "@/lib/connectors/credentials";
+import { refreshAllGoogleData } from "@/lib/googleConnector";
+import { ValidSources } from "@/lib/types";
+import { buildSimilarCredentialInfoURL } from "@/app/admin/connector/[ccPairId]/lib";
 
 type GoogleDriveCredentialJsonTypes = "authorized_user" | "service_account";
 
 export const DriveJsonUpload = ({
   setPopup,
+  onSuccess,
 }: {
   setPopup: (popupSpec: PopupSpec | null) => void;
+  onSuccess?: () => void;
 }) => {
   const { mutate } = useSWRConfig();
   const [credentialJsonStr, setCredentialJsonStr] = useState<
@@ -34,9 +39,9 @@ export const DriveJsonUpload = ({
     <>
       <input
         className={
-          "mr-3 text-sm text-gray-900 border border-gray-300 " +
-          "cursor-pointer bg-backgrournd dark:text-gray-400 focus:outline-none " +
-          "dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400"
+          "mr-3 text-sm text-text-900 border border-background-300 " +
+          "cursor-pointer bg-backgrournd dark:text-text-400 focus:outline-none " +
+          "dark:bg-background-700 dark:border-background-600 dark:placeholder-text-400"
         }
         type="file"
         accept=".json"
@@ -62,7 +67,6 @@ export const DriveJsonUpload = ({
       <Button
         disabled={!credentialJsonStr}
         onClick={async () => {
-          // check if the JSON is a app credential or a service account credential
           let credentialFileType: GoogleDriveCredentialJsonTypes;
           try {
             const appCredentialJson = JSON.parse(credentialJsonStr!);
@@ -99,6 +103,10 @@ export const DriveJsonUpload = ({
                 message: "Successfully uploaded app credentials",
                 type: "success",
               });
+              mutate("/api/manage/admin/connector/google-drive/app-credential");
+              if (onSuccess) {
+                onSuccess();
+              }
             } else {
               const errorMsg = await response.text();
               setPopup({
@@ -106,7 +114,6 @@ export const DriveJsonUpload = ({
                 type: "error",
               });
             }
-            mutate("/api/manage/admin/connector/google-drive/app-credential");
           }
 
           if (credentialFileType === "service_account") {
@@ -122,19 +129,22 @@ export const DriveJsonUpload = ({
             );
             if (response.ok) {
               setPopup({
-                message: "Successfully uploaded app credentials",
+                message: "Successfully uploaded service account key",
                 type: "success",
               });
+              mutate(
+                "/api/manage/admin/connector/google-drive/service-account-key"
+              );
+              if (onSuccess) {
+                onSuccess();
+              }
             } else {
               const errorMsg = await response.text();
               setPopup({
-                message: `Failed to upload app credentials - ${errorMsg}`,
+                message: `Failed to upload service account key - ${errorMsg}`,
                 type: "error",
               });
             }
-            mutate(
-              "/api/manage/admin/connector/google-drive/service-account-key"
-            );
           }
         }}
       >
@@ -149,6 +159,7 @@ interface DriveJsonUploadSectionProps {
   appCredentialData?: { client_id: string };
   serviceAccountCredentialData?: { service_account_email: string };
   isAdmin: boolean;
+  onSuccess?: () => void;
 }
 
 export const DriveJsonUploadSection = ({
@@ -156,17 +167,36 @@ export const DriveJsonUploadSection = ({
   appCredentialData,
   serviceAccountCredentialData,
   isAdmin,
+  onSuccess,
 }: DriveJsonUploadSectionProps) => {
   const { mutate } = useSWRConfig();
   const router = useRouter();
+  const [localServiceAccountData, setLocalServiceAccountData] = useState(
+    serviceAccountCredentialData
+  );
+  const [localAppCredentialData, setLocalAppCredentialData] =
+    useState(appCredentialData);
 
-  if (serviceAccountCredentialData?.service_account_email) {
+  useEffect(() => {
+    setLocalServiceAccountData(serviceAccountCredentialData);
+    setLocalAppCredentialData(appCredentialData);
+  }, [serviceAccountCredentialData, appCredentialData]);
+
+  const handleSuccess = () => {
+    if (onSuccess) {
+      onSuccess();
+    } else {
+      refreshAllGoogleData(ValidSources.GoogleDrive);
+    }
+  };
+
+  if (localServiceAccountData?.service_account_email) {
     return (
       <div className="mt-2 text-sm">
         <div>
           Found existing service account key with the following <b>Email:</b>
           <p className="italic mt-1">
-            {serviceAccountCredentialData.service_account_email}
+            {localServiceAccountData.service_account_email}
           </p>
         </div>
         {isAdmin ? (
@@ -188,11 +218,15 @@ export const DriveJsonUploadSection = ({
                   mutate(
                     "/api/manage/admin/connector/google-drive/service-account-key"
                   );
+                  mutate(
+                    buildSimilarCredentialInfoURL(ValidSources.GoogleDrive)
+                  );
                   setPopup({
                     message: "Successfully deleted service account key",
                     type: "success",
                   });
-                  router.refresh();
+                  setLocalServiceAccountData(undefined);
+                  handleSuccess();
                 } else {
                   const errorMsg = await response.text();
                   setPopup({
@@ -216,12 +250,12 @@ export const DriveJsonUploadSection = ({
     );
   }
 
-  if (appCredentialData?.client_id) {
+  if (localAppCredentialData?.client_id) {
     return (
       <div className="mt-2 text-sm">
         <div>
           Found existing app credentials with the following <b>Client ID:</b>
-          <p className="italic mt-1">{appCredentialData.client_id}</p>
+          <p className="italic mt-1">{localAppCredentialData.client_id}</p>
         </div>
         {isAdmin ? (
           <>
@@ -242,10 +276,15 @@ export const DriveJsonUploadSection = ({
                   mutate(
                     "/api/manage/admin/connector/google-drive/app-credential"
                   );
+                  mutate(
+                    buildSimilarCredentialInfoURL(ValidSources.GoogleDrive)
+                  );
                   setPopup({
                     message: "Successfully deleted app credentials",
                     type: "success",
                   });
+                  setLocalAppCredentialData(undefined);
+                  handleSuccess();
                 } else {
                   const errorMsg = await response.text();
                   setPopup({
@@ -285,7 +324,7 @@ export const DriveJsonUploadSection = ({
         <a
           className="text-link"
           target="_blank"
-          href="https://docs.danswer.dev/connectors/google_drive#authorization"
+          href="https://docs.onyx.app/connectors/google_drive#authorization"
           rel="noreferrer"
         >
           here
@@ -297,58 +336,106 @@ export const DriveJsonUploadSection = ({
         Download the credentials JSON if choosing option (1) or the Service
         Account key JSON if chooosing option (2), and upload it here.
       </p>
-      <DriveJsonUpload setPopup={setPopup} />
+      <DriveJsonUpload setPopup={setPopup} onSuccess={handleSuccess} />
     </div>
   );
 };
 
 interface DriveCredentialSectionProps {
-  googleDrivePublicCredential?: Credential<GoogleDriveCredentialJson>;
+  googleDrivePublicUploadedCredential?: Credential<GoogleDriveCredentialJson>;
   googleDriveServiceAccountCredential?: Credential<GoogleDriveServiceAccountCredentialJson>;
   serviceAccountKeyData?: { service_account_email: string };
   appCredentialData?: { client_id: string };
   setPopup: (popupSpec: PopupSpec | null) => void;
   refreshCredentials: () => void;
-  connectorExists: boolean;
+  connectorAssociated: boolean;
   user: User | null;
 }
 
+async function handleRevokeAccess(
+  connectorAssociated: boolean,
+  setPopup: (popupSpec: PopupSpec | null) => void,
+  existingCredential:
+    | Credential<GoogleDriveCredentialJson>
+    | Credential<GoogleDriveServiceAccountCredentialJson>,
+  refreshCredentials: () => void
+) {
+  if (connectorAssociated) {
+    const message =
+      "Cannot revoke the Google Drive credential while any connector is still associated with the credential. " +
+      "Please delete all associated connectors, then try again.";
+    setPopup({
+      message: message,
+      type: "error",
+    });
+    return;
+  }
+
+  await adminDeleteCredential(existingCredential.id);
+  setPopup({
+    message: "Successfully revoked the Google Drive credential!",
+    type: "success",
+  });
+
+  refreshCredentials();
+}
+
 export const DriveAuthSection = ({
-  googleDrivePublicCredential,
+  googleDrivePublicUploadedCredential,
   googleDriveServiceAccountCredential,
   serviceAccountKeyData,
   appCredentialData,
   setPopup,
   refreshCredentials,
-  connectorExists,
+  connectorAssociated,
   user,
 }: DriveCredentialSectionProps) => {
   const router = useRouter();
+  const [localServiceAccountData, setLocalServiceAccountData] = useState(
+    serviceAccountKeyData
+  );
+  const [localAppCredentialData, setLocalAppCredentialData] =
+    useState(appCredentialData);
+  const [
+    localGoogleDrivePublicCredential,
+    setLocalGoogleDrivePublicCredential,
+  ] = useState(googleDrivePublicUploadedCredential);
+  const [
+    localGoogleDriveServiceAccountCredential,
+    setLocalGoogleDriveServiceAccountCredential,
+  ] = useState(googleDriveServiceAccountCredential);
+
+  useEffect(() => {
+    setLocalServiceAccountData(serviceAccountKeyData);
+    setLocalAppCredentialData(appCredentialData);
+    setLocalGoogleDrivePublicCredential(googleDrivePublicUploadedCredential);
+    setLocalGoogleDriveServiceAccountCredential(
+      googleDriveServiceAccountCredential
+    );
+  }, [
+    serviceAccountKeyData,
+    appCredentialData,
+    googleDrivePublicUploadedCredential,
+    googleDriveServiceAccountCredential,
+  ]);
 
   const existingCredential =
-    googleDrivePublicCredential || googleDriveServiceAccountCredential;
+    localGoogleDrivePublicCredential ||
+    localGoogleDriveServiceAccountCredential;
   if (existingCredential) {
     return (
       <>
         <p className="mb-2 text-sm">
-          <i>Existing credential already setup!</i>
+          <i>Uploaded and authenticated credential already exists!</i>
         </p>
         <Button
           onClick={async () => {
-            if (connectorExists) {
-              setPopup({
-                message:
-                  "Cannot revoke access to Google Drive while any connector is still setup. Please delete all connectors, then try again.",
-                type: "error",
-              });
-              return;
-            }
-            await adminDeleteCredential(existingCredential.id);
-            setPopup({
-              message: "Successfully revoked access to Google Drive!",
-              type: "success",
-            });
-            refreshCredentials();
+            handleRevokeAccess(
+              connectorAssociated,
+              setPopup,
+              existingCredential,
+              refreshCredentials
+            );
           }}
         >
           Revoke Access
@@ -357,7 +444,7 @@ export const DriveAuthSection = ({
     );
   }
 
-  if (serviceAccountKeyData?.service_account_email) {
+  if (localServiceAccountData?.service_account_email) {
     return (
       <div>
         <Formik
@@ -418,7 +505,7 @@ export const DriveAuthSection = ({
     );
   }
 
-  if (appCredentialData?.client_id) {
+  if (localAppCredentialData?.client_id) {
     return (
       <div className="text-sm mb-4">
         <p className="mb-2">
@@ -429,6 +516,7 @@ export const DriveAuthSection = ({
           onClick={async () => {
             const [authUrl, errorMsg] = await setupGoogleDriveOAuth({
               isAdmin: true,
+              name: "OAuth (uploaded)",
             });
             if (authUrl) {
               // cookie used by callback to determine where to finally redirect to
