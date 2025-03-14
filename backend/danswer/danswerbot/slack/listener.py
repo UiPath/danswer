@@ -100,6 +100,10 @@ def prefilter_requests(req: SocketModeRequest, client: SocketModeClient) -> bool
             channel_specific_logger.info("Ignoring message containing '!darwin'")
             return False
 
+        if re.search(r":announcement\d*:", msg):
+            channel_specific_logger.info("Ignoring message: contains the announcement emoji")
+            return False
+
         if (
             req.payload.setdefault("event", {}).get("user", "")
             == _OFFICIAL_SLACKBOT_USER_ID

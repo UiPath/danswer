@@ -241,7 +241,8 @@ def handle_message(
     else:
         persona = channel_config.persona if channel_config else None
 
-    if is_bot_msg:
+
+    if is_bot_msg and channel_name is None:
         command = message_info.command
         if command == "/personas":
             with Session(get_sqlalchemy_engine()) as db_session:
@@ -310,6 +311,9 @@ def handle_message(
                     thread_ts=message_ts_to_respond_to,
                 )
                 return
+    elif is_bot_msg and (command == "/personas" or command == "/current_persona"):
+        logger.info(f"The slash command was used in a channel, won't work")
+        return
 
     document_set_names: list[str] | None = None
     prompt = None
