@@ -3,6 +3,7 @@ from fastapi import Depends
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
+from danswer.auth.api_key import validate_api_key
 from danswer.auth.users import current_admin_user
 from danswer.danswerbot.slack.config import validate_channel_names
 from danswer.danswerbot.slack.tokens import fetch_tokens
@@ -24,7 +25,7 @@ from danswer.server.manage.models import SlackBotConfigCreationRequest
 from danswer.server.manage.models import SlackBotTokens
 
 
-router = APIRouter(prefix="/manage")
+router = APIRouter(prefix="/manage", dependencies=[Depends(validate_api_key)])
 
 
 def _form_channel_config(
