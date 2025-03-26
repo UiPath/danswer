@@ -21,11 +21,11 @@ from danswer.server.danswer_api.models import IngestionDocument
 from danswer.server.danswer_api.models import IngestionResult
 from danswer.utils.logger import setup_logger
 from ee.danswer.auth.users import api_key_dep
-
+from danswer.auth.api_key import validate_api_key
 logger = setup_logger()
 
 # not using /api to avoid confusion with nginx api path routing
-router = APIRouter(prefix="/danswer-api")
+router = APIRouter(prefix="/danswer-api", dependencies=[Depends(validate_api_key)])
 
 
 @router.get("/connector-docs/{cc_pair_id}")
