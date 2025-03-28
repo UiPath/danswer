@@ -9,8 +9,8 @@ from sqlalchemy import not_
 from sqlalchemy import or_
 from sqlalchemy import select
 from sqlalchemy import update
-from sqlalchemy.orm import Session
 from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import Session
 
 from danswer.auth.schemas import UserRole
 from danswer.db.constants import SLACK_BOT_PERSONA_PREFIX

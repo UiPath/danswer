@@ -172,8 +172,8 @@ def respond_in_thread(
                 )
                 if response.get("ok"):
                     success = True
-            except:
-                pass
+            except SlackApiError as e:
+                logger.exception(f"Failed to post message: {e}")
         if not success:
             raise RuntimeError(f"Failed to post message: {response}")
 

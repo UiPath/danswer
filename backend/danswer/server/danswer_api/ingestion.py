@@ -3,6 +3,7 @@ from fastapi import Depends
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
+from danswer.auth.api_key import validate_api_key
 from danswer.configs.constants import DocumentSource
 from danswer.connectors.models import Document
 from danswer.connectors.models import IndexAttemptMetadata
@@ -21,7 +22,7 @@ from danswer.server.danswer_api.models import IngestionDocument
 from danswer.server.danswer_api.models import IngestionResult
 from danswer.utils.logger import setup_logger
 from ee.danswer.auth.users import api_key_dep
-from danswer.auth.api_key import validate_api_key
+
 logger = setup_logger()
 
 # not using /api to avoid confusion with nginx api path routing

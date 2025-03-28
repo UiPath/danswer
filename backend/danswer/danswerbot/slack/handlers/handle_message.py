@@ -1,8 +1,8 @@
 import datetime
 import functools
 import logging
-from collections.abc import Callable
 import re
+from collections.abc import Callable
 from typing import Any
 from typing import cast
 from typing import Optional
@@ -24,7 +24,6 @@ from danswer.configs.danswerbot_configs import DANSWER_BOT_FEEDBACK_REMINDER
 from danswer.configs.danswerbot_configs import DANSWER_BOT_NUM_RETRIES
 from danswer.configs.danswerbot_configs import DANSWER_BOT_TARGET_CHUNK_PERCENTAGE
 from danswer.configs.danswerbot_configs import DANSWER_BOT_USE_QUOTES
-from danswer.configs.danswerbot_configs import DANSWER_FOLLOWUP_EMOJI
 from danswer.configs.danswerbot_configs import DANSWER_REACT_EMOJI
 from danswer.configs.danswerbot_configs import DISABLE_DANSWER_BOT_FILTER_DETECT
 from danswer.configs.danswerbot_configs import ENABLE_DANSWERBOT_REFLEXION
@@ -241,7 +240,6 @@ def handle_message(
     else:
         persona = channel_config.persona if channel_config else None
 
-
     if is_bot_msg and channel_name is None:
         command = message_info.command
         if command == "/personas":
@@ -312,7 +310,7 @@ def handle_message(
                 )
                 return
     elif is_bot_msg and (command == "/personas" or command == "/current_persona"):
-        logger.info(f"The slash command was used in a channel, won't work")
+        logger.info("The slash command was used in a channel, won't work")
         return
 
     document_set_names: list[str] | None = None
@@ -354,10 +352,9 @@ def handle_message(
         if not bypass_filters and "answer_filters" in channel_conf:
             reflexion = "well_answered_postfilter" in channel_conf["answer_filters"]
 
-            if (
-                "questionmark_prefilter" in channel_conf["answer_filters"]
-                and not contains_questionmark_outside_links(messages[-1].message)
-            ):
+            if "questionmark_prefilter" in channel_conf[
+                "answer_filters"
+            ] and not contains_questionmark_outside_links(messages[-1].message):
                 logger.info(
                     "Skipping message since it does not contain a question mark"
                 )

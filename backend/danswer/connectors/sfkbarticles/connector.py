@@ -1,9 +1,10 @@
 import os
-import requests
-
 from datetime import datetime
 from datetime import timezone
-from typing import Any, Tuple
+from typing import Any
+from typing import Tuple
+
+import requests
 
 from danswer.configs.app_configs import INDEX_BATCH_SIZE
 from danswer.configs.constants import DocumentSource
@@ -38,10 +39,10 @@ class SfKbArticlesConnector(LoadConnector, PollConnector):
         )
 
     def load_credentials(self, credentials: dict[str, Any]) -> dict[str, Any] | None:
-        self.client_id = credentials['sf_client_id']
-        self.client_secret = credentials['sf_client_secret']
-        self.username = credentials['sf_username']
-        self.password = credentials['sf_password']
+        self.client_id = credentials["sf_client_id"]
+        self.client_secret = credentials["sf_client_secret"]
+        self.username = credentials["sf_username"]
+        self.password = credentials["sf_password"]
 
         self.access_token, self.instance_url = self._get_access_token()
 
@@ -73,7 +74,6 @@ class SfKbArticlesConnector(LoadConnector, PollConnector):
     def _convert_object_instance_to_document(
         self, object_dict: dict[str, Any]
     ) -> Document:
-
         salesforce_id = object_dict["Id"]
         danswer_salesforce_id = f"{ID_PREFIX}{salesforce_id}"
         extracted_link = f"{self.instance_url}/{salesforce_id}"
@@ -118,10 +118,12 @@ class SfKbArticlesConnector(LoadConnector, PollConnector):
 
         return records[0].get("Name", "Unknown")
 
-    def build_salesforce_query(self, 
+    def build_salesforce_query(
+        self,
         parent_objects: list[str],
         start: datetime | None = None,
-        end: datetime | None = None) -> str:
+        end: datetime | None = None,
+    ) -> str:
         """
         Builds the Salesforce query dynamically.
         If product_component_list is empty, it fetches all Product_Component__c values.
@@ -186,7 +188,6 @@ class SfKbArticlesConnector(LoadConnector, PollConnector):
         start: datetime | None = None,
         end: datetime | None = None,
     ) -> GenerateDocumentsOutput:
-        
         query = self.build_salesforce_query(self.product_component_list, start, end)
         doc_batch: list[Document] = []
         query_results: dict = {}
@@ -194,8 +195,8 @@ class SfKbArticlesConnector(LoadConnector, PollConnector):
         url = f"{self.instance_url}/services/data/v56.0/query"
         params = {"q": query}
         query_result = requests.get(
-                url, headers=self.headers, params=params if "q" in params else None
-            )
+            url, headers=self.headers, params=params if "q" in params else None
+        )
 
         while url:
             query_result = requests.get(
@@ -204,7 +205,9 @@ class SfKbArticlesConnector(LoadConnector, PollConnector):
             data = query_result.json()
 
             if isinstance(data, list):
-                error_message = "; ".join(error.get("message", "Unknown error") for error in data)
+                error_message = "; ".join(
+                    error.get("message", "Unknown error") for error in data
+                )
                 raise Exception(f"Salesforce API error: {error_message}")
 
             if "records" in data:
@@ -220,8 +223,8 @@ class SfKbArticlesConnector(LoadConnector, PollConnector):
                 self._convert_object_instance_to_document(combined_object_dict)
             )
             if len(doc_batch) > self.batch_size:
-                    yield doc_batch
-                    doc_batch = []
+                yield doc_batch
+                doc_batch = []
 
         yield doc_batch
 

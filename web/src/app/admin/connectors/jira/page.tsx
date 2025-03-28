@@ -26,7 +26,6 @@ import { usePublicCredentials } from "@/lib/hooks";
 import { AdminPageTitle } from "@/components/admin/Title";
 import { Card, Divider, Text, Title } from "@tremor/react";
 
-
 const Main = () => {
   const { popup, setPopup } = usePopup();
 
@@ -213,7 +212,8 @@ const Main = () => {
         <>
           {" "}
           <Text className="mb-4">
-          Please specify the filters you want to use for indexing the Jira Issues.
+            Please specify the filters you want to use for indexing the Jira
+            Issues.
           </Text>
           {jiraConnectorIndexingStatuses.length > 0 && (
             <>
@@ -275,25 +275,15 @@ const Main = () => {
           <Card className="mt-4">
             <h2 className="font-bold mb-3">Add a New Project</h2>
             <ConnectorForm<JiraConfig>
-              nameBuilder={(values) =>
-                `JiraConnector-${values.jira_filter}`
-              }
-              ccPairNameBuilder={(values) =>
-                `JIRA - ${values.jira_filter}`
-              }
+              nameBuilder={(values) => `JiraConnector-${values.jira_filter}`}
+              ccPairNameBuilder={(values) => `JIRA - ${values.jira_filter}`}
               credentialId={jiraCredential.id}
               source="jira"
               inputType="poll"
               formBody={
                 <>
-                  <TextFormField
-                    name="jira_base_url"
-                    label="Jira Base Url:"
-                  />
-                  <TextFormField
-                    name="jira_filter"
-                    label="Jira Filter:"
-                  />
+                  <TextFormField name="jira_base_url" label="Jira Base Url:" />
+                  <TextFormField name="jira_filter" label="Jira Filter:" />
                 </>
               }
               formBodyBuilder={(values) => {

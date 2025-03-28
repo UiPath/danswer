@@ -14,7 +14,9 @@ from ee.danswer.db.token_limit import fetch_all_global_token_rate_limits
 from ee.danswer.db.token_limit import insert_global_token_rate_limit
 from ee.danswer.db.token_limit import update_token_rate_limit
 
-router = APIRouter(prefix="/admin/token-rate-limits", dependencies=[Depends(validate_api_key)])
+router = APIRouter(
+    prefix="/admin/token-rate-limits", dependencies=[Depends(validate_api_key)]
+)
 
 
 """

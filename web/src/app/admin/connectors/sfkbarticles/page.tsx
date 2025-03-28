@@ -65,17 +65,18 @@ const MainSection = () => {
       connectorIndexingStatus.connector.source === "salesforce"
   );
 
-  const SfKbArticlesCredential: Credential<SfKbArticlesCredentialJson> | undefined =
-    credentialsData.find(
-      (credential) => credential.credential_json?.sf_username
-    );
+  const SfKbArticlesCredential:
+    | Credential<SfKbArticlesCredentialJson>
+    | undefined = credentialsData.find(
+    (credential) => credential.credential_json?.sf_username
+  );
 
   return (
     <>
       <Text>
-        The Salesforce Knowledge Base Articles connector allows you to index and search through your
-        Salesforce Knowledge Base. Once setup, all indicated Salesforce data will
-        be queryable within Darwin.
+        The Salesforce Knowledge Base Articles connector allows you to index and
+        search through your Salesforce Knowledge Base. Once setup, all indicated
+        Salesforce data will be queryable within Darwin.
       </Text>
 
       <Title className="mb-2 mt-6 ml-auto mr-auto">
@@ -102,8 +103,8 @@ const MainSection = () => {
       ) : (
         <>
           <Text className="mb-2">
-           As a first step, please provide the Salesforce account&apos;s
-           client_id, client_secret, username and password.
+            As a first step, please provide the Salesforce account&apos;s
+            client_id, client_secret, username and password.
           </Text>
           <Card className="mt-2">
             <CredentialForm<SfKbArticlesCredentialJson>
@@ -224,16 +225,23 @@ const MainSection = () => {
               subtext: (
                 <>
                   <br />
-                  Specify the product components for which you want to fetch the Salesforce Knowledge Base articles.
+                  Specify the product components for which you want to fetch the
+                  Salesforce Knowledge Base articles.
                   <br />
                   <br />
-                  Example: <strong>Orchestrator, Activities, Studio, Robot, Automation Hub</strong>.
+                  Example:{" "}
+                  <strong>
+                    Orchestrator, Activities, Studio, Robot, Automation Hub
+                  </strong>
+                  .
                   <br />
                   <br />
-                  By default, it will fetch articles for all the product components.
+                  By default, it will fetch articles for all the product
+                  components.
                   <br />
                   <br />
-                  Hint: Use the exact product component name for accurate results.
+                  Hint: Use the exact product component name for accurate
+                  results.
                 </>
               ),
             })}
@@ -256,7 +264,7 @@ const MainSection = () => {
       ) : (
         <Text>
           Please provide all Salesforce info in Step 1 first! Once you&apos;re
-          done with that, you can then specify the product components for which 
+          done with that, you can then specify the product components for which
           you want to fetch the Salesforce Knowledge Base articles.
         </Text>
       )}
@@ -271,7 +279,10 @@ export default function Page() {
         <HealthCheckBanner />
       </div>
 
-      <AdminPageTitle icon={<SalesforceIcon size={32} />} title="Salesforce KB Articles" />
+      <AdminPageTitle
+        icon={<SalesforceIcon size={32} />}
+        title="Salesforce KB Articles"
+      />
 
       <MainSection />
     </div>

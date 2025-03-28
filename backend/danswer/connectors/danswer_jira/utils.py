@@ -43,7 +43,7 @@ def best_effort_get_field_from_issue(jira_issue: Issue, field: str) -> Any:
         return jira_issue.raw["fields"][field]
     except Exception:
         return None
-    
+
 
 def extract_text_from_content(content: dict) -> str:
     texts = []

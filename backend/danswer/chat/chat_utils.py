@@ -148,6 +148,7 @@ def reorganize_citations(answer: str, citations: list) -> tuple[str, list]:
             )
         except Exception:
             pass
+
     # Function to replace citations with their new number
     def slack_link_format(match: re.Match) -> str:
         # Case 1: Linked citation ([[number]](LINK))

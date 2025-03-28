@@ -367,9 +367,11 @@ def get_search_answer(
         elif not use_citations:
             break
 
-        logger.info(f"Citations not found, retrying... (attempt {attempt + 1}/{max_attempts})")
+        logger.info(
+            f"Citations not found, retrying... (attempt {attempt + 1}/{max_attempts})"
+        )
         attempt += 1
-    
+
     if enable_reflexion:
         # Because follow up messages are explicitly tagged, we don't need to verify the answer
         if len(query_req.messages) == 1:

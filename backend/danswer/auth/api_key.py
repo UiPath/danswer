@@ -1,19 +1,18 @@
-from danswer.db.engine import get_session
-from danswer.db.models import ApiKey
-from danswer.utils.logger import setup_logger
-
 from fastapi import Depends
 from fastapi import HTTPException
 from fastapi import Request
-
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from danswer.db.engine import get_session
+from danswer.db.models import ApiKey
+from danswer.utils.logger import setup_logger
 
 
 logger = setup_logger()
 
 _API_KEY_HEADER = "X-API-Key"
+
 
 def validate_api_key(request: Request, db_session: Session = Depends(get_session)):
     if _API_KEY_HEADER not in request.headers:

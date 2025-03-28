@@ -28,7 +28,9 @@ from danswer.utils.logger import setup_logger
 logger = setup_logger()
 
 
-admin_router = APIRouter(prefix="/admin/persona", dependencies=[Depends(validate_api_key)])
+admin_router = APIRouter(
+    prefix="/admin/persona", dependencies=[Depends(validate_api_key)]
+)
 basic_router = APIRouter(prefix="/persona", dependencies=[Depends(validate_api_key)])
 
 

@@ -11,7 +11,9 @@ from danswer.server.settings.store import load_settings
 from danswer.server.settings.store import store_settings
 
 
-admin_router = APIRouter(prefix="/admin/settings", dependencies=[Depends(validate_api_key)])
+admin_router = APIRouter(
+    prefix="/admin/settings", dependencies=[Depends(validate_api_key)]
+)
 basic_router = APIRouter(prefix="/settings", dependencies=[Depends(validate_api_key)])
 
 

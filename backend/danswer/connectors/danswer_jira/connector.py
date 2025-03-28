@@ -3,7 +3,6 @@ from collections.abc import Iterable
 from datetime import datetime
 from datetime import timezone
 from typing import Any
-from urllib.parse import urlparse
 
 from jira import JIRA
 from jira.resources import Issue
@@ -21,7 +20,6 @@ from danswer.connectors.interfaces import GenerateDocumentsOutput
 from danswer.connectors.interfaces import LoadConnector
 from danswer.connectors.interfaces import PollConnector
 from danswer.connectors.interfaces import SecondsSinceUnixEpoch
-from danswer.connectors.models import BasicExpertInfo
 from danswer.connectors.models import ConnectorMissingCredentialError
 from danswer.connectors.models import Document
 from danswer.connectors.models import Section
@@ -168,11 +166,10 @@ class JiraConnector(LoadConnector, PollConnector):
         self.labels_to_skip = set(labels_to_skip)
         self.jira_filter = jira_filter
 
-
     @property
     def comment_email_blacklist(self) -> tuple:
         return tuple(email.strip() for email in self._comment_email_blacklist)
-    
+
     @property
     def jira_client(self) -> JIRA:
         if self._jira_client is None:
@@ -253,9 +250,7 @@ class JiraConnector(LoadConnector, PollConnector):
 if __name__ == "__main__":
     import os
 
-    connector = JiraConnector(
-        os.environ["JIRA_FILTERS"], comment_email_blacklist=[]
-    )
+    connector = JiraConnector(os.environ["JIRA_FILTERS"], comment_email_blacklist=[])
     connector.load_credentials(
         {
             "jira_user_email": os.environ["JIRA_USER_EMAIL"],
