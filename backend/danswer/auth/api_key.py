@@ -24,6 +24,8 @@ def validate_api_key(request: Request, db_session: Session = Depends(get_session
     if not api_key_value:
         raise HTTPException(status_code=401, detail="Missing API key")
 
+    # Check if the API key is in cache
+    # This is a performance optimization to avoid database lookups
     if api_key_value in cache:
         return None
 
@@ -33,6 +35,7 @@ def validate_api_key(request: Request, db_session: Session = Depends(get_session
     if not api_key:
         raise HTTPException(status_code=401, detail="Invalid API key")
 
-    # Cache the API key
+    # If we reach here, the API key is valid
+    # Cache it for future requests (TTL of 300 seconds set in cache initialization)
     cache[api_key_value] = True
     return None
