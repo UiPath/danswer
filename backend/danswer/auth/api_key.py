@@ -13,7 +13,8 @@ from danswer.utils.logger import setup_logger
 logger = setup_logger()
 
 _API_KEY_HEADER = "X-API-Key"
-cache = TTLCache(maxsize=1000, ttl=300)
+# Cache API keys for 24 hours (86400 seconds)
+cache = TTLCache(maxsize=1000, ttl=86400)  # 24 * 60 * 60 seconds
 
 
 def validate_api_key(request: Request, db_session: Session = Depends(get_session)):
@@ -36,6 +37,6 @@ def validate_api_key(request: Request, db_session: Session = Depends(get_session
         raise HTTPException(status_code=401, detail="Invalid API key")
 
     # If we reach here, the API key is valid
-    # Cache it for future requests (TTL of 300 seconds set in cache initialization)
+    # Cache it for future requests
     cache[api_key_value] = True
     return None
