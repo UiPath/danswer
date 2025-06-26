@@ -272,7 +272,7 @@ def handle_message(
                         respond_in_thread(
                             client=client,
                             channel=channel,
-                            text=f"I've created a JIRA ticket for your query. You can track it here: {jira_ticket_url}",
+                            text=f"Tracking Jira ticket: {jira_ticket_url}",
                             thread_ts=message_ts_to_respond_to,
                         )
             except Exception as e:
