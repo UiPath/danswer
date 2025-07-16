@@ -9,9 +9,8 @@ from slack_sdk.socket_mode.request import SocketModeRequest
 from sqlalchemy.orm import Session
 
 from danswer.configs.constants import SearchFeedbackType
-from danswer.configs.danswerbot_configs import DANSWER_FOLLOWUP_EMOJI
 from danswer.configs.danswerbot_configs import CURATED_RESPONSE_CONFIG_KEY
-from danswer.configs.danswerbot_configs import DEFAULT_CURATED_RESPONSE_MESSAGE
+from danswer.configs.danswerbot_configs import DANSWER_FOLLOWUP_EMOJI
 from danswer.configs.danswerbot_configs import ENABLE_CURATED_RESPONSE_KEY
 from danswer.configs.danswerbot_configs import RESPONSE_MESSAGE_KEY
 from danswer.configs.danswerbot_configs import USER_ID_KEY
@@ -70,7 +69,7 @@ def handle_curated_response(
     # Early return if curated response is not enabled
     if not curated_response_config.get(ENABLE_CURATED_RESPONSE_KEY, False):
         return False
-    
+
     if not curated_response_config.get(RESPONSE_MESSAGE_KEY):
         return False
 
