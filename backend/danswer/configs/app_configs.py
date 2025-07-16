@@ -306,14 +306,3 @@ CUSTOM_ANSWER_VALIDITY_CONDITIONS = json.loads(
 ENTERPRISE_EDITION_ENABLED = (
     os.environ.get("ENABLE_PAID_ENTERPRISE_EDITION_FEATURES", "").lower() == "true"
 )
-
-# Constants for curated response handling
-CURATED_RESPONSE_CONFIG_KEY = "curated_response_config"
-ENABLE_CURATED_RESPONSE_KEY = "enable_curated_response_integration"
-RESPONSE_MESSAGE_KEY = "response_message"
-USER_TITLE_FILTER_KEY = "curated_response_user_title_filter"
-USER_KEY = "user"
-USER_ID_KEY = "id"
-USER_PROFILE_KEY = "profile"
-USER_TITLE_KEY = "title"
-DEFAULT_CURATED_RESPONSE_MESSAGE = "Contact customer support for more help."

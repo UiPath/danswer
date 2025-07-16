@@ -8,17 +8,17 @@ from slack_sdk.socket_mode import SocketModeClient
 from slack_sdk.socket_mode.request import SocketModeRequest
 from sqlalchemy.orm import Session
 
-from danswer.configs.app_configs import CURATED_RESPONSE_CONFIG_KEY
-from danswer.configs.app_configs import DEFAULT_CURATED_RESPONSE_MESSAGE
-from danswer.configs.app_configs import ENABLE_CURATED_RESPONSE_KEY
-from danswer.configs.app_configs import RESPONSE_MESSAGE_KEY
-from danswer.configs.app_configs import USER_ID_KEY
-from danswer.configs.app_configs import USER_KEY
-from danswer.configs.app_configs import USER_PROFILE_KEY
-from danswer.configs.app_configs import USER_TITLE_FILTER_KEY
-from danswer.configs.app_configs import USER_TITLE_KEY
 from danswer.configs.constants import SearchFeedbackType
 from danswer.configs.danswerbot_configs import DANSWER_FOLLOWUP_EMOJI
+from danswer.configs.danswerbot_configs import CURATED_RESPONSE_CONFIG_KEY
+from danswer.configs.danswerbot_configs import DEFAULT_CURATED_RESPONSE_MESSAGE
+from danswer.configs.danswerbot_configs import ENABLE_CURATED_RESPONSE_KEY
+from danswer.configs.danswerbot_configs import RESPONSE_MESSAGE_KEY
+from danswer.configs.danswerbot_configs import USER_ID_KEY
+from danswer.configs.danswerbot_configs import USER_KEY
+from danswer.configs.danswerbot_configs import USER_PROFILE_KEY
+from danswer.configs.danswerbot_configs import USER_TITLE_FILTER_KEY
+from danswer.configs.danswerbot_configs import USER_TITLE_KEY
 from danswer.connectors.slack.utils import make_slack_api_rate_limited
 from danswer.danswerbot.slack.blocks import build_follow_up_resolved_blocks
 from danswer.danswerbot.slack.blocks import get_document_feedback_blocks
@@ -70,6 +70,9 @@ def handle_curated_response(
     # Early return if curated response is not enabled
     if not curated_response_config.get(ENABLE_CURATED_RESPONSE_KEY, False):
         return False
+    
+    if not curated_response_config.get(RESPONSE_MESSAGE_KEY):
+        return False
 
     user_title_filter = channel_conf.get(USER_TITLE_FILTER_KEY, [])
     sender_id = req.payload.get(USER_KEY, {}).get(USER_ID_KEY)
@@ -88,9 +91,7 @@ def handle_curated_response(
 
         # Check if user title matches any in the filter list
         if user_title in [title.lower() for title in user_title_filter]:
-            response_message = curated_response_config.get(
-                RESPONSE_MESSAGE_KEY, DEFAULT_CURATED_RESPONSE_MESSAGE
-            )
+            response_message = curated_response_config.get(RESPONSE_MESSAGE_KEY)
 
             respond_in_thread(
                 client=client.web_client,
