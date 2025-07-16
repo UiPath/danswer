@@ -9,22 +9,22 @@ from slack_sdk.socket_mode.request import SocketModeRequest
 from sqlalchemy.orm import Session
 
 from danswer.configs.constants import SearchFeedbackType
+from danswer.configs.danswerbot_configs import DANSWER_FOLLOWUP_EMOJI
+from danswer.connectors.slack.utils import make_slack_api_rate_limited
+from danswer.danswerbot.slack.blocks import build_follow_up_resolved_blocks
+from danswer.danswerbot.slack.blocks import get_document_feedback_blocks
+from danswer.danswerbot.slack.config import get_slack_bot_config_for_channel
 from danswer.danswerbot.slack.constants import CURATED_RESPONSE_CONFIG_KEY
+from danswer.danswerbot.slack.constants import DISLIKE_BLOCK_ACTION_ID
 from danswer.danswerbot.slack.constants import ENABLE_CURATED_RESPONSE_KEY
+from danswer.danswerbot.slack.constants import FeedbackVisibility
+from danswer.danswerbot.slack.constants import LIKE_BLOCK_ACTION_ID
 from danswer.danswerbot.slack.constants import RESPONSE_MESSAGE_KEY
 from danswer.danswerbot.slack.constants import USER_ID_KEY
 from danswer.danswerbot.slack.constants import USER_KEY
 from danswer.danswerbot.slack.constants import USER_PROFILE_KEY
 from danswer.danswerbot.slack.constants import USER_TITLE_FILTER_KEY
 from danswer.danswerbot.slack.constants import USER_TITLE_KEY
-from danswer.configs.danswerbot_configs import DANSWER_FOLLOWUP_EMOJI
-from danswer.connectors.slack.utils import make_slack_api_rate_limited
-from danswer.danswerbot.slack.blocks import build_follow_up_resolved_blocks
-from danswer.danswerbot.slack.blocks import get_document_feedback_blocks
-from danswer.danswerbot.slack.config import get_slack_bot_config_for_channel
-from danswer.danswerbot.slack.constants import DISLIKE_BLOCK_ACTION_ID
-from danswer.danswerbot.slack.constants import FeedbackVisibility
-from danswer.danswerbot.slack.constants import LIKE_BLOCK_ACTION_ID
 from danswer.danswerbot.slack.constants import VIEW_DOC_FEEDBACK_ID
 from danswer.danswerbot.slack.handlers.handle_message import (
     remove_scheduled_feedback_reminder,
