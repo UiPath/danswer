@@ -14,7 +14,6 @@ class FeedbackVisibility(str, Enum):
     PRIVATE = "private"
     ANONYMOUS = "anonymous"
     PUBLIC = "public"
-
 # Constants for curated response handling
 CURATED_RESPONSE_CONFIG_KEY = "curated_response_config"
 ENABLE_CURATED_RESPONSE_KEY = "enable_curated_response_integration"
