@@ -8,5 +8,3 @@
 *.sw?
 docker-compose.dev.yml
 venv/
-venv/*
-venv
