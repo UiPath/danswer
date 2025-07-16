@@ -82,13 +82,3 @@ DANSWER_BOT_REPHRASE_MESSAGE = (
 JIRA_SERVER_URL = os.getenv("JIRA_SERVER_URL", "")
 JIRA_EMAIL = os.getenv("JIRA_EMAIL", "")
 JIRA_API_TOKEN = os.getenv("JIRA_API_TOKEN", "")
-
-# Constants for curated response handling
-CURATED_RESPONSE_CONFIG_KEY = "curated_response_config"
-ENABLE_CURATED_RESPONSE_KEY = "enable_curated_response_integration"
-RESPONSE_MESSAGE_KEY = "response_message"
-USER_TITLE_FILTER_KEY = "curated_response_user_title_filter"
-USER_KEY = "user"
-USER_ID_KEY = "id"
-USER_PROFILE_KEY = "profile"
-USER_TITLE_KEY = "title"
