@@ -8,6 +8,15 @@ from slack_sdk.socket_mode import SocketModeClient
 from slack_sdk.socket_mode.request import SocketModeRequest
 from sqlalchemy.orm import Session
 
+from danswer.configs.app_configs import CURATED_RESPONSE_CONFIG_KEY
+from danswer.configs.app_configs import ENABLE_CURATED_RESPONSE_KEY
+from danswer.configs.app_configs import RESPONSE_MESSAGE_KEY
+from danswer.configs.app_configs import USER_TITLE_FILTER_KEY
+from danswer.configs.app_configs import USER_KEY
+from danswer.configs.app_configs import USER_ID_KEY
+from danswer.configs.app_configs import USER_PROFILE_KEY
+from danswer.configs.app_configs import USER_TITLE_KEY
+from danswer.configs.app_configs import DEFAULT_CURATED_RESPONSE_MESSAGE
 from danswer.configs.constants import SearchFeedbackType
 from danswer.configs.danswerbot_configs import DANSWER_FOLLOWUP_EMOJI
 from danswer.connectors.slack.utils import make_slack_api_rate_limited
@@ -38,19 +47,6 @@ from danswer.document_index.factory import get_default_document_index
 from danswer.utils.logger import setup_logger
 
 logger_base = setup_logger()
-
-
-# Constants for curated response handling
-CURATED_RESPONSE_CONFIG_KEY = "curated_response_config"
-ENABLE_CURATED_RESPONSE_KEY = "enable_curated_response_integration"
-RESPONSE_MESSAGE_KEY = "response_message"
-USER_TITLE_FILTER_KEY = "curated_response_user_title_filter"
-USER_KEY = "user"
-USER_ID_KEY = "id"
-USER_PROFILE_KEY = "profile"
-USER_TITLE_KEY = "title"
-DEFAULT_CURATED_RESPONSE_MESSAGE = "contact customer support for more help"
-
 
 def handle_curated_response(
     slack_bot_config: Any,
