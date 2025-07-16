@@ -286,7 +286,6 @@ def handle_followup_button(
         channel_id=channel_id,
         thread_ts=thread_ts,
     )
-    logger_base.info(f"Curated response sent: {curated_response_sent}")
 
     # Only send the default response if no curated response was sent
     if not curated_response_sent:
