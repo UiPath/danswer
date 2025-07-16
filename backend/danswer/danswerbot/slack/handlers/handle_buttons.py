@@ -9,15 +9,15 @@ from slack_sdk.socket_mode.request import SocketModeRequest
 from sqlalchemy.orm import Session
 
 from danswer.configs.constants import SearchFeedbackType
-from danswer.configs.danswerbot_configs import CURATED_RESPONSE_CONFIG_KEY
+from danswer.configs.constants import CURATED_RESPONSE_CONFIG_KEY
+from danswer.configs.constants import ENABLE_CURATED_RESPONSE_KEY
+from danswer.configs.constants import RESPONSE_MESSAGE_KEY
+from danswer.configs.constants import USER_ID_KEY
+from danswer.configs.constants import USER_KEY
+from danswer.configs.constants import USER_PROFILE_KEY
+from danswer.configs.constants import USER_TITLE_FILTER_KEY
+from danswer.configs.constants import USER_TITLE_KEY
 from danswer.configs.danswerbot_configs import DANSWER_FOLLOWUP_EMOJI
-from danswer.configs.danswerbot_configs import ENABLE_CURATED_RESPONSE_KEY
-from danswer.configs.danswerbot_configs import RESPONSE_MESSAGE_KEY
-from danswer.configs.danswerbot_configs import USER_ID_KEY
-from danswer.configs.danswerbot_configs import USER_KEY
-from danswer.configs.danswerbot_configs import USER_PROFILE_KEY
-from danswer.configs.danswerbot_configs import USER_TITLE_FILTER_KEY
-from danswer.configs.danswerbot_configs import USER_TITLE_KEY
 from danswer.connectors.slack.utils import make_slack_api_rate_limited
 from danswer.danswerbot.slack.blocks import build_follow_up_resolved_blocks
 from danswer.danswerbot.slack.blocks import get_document_feedback_blocks
