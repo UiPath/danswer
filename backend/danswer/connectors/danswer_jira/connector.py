@@ -84,9 +84,9 @@ def fetch_jira_issues_batch(
                 continue
 
         description = (
-            issue.fields.description
+            issue.fields.description or ""
             if JIRA_API_VERSION == "2"
-            else extract_text_from_content(issue.raw["fields"]["description"])
+            else extract_text_from_content(issue.raw["fields"].get("description"))
         )
         comments = get_comment_strs(
             issue=issue,
