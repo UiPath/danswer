@@ -125,24 +125,41 @@ export const DocumentSetCreationForm = ({
             </p>
             <FieldArray
               name="cc_pair_ids"
-              render={(arrayHelpers: ArrayHelpers) => (
+              render={(arrayHelpers: ArrayHelpers) => {
+                // Sort connectors by creation time (newest first)
+                const sortedCcPairs = [...ccPairs].sort((a, b) => {
+                  const timeA = new Date(a.connector.time_created).getTime();
+                  const timeB = new Date(b.connector.time_created).getTime();
+                  return timeB - timeA; // Descending order (newest first)
+                });
+
+                return (
                 <div className="mb-3 flex gap-2 flex-wrap">
-                  {ccPairs.map((ccPair) => {
+                  {sortedCcPairs.map((ccPair) => {
                     const ind = values.cc_pair_ids.indexOf(ccPair.cc_pair_id);
                     let isSelected = ind !== -1;
+
+                    // Extract wiki URL for Confluence connectors
+                    const isConfluence = ccPair.connector.source === "confluence";
+                    const wikiUrl = isConfluence
+                      ? ccPair.connector.connector_specific_config.wiki_page_url
+                      : null;
+
                     return (
                       <div
                         key={`${ccPair.connector.id}-${ccPair.credential.id}`}
                         className={
                           `
-                              px-3 
+                              px-3
                               py-1
-                              rounded-lg 
+                              rounded-lg
                               border
-                              border-border 
-                              w-fit 
-                              flex 
-                              cursor-pointer ` +
+                              border-border
+                              w-fit
+                              flex
+                              ${isConfluence ? 'flex-col' : ''}
+                              cursor-pointer
+                              ${isConfluence ? 'max-w-md' : ''} ` +
                           (isSelected
                             ? " bg-background-strong"
                             : " hover:bg-hover")
@@ -164,11 +181,17 @@ export const DocumentSetCreationForm = ({
                             showMetadata={false}
                           />
                         </div>
+                        {wikiUrl && (
+                          <div className="text-xs text-gray-500 mt-1 break-all">
+                            {wikiUrl}
+                          </div>
+                        )}
                       </div>
                     );
                   })}
                 </div>
-              )}
+                );
+              }}
             />
 
             {isPaidEnterpriseFeaturesEnabled &&
