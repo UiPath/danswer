@@ -5,6 +5,7 @@ import { ConfluenceIcon, TrashIcon } from "@/components/icons/icons";
 import {
   BooleanFormField,
   TextFormField,
+  TextArrayFieldBuilder,
 } from "@/components/admin/connectors/Field";
 import { HealthCheckBanner } from "@/components/health/healthcheck";
 import { CredentialForm } from "@/components/admin/connectors/CredentialForm";
@@ -272,6 +273,18 @@ const Main = () => {
                         </a>
                       ),
                     },
+                    {
+                      header: "Pages to Skip",
+                      key: "pages_to_skip",
+                      getValue: (ccPairStatus) => {
+                        const connectorConfig =
+                          ccPairStatus.connector.connector_specific_config;
+                        return connectorConfig.pages_to_skip &&
+                          connectorConfig.pages_to_skip.length > 0
+                          ? connectorConfig.pages_to_skip.join(", ")
+                          : "";
+                      },
+                    },
                   ]}
                   onUpdate={() =>
                     mutate("/api/manage/admin/connector/indexing-status")
@@ -301,15 +314,29 @@ const Main = () => {
                   />
                 </>
               }
+              formBodyBuilder={(values) => (
+                <>
+                  {TextArrayFieldBuilder({
+                    name: "pages_to_skip",
+                    label: "Pages/Folders to Skip:",
+                    subtext:
+                      "Enter page titles to exclude from indexing. All child pages under these will also be skipped.",
+                  })(values)}
+                </>
+              )}
               validationSchema={Yup.object().shape({
                 wiki_page_url: Yup.string().required(
                   "Please enter any link to a Confluence space or Page e.g. https://danswer.atlassian.net/wiki/spaces/Engineering/overview"
                 ),
                 index_origin: Yup.boolean(),
+                pages_to_skip: Yup.array()
+                  .of(Yup.string().required("Page names must be strings"))
+                  .required(),
               })}
               initialValues={{
                 wiki_page_url: "",
                 index_origin: true,
+                pages_to_skip: [],
               }}
               refreshFreq={10 * 60} // 10 minutes
               credentialId={confluenceCredential.id}
