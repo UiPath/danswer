@@ -3,7 +3,8 @@ from danswer.prompts.constants import QUESTION_PAT
 
 REQUIRE_CITATION_STATEMENT = """
 CRUCIAL: Cite relevant statements INLINE using the format [1], [2], [3], etc to reference the document number, \
-DO NOT provide a reference section at the end and DO NOT provide any links following the citations.
+DO NOT provide a reference section at the end. If the source document contains a URL as part of the answer, \
+include that URL in your response.
 """.rstrip()
 
 NO_CITATION_STATEMENT = """
