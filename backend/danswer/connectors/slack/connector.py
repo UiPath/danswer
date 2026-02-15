@@ -261,19 +261,27 @@ def filter_channels(
     channel_ids = {c for c in channels_to_connect if _is_channel_id(c)}
     channel_names = {c for c in channels_to_connect if not _is_channel_id(c)}
 
-    # validate that all channel names are valid
-    # fail loudly in the case of an invalid channel so that the user
-    # knows that one of the channels they've specified is typo'd or private
     all_channel_names = {channel["name"] for channel in all_channels}
+    all_channel_ids = {channel["id"] for channel in all_channels}
+
+    # validate channel names — if a name is not found but valid channel IDs
+    # were also provided, warn instead of failing (the channel was likely
+    # renamed and the user also specified its stable ID)
     for name in channel_names:
         if name not in all_channel_names:
-            raise ValueError(
-                f"Channel '{name}' not found in workspace. "
-                f"Available channels: {all_channel_names}"
-            )
+            if channel_ids:
+                logger.warning(
+                    f"Channel '{name}' not found in workspace. "
+                    f"It may have been renamed. "
+                    f"Consider using channel IDs instead for stability."
+                )
+            else:
+                raise ValueError(
+                    f"Channel '{name}' not found in workspace. "
+                    f"Available channels: {all_channel_names}"
+                )
 
     # validate that all channel IDs are valid
-    all_channel_ids = {channel["id"] for channel in all_channels}
     for cid in channel_ids:
         if cid not in all_channel_ids:
             raise ValueError(
