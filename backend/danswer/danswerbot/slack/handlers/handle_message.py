@@ -862,7 +862,7 @@ def handle_message(
     )
 
     if channel_conf and channel_conf.get("follow_up_tags") is not None:
-        all_blocks.append(build_follow_up_block(message_id=answer.chat_message_id))
+        all_blocks.extend(build_follow_up_block(message_id=answer.chat_message_id))
 
     try:
         respond_in_thread(
