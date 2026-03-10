@@ -435,8 +435,18 @@ def build_qa_response_blocks(
     return response_blocks
 
 
-def build_follow_up_block(message_id: int | None) -> ActionsBlock:
-    return ActionsBlock(
+def build_follow_up_block(message_id: int | None) -> list[Block]:
+    hint_block = SectionBlock(
+        text=(
+            "_If you need someone to actively look into this, "
+            "please click the button below and make sure to include "
+            "the following details in the thread:_\n"
+            "- *Environment* (e.g., Production, Staging, alpha)\n"
+            "- *TenantId* and *Organization Id*\n"
+            "- *ConnectionId*"
+        ),
+    )
+    actions_block = ActionsBlock(
         block_id=build_feedback_id(message_id) if message_id is not None else None,
         elements=[
             ButtonElement(
@@ -451,6 +461,7 @@ def build_follow_up_block(message_id: int | None) -> ActionsBlock:
             ),
         ],
     )
+    return [hint_block, actions_block]
 
 
 def build_follow_up_resolved_blocks(
