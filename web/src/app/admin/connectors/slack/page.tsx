@@ -228,8 +228,9 @@ const MainSection = () => {
                     name: "channels",
                     label: "Channels:",
                     subtext: `
-                      Specify 0 or more channels to index. For example, specifying the channel
-                      "support" will cause us to only index all content within the "#support" channel.
+                      Specify 0 or more channels to index by name or channel ID. For example,
+                      specifying "support" or "C04ABCDEF12" will index that channel.
+                      Using channel IDs is recommended as they remain stable even if a channel is renamed.
                       If no channels are specified, all channels in your workspace will be indexed.`,
                   })(values)}
                   <BooleanFormField
@@ -257,7 +258,9 @@ const MainSection = () => {
                 "Please enter the workspace to index"
               ),
               channels: Yup.array()
-                .of(Yup.string().required("Channel names must be strings"))
+                .of(
+                  Yup.string().required("Channel names or IDs must be strings")
+                )
                 .required(),
               channel_regex_enabled: Yup.boolean().required(),
             })}

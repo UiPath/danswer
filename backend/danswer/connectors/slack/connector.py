@@ -232,6 +232,12 @@ def _default_msg_filter(message: MessageType) -> bool:
     return False
 
 
+def _is_channel_id(value: str) -> bool:
+    """Slack channel IDs start with C (public) or G (private) followed by
+    alphanumeric characters, e.g. C04ABCDEF12."""
+    return bool(re.fullmatch(r"[CG][A-Z0-9]{8,}", value))
+
+
 def filter_channels(
     all_channels: list[dict[str, Any]],
     channels_to_connect: list[str] | None,
@@ -241,6 +247,7 @@ def filter_channels(
         return all_channels
 
     if regex_enabled:
+        # regex only applies to channel names
         return [
             channel
             for channel in all_channels
@@ -250,19 +257,42 @@ def filter_channels(
             )
         ]
 
-    # validate that all channels in `channels_to_connect` are valid
-    # fail loudly in the case of an invalid channel so that the user
-    # knows that one of the channels they've specified is typo'd or private
+    # separate channel IDs from channel names
+    channel_ids = {c for c in channels_to_connect if _is_channel_id(c)}
+    channel_names = {c for c in channels_to_connect if not _is_channel_id(c)}
+
     all_channel_names = {channel["name"] for channel in all_channels}
-    for channel in channels_to_connect:
-        if channel not in all_channel_names:
+    all_channel_ids = {channel["id"] for channel in all_channels}
+
+    # validate channel names — if a name is not found but valid channel IDs
+    # were also provided, warn instead of failing (the channel was likely
+    # renamed and the user also specified its stable ID)
+    for name in channel_names:
+        if name not in all_channel_names:
+            if channel_ids:
+                logger.warning(
+                    f"Channel '{name}' not found in workspace. "
+                    f"It may have been renamed. "
+                    f"Consider using channel IDs instead for stability."
+                )
+            else:
+                raise ValueError(
+                    f"Channel '{name}' not found in workspace. "
+                    f"Available channels: {all_channel_names}"
+                )
+
+    # validate that all channel IDs are valid
+    for cid in channel_ids:
+        if cid not in all_channel_ids:
             raise ValueError(
-                f"Channel '{channel}' not found in workspace. "
-                f"Available channels: {all_channel_names}"
+                f"Channel ID '{cid}' not found in workspace. "
+                f"Available channel IDs: {all_channel_ids}"
             )
 
     return [
-        channel for channel in all_channels if channel["name"] in channels_to_connect
+        channel
+        for channel in all_channels
+        if channel["name"] in channel_names or channel["id"] in channel_ids
     ]
 
 
