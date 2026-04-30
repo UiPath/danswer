@@ -125,9 +125,7 @@ class CustomModelServer(LLM):
         self._client_secret = client_secret
         self._account_id = account_id
         self._tenant_id = tenant_id
-        self._endpoint = endpoint.format(
-            account_id=account_id, tenant_id=tenant_id
-        )
+        self._endpoint = endpoint.format(account_id=account_id, tenant_id=tenant_id)
         self._max_output_tokens = max_output_tokens
         self._timeout = timeout
         self.token = self._get_token()
