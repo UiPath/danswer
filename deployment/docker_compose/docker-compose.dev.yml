@@ -42,6 +42,8 @@ services:
       - GEN_AI_IDENTITY_ENDPOINT=https://alpha.uipath.com/identity_/connect/token
       - GEN_AI_CLIENT_ID=${GEN_AI_CLIENT_ID:-}
       - GEN_AI_CLIENT_SECRET=${GEN_AI_CLIENT_SECRET:-}
+      - GEN_AI_ACCOUNT_ID=${GEN_AI_ACCOUNT_ID:-}
+      - GEN_AI_TENANT_ID=${GEN_AI_TENANT_ID:-}
       - GEN_AI_API_VERSION=${GEN_AI_API_VERSION:-}
       - GEN_AI_LLM_PROVIDER_TYPE=${GEN_AI_LLM_PROVIDER_TYPE:-}
       - GEN_AI_MAX_TOKENS=${GEN_AI_MAX_TOKENS:-}
@@ -129,6 +131,8 @@ services:
       - GEN_AI_IDENTITY_ENDPOINT=https://alpha.uipath.com/identity_/connect/token
       - GEN_AI_CLIENT_ID=${GEN_AI_CLIENT_ID:-}
       - GEN_AI_CLIENT_SECRET=${GEN_AI_CLIENT_SECRET:-}
+      - GEN_AI_ACCOUNT_ID=${GEN_AI_ACCOUNT_ID:-}
+      - GEN_AI_TENANT_ID=${GEN_AI_TENANT_ID:-}
       - GEN_AI_API_VERSION=${GEN_AI_API_VERSION:-}
       - GEN_AI_LLM_PROVIDER_TYPE=${GEN_AI_LLM_PROVIDER_TYPE:-}
       - GEN_AI_MAX_TOKENS=${GEN_AI_MAX_TOKENS:-}

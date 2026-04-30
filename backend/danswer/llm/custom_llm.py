@@ -8,11 +8,13 @@ from langchain_core.messages import AIMessage
 from langchain_core.messages import BaseMessage
 from requests import Timeout
 
+from danswer.configs.model_configs import GEN_AI_ACCOUNT_ID
 from danswer.configs.model_configs import GEN_AI_API_VERSION
 from danswer.configs.model_configs import GEN_AI_CLIENT_ID
 from danswer.configs.model_configs import GEN_AI_CLIENT_SECRET
 from danswer.configs.model_configs import GEN_AI_IDENTITY_ENDPOINT
 from danswer.configs.model_configs import GEN_AI_MAX_OUTPUT_TOKENS
+from danswer.configs.model_configs import GEN_AI_TENANT_ID
 from danswer.llm.interfaces import LLM
 from danswer.llm.interfaces import LLMConfig
 from danswer.llm.interfaces import ToolChoiceOptions
@@ -66,10 +68,12 @@ class CustomModelServer(LLM):
         api_key: str | None,
         timeout: int,
         endpoint: str
-        | None = "https://alpha.uipath.com/llmgateway_/openai/deployments/gpt-4o-mini-2024-07-18/chat/completions?api-version=2024-06-01",
+        | None = "https://alpha.uipath.com/{account_id}/{tenant_id}/llmgateway_/api/raw/vendor/openai/model/gpt-4o-2024-11-20/completions",
         identity_url: str | None = GEN_AI_IDENTITY_ENDPOINT,
         client_id: str | None = GEN_AI_CLIENT_ID,
         client_secret: str | None = GEN_AI_CLIENT_SECRET,
+        account_id: str | None = GEN_AI_ACCOUNT_ID,
+        tenant_id: str | None = GEN_AI_TENANT_ID,
         max_output_tokens: int = int(GEN_AI_MAX_OUTPUT_TOKENS),
         api_version: str | None = GEN_AI_API_VERSION,
     ):
@@ -97,6 +101,18 @@ class CustomModelServer(LLM):
                 "client_secret for the model server."
             )
 
+        if not account_id:
+            raise ValueError(
+                "Cannot point Danswer to a custom LLM server without providing the "
+                "account_id (GEN_AI_ACCOUNT_ID) for the model server."
+            )
+
+        if not tenant_id:
+            raise ValueError(
+                "Cannot point Danswer to a custom LLM server without providing the "
+                "tenant_id (GEN_AI_TENANT_ID) for the model server."
+            )
+
         # TODO: implement api versions for endpoints and add those to model
         # if not api_version:
         #     raise ValueError(
@@ -107,7 +123,11 @@ class CustomModelServer(LLM):
         self._identity_url = identity_url
         self._client_id = client_id
         self._client_secret = client_secret
-        self._endpoint = endpoint
+        self._account_id = account_id
+        self._tenant_id = tenant_id
+        self._endpoint = endpoint.format(
+            account_id=account_id, tenant_id=tenant_id
+        )
         self._max_output_tokens = max_output_tokens
         self._timeout = timeout
         self.token = self._get_token()
@@ -123,11 +143,13 @@ class CustomModelServer(LLM):
     def _execute(self, input: LanguageModelInput) -> AIMessage:
         headers = {
             "Content-Type": "application/json",
-            "X-UiPath-LlmGateway-RequestedFeature": "ChatWithAssistant",
-            "X-UiPath-LlmGateway-RequestingFeature": "ChatWithAssistant",
-            "X-UiPath-LlmGateway-RequestingProduct": "darwin",
-            "X-UiPath-LlmGateway-TimeoutSeconds": "60",
             "Authorization": "Bearer " + self.token,
+            "X-UiPath-LlmGateway-RequestingProduct": "darwin",
+            "X-UiPath-LlmGateway-RequestingFeature": "ChatWithAssistant",
+            "X-UiPath-LlmGateway-ApiFlavor": "chat-completions",
+            "X-UiPath-LlmGateway-ApiVersion": "2024-10-21",
+            "X-UiPath-LlmGateway-TimeoutSeconds": "60",
+            "X-UIPATH-STREAMING-ENABLED": "false",
         }
 
         # print(f"Input: {input}")
