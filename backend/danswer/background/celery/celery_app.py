@@ -2,6 +2,7 @@ from datetime import timedelta
 from typing import cast
 
 from celery import Celery  # type: ignore
+from celery.schedules import crontab  # type: ignore
 from sqlalchemy.orm import Session
 
 from danswer.background.celery.celery_utils import extract_ids_from_runnable_connector
@@ -268,6 +269,56 @@ def check_for_document_sets_sync_task() -> None:
 
 
 @celery_app.task(
+    name="run_analytics_rollup_task",
+    soft_time_limit=JOB_TIMEOUT,
+)
+def run_analytics_rollup_task() -> None:
+    """Daily rollup of admin analytics into `analytics_daily_rollup`.
+
+    Must run BEFORE `run_retention_policies_task` so the rollup sees live
+    chat data. Default schedule: 07:30 UTC (retention runs at 08:00 UTC).
+    See backend/danswer/db/analytics_rollup.py for the pipeline + window
+    semantics.
+    """
+    from danswer.db.analytics_rollup import run_rollup
+
+    try:
+        n = run_rollup()
+    except Exception:
+        logger.exception(
+            "Analytics rollup failed; will retry on next schedule. "
+            "If this is the first run after deploy, ensure the migration "
+            "has been applied (alembic upgrade head)."
+        )
+        raise
+    logger.info(f"Analytics rollup: upserted {n} day(s)")
+
+
+@celery_app.task(
+    name="run_retention_policies_task",
+    soft_time_limit=JOB_TIMEOUT,
+)
+def run_retention_policies_task() -> None:
+    """Daily DB retention sweep. Deletes stale rows from
+    kombu_message, task_queue_jobs, index_attempt, and chat tables per
+    the policies defined in `danswer.db.retention`. Configured via
+    RETENTION_DAYS_* env vars; see backend/danswer/db/retention.py."""
+    from danswer.db.retention import run_retention_policies
+
+    try:
+        results = run_retention_policies()
+    except Exception:
+        logger.exception("Retention sweep raised; will retry on next schedule")
+        raise
+    total = sum(results.values())
+    if total == 0:
+        logger.info("Retention sweep: nothing to delete this run")
+    else:
+        summary = ", ".join(f"{name}={n}" for name, n in results.items() if n > 0)
+        logger.info(f"Retention sweep: {total} rows deleted ({summary})")
+
+
+@celery_app.task(
     name="check_for_prune_task",
     soft_time_limit=JOB_TIMEOUT,
 )
@@ -308,6 +359,25 @@ celery_app.conf.beat_schedule.update(
         "check-for-prune": {
             "task": "check_for_prune_task",
             "schedule": timedelta(seconds=5),
+        },
+    }
+)
+celery_app.conf.beat_schedule.update(
+    {
+        # Daily analytics rollup — pre-aggregates admin metrics so the
+        # dashboard survives chat retention deletes. Runs 30 min BEFORE
+        # the retention sweep so chat data is still alive when we read.
+        # See backend/danswer/db/analytics_rollup.py.
+        "run-analytics-rollup": {
+            "task": "run_analytics_rollup_task",
+            "schedule": crontab(hour=7, minute=30),  # 07:30 UTC daily
+        },
+        # Daily DB retention sweep — kombu_message / task_queue_jobs /
+        # index_attempt / chat. Tunable via RETENTION_DAYS_* env vars.
+        # See backend/danswer/db/retention.py for the policies.
+        "run-retention": {
+            "task": "run_retention_policies_task",
+            "schedule": crontab(hour=8, minute=0),  # 08:00 UTC daily
         },
     }
 )

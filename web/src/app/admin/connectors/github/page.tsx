@@ -1,7 +1,8 @@
 "use client";
 
+import { useState } from "react";
 import * as Yup from "yup";
-import { GithubIcon, TrashIcon } from "@/components/icons/icons";
+import { EditIcon, GithubIcon, TrashIcon } from "@/components/icons/icons";
 import {
   BooleanFormField,
   TextFormField,
@@ -22,11 +23,12 @@ import { CredentialForm } from "@/components/admin/connectors/CredentialForm";
 import { adminDeleteCredential, linkCredential } from "@/lib/credential";
 import { ConnectorsTable } from "@/components/admin/connectors/table/ConnectorsTable";
 import { usePublicCredentials } from "@/lib/hooks";
-import { Card, Divider, Text, Title } from "@tremor/react";
+import { Button, Card, Divider, Text, Title } from "@tremor/react";
 import { AdminPageTitle } from "@/components/admin/Title";
 
 const Main = () => {
   const { mutate } = useSWRConfig();
+  const [isEditingCredential, setIsEditingCredential] = useState(false);
   const {
     data: connectorIndexingStatuses,
     isLoading: isConnectorIndexingStatusesLoading,
@@ -87,22 +89,73 @@ const Main = () => {
       </Title>
       {githubCredential ? (
         <>
-          {" "}
-          <div className="flex mb-1 text-sm">
+          <div className="flex mb-1 text-sm items-center">
             <p className="my-auto">Existing Access Token: </p>
             <p className="ml-1 italic my-auto">
               {githubCredential.credential_json.github_access_token}
-            </p>{" "}
+            </p>
             <button
               className="ml-1 hover:bg-hover rounded p-1"
+              title="Edit credential"
+              onClick={() => setIsEditingCredential((v) => !v)}
+            >
+              <EditIcon size={16} />
+            </button>
+            <button
+              className="ml-1 hover:bg-hover rounded p-1"
+              title="Delete credential"
               onClick={async () => {
                 await adminDeleteCredential(githubCredential.id);
+                setIsEditingCredential(false);
                 refreshCredentials();
               }}
             >
               <TrashIcon />
             </button>
           </div>
+          {isEditingCredential && (
+            <Card className="mt-2">
+              <Text className="mb-2">
+                Update the GitHub personal access token. Both the GitHub and
+                GitHub-Files connectors share this credential.
+              </Text>
+              <CredentialForm<GithubCredentialJson>
+                existingCredentialId={githubCredential.id}
+                formBody={
+                  <TextFormField
+                    name="github_access_token"
+                    label="Access Token:"
+                    type="password"
+                  />
+                }
+                validationSchema={Yup.object().shape({
+                  github_access_token: Yup.string().required(
+                    "Please enter the access token for Github"
+                  ),
+                })}
+                initialValues={{
+                  github_access_token:
+                    githubCredential.credential_json.github_access_token || "",
+                }}
+                onSubmit={(isSuccess) => {
+                  if (isSuccess) {
+                    setIsEditingCredential(false);
+                    refreshCredentials();
+                  }
+                }}
+                extraActions={
+                  <Button
+                    type="button"
+                    size="xs"
+                    color="gray"
+                    onClick={() => setIsEditingCredential(false)}
+                  >
+                    Cancel
+                  </Button>
+                }
+              />
+            </Card>
+          )}
         </>
       ) : (
         <>
@@ -176,7 +229,18 @@ const Main = () => {
                   getValue: (ccPairStatus) => {
                     const connectorConfig =
                       ccPairStatus.connector.connector_specific_config;
-                    return `${connectorConfig.repo_owner}/${connectorConfig.repo_name}`;
+                    const name = (connectorConfig.repo_name || "").trim();
+                    if (!name) {
+                      return `${connectorConfig.repo_owner} (all repos)`;
+                    }
+                    if (name.includes(",")) {
+                      const repos = name
+                        .split(",")
+                        .map((s) => s.trim())
+                        .filter(Boolean);
+                      return `${connectorConfig.repo_owner} (${repos.length} repos)`;
+                    }
+                    return `${connectorConfig.repo_owner}/${name}`;
                   },
                 },
               ]}
@@ -198,27 +262,46 @@ const Main = () => {
           </Text>
 
           <ConnectorForm<GithubConfig>
-            nameBuilder={(values) =>
-              `GithubConnector-${values.repo_owner}/${values.repo_name}`
-            }
-            ccPairNameBuilder={(values) =>
-              `${values.repo_owner}/${values.repo_name}`
-            }
+            nameBuilder={(values) => {
+              const trimmed = (values.repo_name || "").trim();
+              if (!trimmed || trimmed.includes(",")) {
+                return `GithubConnector-${values.repo_owner}`;
+              }
+              return `GithubConnector-${values.repo_owner}/${trimmed}`;
+            }}
+            ccPairNameBuilder={(values) => {
+              const trimmed = (values.repo_name || "").trim();
+              if (!trimmed || trimmed.includes(",")) {
+                return values.repo_owner;
+              }
+              return `${values.repo_owner}/${trimmed}`;
+            }}
             source="github"
             inputType="poll"
             formBody={
               <>
                 <TextFormField name="repo_owner" label="Repository Owner:" />
-                <TextFormField name="repo_name" label="Repository Name:" />
+                <TextFormField
+                  name="repo_name"
+                  label="Repository Name:"
+                  subtext={
+                    <>
+                      Single repo (e.g. <code>darwin</code>), comma-separated
+                      list (e.g. <code>darwin,onyx,api</code>), or leave blank
+                      to index every repo the access token can see under this
+                      owner.
+                    </>
+                  }
+                />
                 <BooleanFormField
                   name="include_prs"
                   label="Include Pull Requests"
-                  subtext="Index pull requests from this repository"
+                  subtext="Index pull requests from the selected repository (or repositories)."
                 />
                 <BooleanFormField
                   name="include_issues"
                   label="Include Issues"
-                  subtext="Index issues from this repository"
+                  subtext="Index issues from the selected repository (or repositories). Issue comments are included in the indexed text."
                 />
               </>
             }
@@ -226,9 +309,7 @@ const Main = () => {
               repo_owner: Yup.string().required(
                 "Please enter the owner of the repository to index e.g. darwin-ai"
               ),
-              repo_name: Yup.string().required(
-                "Please enter the name of the repository to index e.g. darwin "
-              ),
+              repo_name: Yup.string(),
               include_prs: Yup.boolean().required(),
               include_issues: Yup.boolean().required(),
             })}

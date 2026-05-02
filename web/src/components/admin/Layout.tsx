@@ -227,6 +227,20 @@ export async function Layout({ children }: { children: React.ReactNode }) {
                   },
                 ],
               },
+              {
+                name: "Analytics",
+                items: [
+                  {
+                    name: (
+                      <div className="flex">
+                        <FiBarChart2 size={18} />
+                        <div className="ml-1">Usage Analytics</div>
+                      </div>
+                    ),
+                    link: "/admin/analytics",
+                  },
+                ],
+              },
               ...(SERVER_SIDE_ONLY__PAID_ENTERPRISE_FEATURES_ENABLED
                 ? [
                     {

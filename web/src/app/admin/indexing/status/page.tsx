@@ -11,13 +11,16 @@ import { AdminPageTitle } from "@/components/admin/Title";
 import Link from "next/link";
 import { Button, Text } from "@tremor/react";
 
+const INDEXING_STATUS_URL = "/api/manage/admin/connector/indexing-status";
+
 function Main() {
   const {
     data: indexAttemptData,
     isLoading: indexAttemptIsLoading,
     error: indexAttemptError,
+    mutate: refetchIndexAttempt,
   } = useSWR<ConnectorIndexingStatus<any, any>[]>(
-    "/api/manage/admin/connector/indexing-status",
+    INDEXING_STATUS_URL,
     errorHandlingFetcher,
     { refreshInterval: 10000 } // 10 seconds
   );
@@ -58,7 +61,10 @@ function Main() {
   });
 
   return (
-    <CCPairIndexingStatusTable ccPairsIndexingStatuses={indexAttemptData} />
+    <CCPairIndexingStatusTable
+      ccPairsIndexingStatuses={indexAttemptData}
+      onRefresh={() => refetchIndexAttempt()}
+    />
   );
 }
 

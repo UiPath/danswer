@@ -10,6 +10,19 @@ export async function createCredential(credential: CredentialBase<any>) {
   });
 }
 
+export async function updateCredential(
+  credentialId: number,
+  credential: CredentialBase<any>
+) {
+  return await fetch(`/api/manage/credential/${credentialId}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(credential),
+  });
+}
+
 export async function adminDeleteCredential<T>(credentialId: number) {
   return await fetch(`/api/manage/admin/credential/${credentialId}`, {
     method: "DELETE",

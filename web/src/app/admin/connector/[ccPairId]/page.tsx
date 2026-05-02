@@ -12,6 +12,7 @@ import { ModifyStatusButtonCluster } from "./ModifyStatusButtonCluster";
 import { DeletionButton } from "./DeletionButton";
 import { ErrorCallout } from "@/components/ErrorCallout";
 import { ReIndexButton } from "./ReIndexButton";
+import { CredentialSection } from "./CredentialSection";
 import { isCurrentlyDeleting } from "@/lib/documentDeletion";
 import { ValidSources } from "@/lib/types";
 import useSWR from "swr";
@@ -29,6 +30,7 @@ function Main({ ccPairId }: { ccPairId: number }) {
     data: ccPair,
     isLoading,
     error,
+    mutate: mutateCcPair,
   } = useSWR<CCPairFullInfo>(
     buildCCPairInfoUrl(ccPairId),
     errorHandlingFetcher,
@@ -91,6 +93,11 @@ function Main({ ccPairId }: { ccPairId: number }) {
       />
       {/* NOTE: no divider / title here for `ConfigDisplay` since it is optional and we need
         to render these conditionally.*/}
+
+      <CredentialSection
+        credential={ccPair.credential}
+        onUpdated={() => mutateCcPair()}
+      />
 
       <div className="mt-6">
         <div className="flex">

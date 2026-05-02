@@ -1,7 +1,8 @@
 "use client";
 
+import { useState } from "react";
 import * as Yup from "yup";
-import { SlackIcon, TrashIcon } from "@/components/icons/icons";
+import { EditIcon, SlackIcon, TrashIcon } from "@/components/icons/icons";
 import { errorHandlingFetcher } from "@/lib/fetcher";
 import { ErrorCallout } from "@/components/ErrorCallout";
 import useSWR, { useSWRConfig } from "swr";
@@ -29,6 +30,7 @@ import { AdminPageTitle } from "@/components/admin/Title";
 
 const MainSection = () => {
   const { mutate } = useSWRConfig();
+  const [isEditingCredential, setIsEditingCredential] = useState(false);
   const {
     data: connectorIndexingStatuses,
     isLoading: isConnectorIndexingStatusesLoading,
@@ -89,23 +91,75 @@ const MainSection = () => {
       </Title>
       {slackCredential ? (
         <>
-          <div className="flex mb-1 text-sm">
+          <div className="flex mb-1 text-sm items-center">
             <Text className="my-auto">Existing Slack Bot Token: </Text>
             <Text className="ml-1 italic my-auto">
               {slackCredential.credential_json.slack_bot_token}
             </Text>
+            <button
+              className="ml-2 hover:bg-hover rounded p-1"
+              title="Edit credential"
+              onClick={() => setIsEditingCredential((v) => !v)}
+            >
+              <EditIcon size={16} />
+            </button>
             <Button
               size="xs"
               color="red"
               className="ml-3 text-inverted"
               onClick={async () => {
                 await adminDeleteCredential(slackCredential.id);
+                setIsEditingCredential(false);
                 refreshCredentials();
               }}
             >
               <TrashIcon />
             </Button>
           </div>
+          {isEditingCredential && (
+            <Card className="mt-2">
+              <Text className="mb-2">
+                Update the Slack bot token. The change is saved against the
+                existing credential, so all linked Slack connectors pick it up
+                on their next poll.
+              </Text>
+              <CredentialForm<SlackCredentialJson>
+                existingCredentialId={slackCredential.id}
+                formBody={
+                  <TextFormField
+                    name="slack_bot_token"
+                    label="Slack Bot Token:"
+                    type="password"
+                  />
+                }
+                validationSchema={Yup.object().shape({
+                  slack_bot_token: Yup.string().required(
+                    "Please enter your Slack bot token"
+                  ),
+                })}
+                initialValues={{
+                  slack_bot_token:
+                    slackCredential.credential_json.slack_bot_token || "",
+                }}
+                onSubmit={(isSuccess) => {
+                  if (isSuccess) {
+                    setIsEditingCredential(false);
+                    refreshCredentials();
+                  }
+                }}
+                extraActions={
+                  <Button
+                    type="button"
+                    size="xs"
+                    color="gray"
+                    onClick={() => setIsEditingCredential(false)}
+                  >
+                    Cancel
+                  </Button>
+                }
+              />
+            </Card>
+          )}
         </>
       ) : (
         <>

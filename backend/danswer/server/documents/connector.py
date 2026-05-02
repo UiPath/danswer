@@ -15,6 +15,8 @@ from danswer.auth.api_key import validate_api_key
 from danswer.auth.users import current_admin_user
 from danswer.auth.users import current_user
 from danswer.background.celery.celery_utils import get_deletion_status
+from danswer.background.task_utils import name_cc_cleanup_task
+from danswer.db.tasks import get_latest_tasks_by_names
 from danswer.configs.app_configs import ENABLED_CONNECTOR_TYPES
 from danswer.configs.constants import DocumentSource
 from danswer.configs.constants import FileOrigin
@@ -66,7 +68,10 @@ from danswer.db.index_attempt import cancel_indexing_attempts_past_model
 from danswer.db.index_attempt import create_index_attempt
 from danswer.db.index_attempt import get_index_attempts_for_cc_pair
 from danswer.db.index_attempt import get_latest_index_attempts
+from danswer.db.index_attempt import update_index_attempt_priority
+from danswer.db.models import IndexingStatus
 from danswer.db.models import User
+from danswer.server.documents.models import DeletionAttemptSnapshot
 from danswer.dynamic_configs.interface import ConfigNotFoundError
 from danswer.file_store.file_store import get_default_file_store
 from danswer.server.documents.models import AuthStatus
@@ -85,6 +90,7 @@ from danswer.server.documents.models import GoogleServiceAccountKey
 from danswer.server.documents.models import IndexAttemptSnapshot
 from danswer.server.documents.models import ObjectCreationIdResponse
 from danswer.server.documents.models import RunConnectorRequest
+from danswer.server.documents.models import UpdateIndexAttemptPriorityRequest
 from danswer.server.models import StatusResponse
 
 _GMAIL_CREDENTIAL_ID_COOKIE_NAME = "gmail_credential_id"
@@ -373,7 +379,6 @@ def get_connector_indexing_status(
 ) -> list[ConnectorIndexingStatus]:
     indexing_statuses: list[ConnectorIndexingStatus] = []
 
-    # TODO: make this one query
     cc_pairs = get_connector_credential_pairs(db_session)
     cc_pair_identifiers = [
         ConnectorCredentialPairIdentifier(
@@ -401,6 +406,19 @@ def get_connector_indexing_status(
         for connector_id, credential_id, cnt in document_count_info
     }
 
+    # Bulk-fetch latest cleanup-task row per cc_pair in one query, replacing
+    # the previous per-row `get_deletion_status` round-trips. Goes from
+    # O(N) round-trips to 1.
+    cleanup_task_names = [
+        name_cc_cleanup_task(
+            connector_id=cc_pair.connector_id, credential_id=cc_pair.credential_id
+        )
+        for cc_pair in cc_pairs
+    ]
+    cleanup_task_by_name = get_latest_tasks_by_names(
+        task_names=cleanup_task_names, db_session=db_session
+    )
+
     for cc_pair in cc_pairs:
         # TODO remove this to enable ingestion API
         if cc_pair.name == "DefaultCCPair":
@@ -411,6 +429,33 @@ def get_connector_indexing_status(
         latest_index_attempt = cc_pair_to_latest_index_attempt.get(
             (connector.id, credential.id)
         )
+
+        # Compute is_deletable inline using data we already have, instead of
+        # re-querying the DB per row via `check_deletion_attempt_is_allowed`.
+        # Mirrors the logic of that helper with `allow_scheduled=True`:
+        #   - connector must be disabled (paused)
+        #   - latest index attempt must not be IN_PROGRESS
+        is_deletable = bool(connector.disabled) and (
+            latest_index_attempt is None
+            or latest_index_attempt.status != IndexingStatus.IN_PROGRESS
+        )
+
+        # Build deletion_attempt snapshot from the bulk-fetched task row.
+        cleanup_task_row = cleanup_task_by_name.get(
+            name_cc_cleanup_task(
+                connector_id=connector.id, credential_id=credential.id
+            )
+        )
+        deletion_attempt = (
+            DeletionAttemptSnapshot(
+                connector_id=connector.id,
+                credential_id=credential.id,
+                status=cleanup_task_row.status,
+            )
+            if cleanup_task_row is not None
+            else None
+        )
+
         indexing_statuses.append(
             ConnectorIndexingStatus(
                 cc_pair_id=cc_pair.id,
@@ -434,18 +479,8 @@ def get_connector_indexing_status(
                 )
                 if latest_index_attempt
                 else None,
-                deletion_attempt=get_deletion_status(
-                    connector_id=connector.id,
-                    credential_id=credential.id,
-                    db_session=db_session,
-                ),
-                is_deletable=check_deletion_attempt_is_allowed(
-                    connector_credential_pair=cc_pair,
-                    db_session=db_session,
-                    # allow scheduled indexing attempts here, since on deletion request we will cancel them
-                    allow_scheduled=True,
-                )
-                is None,
+                deletion_attempt=deletion_attempt,
+                is_deletable=is_deletable,
             )
         )
 
@@ -592,6 +627,7 @@ def connector_run_once(
             credential_id=credential_id,
             embedding_model_id=embedding_model.id,
             from_beginning=run_info.from_beginning,
+            indexing_priority=run_info.indexing_priority,
             db_session=db_session,
         )
         for credential_id in credential_ids
@@ -608,6 +644,40 @@ def connector_run_once(
         success=True,
         message=f"Successfully created {len(index_attempt_ids)} index attempts",
         data=index_attempt_ids,
+    )
+
+
+@router.patch("/admin/index-attempt/{index_attempt_id}/priority")
+def update_index_attempt_priority_route(
+    index_attempt_id: int,
+    payload: UpdateIndexAttemptPriorityRequest,
+    _: User = Depends(current_admin_user),
+    db_session: Session = Depends(get_session),
+) -> StatusResponse[int]:
+    """Bumps the priority of an existing NOT_STARTED index attempt. Once
+    the attempt is in flight (IN_PROGRESS / SUCCESS / FAILED), priority no
+    longer affects scheduling so we refuse the update — the request is a
+    no-op and the caller can re-trigger if they need a fresh, higher-
+    priority run."""
+    updated = update_index_attempt_priority(
+        index_attempt_id=index_attempt_id,
+        indexing_priority=payload.indexing_priority,
+        db_session=db_session,
+    )
+    if updated is None:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Index attempt {index_attempt_id} not found, or no longer "
+                "in NOT_STARTED state — priority can only be changed before "
+                "the attempt is dispatched."
+            ),
+        )
+    return StatusResponse(
+        success=True,
+        message=f"Updated priority of index attempt {index_attempt_id} "
+        f"to {updated.indexing_priority}",
+        data=updated.indexing_priority,
     )
 
 

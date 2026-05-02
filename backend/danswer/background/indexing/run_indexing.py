@@ -22,6 +22,8 @@ from danswer.db.index_attempt import get_index_attempt
 from danswer.db.index_attempt import mark_attempt_failed
 from danswer.db.index_attempt import mark_attempt_in_progress__no_commit
 from danswer.db.index_attempt import mark_attempt_succeeded
+from danswer.db.index_attempt import release_cc_pair_lock
+from danswer.db.index_attempt import try_acquire_cc_pair_lock
 from danswer.db.index_attempt import update_docs_indexed
 from danswer.db.models import IndexAttempt
 from danswer.db.models import IndexingStatus
@@ -304,10 +306,28 @@ def _prepare_index_attempt(db_session: Session, index_attempt_id: int) -> IndexA
     return attempt
 
 
+_SKIPPED_CONCURRENT_REASON = "skipped_concurrent_cc_pair_run"
+
+
 def run_indexing_entrypoint(index_attempt_id: int, is_ee: bool = False) -> None:
     """Entrypoint for indexing run when using dask distributed.
     Wraps the actual logic in a `try` block so that we can catch any exceptions
-    and mark the attempt as failed."""
+    and mark the attempt as failed.
+
+    With NUM_INDEXING_WORKERS > 1, two workers can in rare cases pick up
+    attempts for the *same* (connector_id, credential_id) concurrently —
+    e.g. a manual Re-Index click colliding with an auto-scheduled run. To
+    prevent racing on Vespa writes / last_successful_index_time / connector
+    checkpoint state, we acquire a per-cc-pair Postgres advisory lock before
+    doing real work. If we can't acquire it, the attempt fails fast with
+    `skipped_concurrent_cc_pair_run` and the next scheduler tick creates a
+    fresh NOT_STARTED row.
+
+    Per-source-type rate-limit caps are enforced *upstream* in the
+    scheduler (`update.py::kickoff_indexing_jobs`) — over-cap attempts
+    are simply not submitted to Dask and stay NOT_STARTED until a slot
+    frees. So no source-cap fail-fast logic lives here.
+    """
     try:
         if is_ee:
             global_version.set_ee()
@@ -321,18 +341,59 @@ def run_indexing_entrypoint(index_attempt_id: int, is_ee: bool = False) -> None:
             # as in progress
             attempt = _prepare_index_attempt(db_session, index_attempt_id)
 
-            logger.info(
-                f"Running indexing attempt for connector: '{attempt.connector.name}', "
-                f"with config: '{attempt.connector.connector_specific_config}', and "
-                f"with credentials: '{attempt.credential_id}'"
-            )
+            connector_id = attempt.connector_id
+            credential_id = attempt.credential_id
+            if connector_id is None or credential_id is None:
+                # Defensive: should never happen for a NOT_STARTED attempt that
+                # made it past _prepare_index_attempt, but the model allows
+                # nullable FKs. Fail fast with a useful message.
+                mark_attempt_failed(
+                    attempt,
+                    db_session,
+                    failure_reason="connector_id or credential_id is null",
+                )
+                return
 
-            _run_indexing(db_session, attempt)
+            # Per-cc-pair concurrency guard. See module docstring for rationale.
+            if not try_acquire_cc_pair_lock(
+                db_session, connector_id, credential_id
+            ):
+                logger.info(
+                    f"Skipping indexing attempt {index_attempt_id} for "
+                    f"connector_id={connector_id} credential_id={credential_id}: "
+                    "another worker is already running an attempt for this "
+                    "cc-pair. The scheduler will retry on its next tick."
+                )
+                mark_attempt_failed(
+                    attempt,
+                    db_session,
+                    failure_reason=_SKIPPED_CONCURRENT_REASON,
+                )
+                return
 
-            logger.info(
-                f"Completed indexing attempt for connector: '{attempt.connector.name}', "
-                f"with config: '{attempt.connector.connector_specific_config}', and "
-                f"with credentials: '{attempt.credential_id}'"
-            )
+            try:
+                priority_str = (
+                    f", priority: {attempt.indexing_priority}"
+                    if attempt.indexing_priority
+                    else ""
+                )
+                logger.info(
+                    f"Running indexing attempt for connector: '{attempt.connector.name}', "
+                    f"with config: '{attempt.connector.connector_specific_config}', and "
+                    f"with credentials: '{attempt.credential_id}'"
+                    f"{priority_str}"
+                )
+
+                _run_indexing(db_session, attempt)
+
+                logger.info(
+                    f"Completed indexing attempt for connector: '{attempt.connector.name}', "
+                    f"with config: '{attempt.connector.connector_specific_config}', and "
+                    f"with credentials: '{attempt.credential_id}'"
+                )
+            finally:
+                # Session-scoped lock auto-releases on disconnect, but explicit
+                # release is faster — no waiting for the connection to time out.
+                release_cc_pair_lock(db_session, connector_id, credential_id)
     except Exception as e:
         logger.exception(f"Indexing job with ID '{index_attempt_id}' failed due to {e}")

@@ -1,7 +1,8 @@
 "use client";
 
+import { useState } from "react";
 import * as Yup from "yup";
-import { ConfluenceIcon, TrashIcon } from "@/components/icons/icons";
+import { ConfluenceIcon, EditIcon, TrashIcon } from "@/components/icons/icons";
 import {
   BooleanFormField,
   TextFormField,
@@ -23,7 +24,7 @@ import { ConnectorForm } from "@/components/admin/connectors/ConnectorForm";
 import { ConnectorsTable } from "@/components/admin/connectors/table/ConnectorsTable";
 import { usePopup } from "@/components/admin/connectors/Popup";
 import { usePublicCredentials } from "@/lib/hooks";
-import { Card, Divider, Text, Title } from "@tremor/react";
+import { Button, Card, Divider, Text, Title } from "@tremor/react";
 import { AdminPageTitle } from "@/components/admin/Title";
 
 const extractSpaceFromCloudUrl = (wikiUrl: string): string => {
@@ -62,6 +63,7 @@ const extractSpaceFromUrl = (wikiUrl: string): string | null => {
 
 const Main = () => {
   const { popup, setPopup } = usePopup();
+  const [isEditingCredential, setIsEditingCredential] = useState(false);
 
   const { mutate } = useSWRConfig();
   const {
@@ -125,19 +127,21 @@ const Main = () => {
 
       {confluenceCredential ? (
         <>
-          <div className="flex mb-1 text-sm">
-            {/* <div className="flex">
-                <p className="my-auto">Existing Username: </p>
-                <p className="ml-1 italic my-auto max-w-md truncate">
-                  {confluenceCredential.credential_json?.confluence_username}
-                </p>{" "}
-              </div> */}
+          <div className="flex mb-1 text-sm items-center">
             <p className="my-auto">Existing Access Token: </p>
             <p className="ml-1 italic my-auto max-w-md truncate">
               {confluenceCredential.credential_json?.confluence_access_token}
             </p>
             <button
               className="ml-1 hover:bg-hover rounded p-1"
+              title="Edit credential"
+              onClick={() => setIsEditingCredential((v) => !v)}
+            >
+              <EditIcon size={16} />
+            </button>
+            <button
+              className="ml-1 hover:bg-hover rounded p-1"
+              title="Delete credential"
               onClick={async () => {
                 if (confluenceConnectorIndexingStatuses.length > 0) {
                   setPopup({
@@ -148,12 +152,69 @@ const Main = () => {
                   return;
                 }
                 await adminDeleteCredential(confluenceCredential.id);
+                setIsEditingCredential(false);
                 refreshCredentials();
               }}
             >
               <TrashIcon />
             </button>
           </div>
+          {isEditingCredential && (
+            <Card className="mt-2">
+              <Text className="mb-2">
+                Update the Confluence credential below. All connectors using
+                this credential pick up the change on their next poll.
+              </Text>
+              <CredentialForm<ConfluenceCredentialJson>
+                existingCredentialId={confluenceCredential.id}
+                formBody={
+                  <>
+                    <TextFormField
+                      name="confluence_username"
+                      label="Username:"
+                    />
+                    <TextFormField
+                      name="confluence_access_token"
+                      label="Access Token:"
+                      type="password"
+                    />
+                  </>
+                }
+                validationSchema={Yup.object().shape({
+                  confluence_username: Yup.string().required(
+                    "Please enter your username on Confluence"
+                  ),
+                  confluence_access_token: Yup.string().required(
+                    "Please enter your Confluence access token"
+                  ),
+                })}
+                initialValues={{
+                  confluence_username:
+                    confluenceCredential.credential_json
+                      ?.confluence_username || "",
+                  confluence_access_token:
+                    confluenceCredential.credential_json
+                      ?.confluence_access_token || "",
+                }}
+                onSubmit={(isSuccess) => {
+                  if (isSuccess) {
+                    setIsEditingCredential(false);
+                    refreshCredentials();
+                  }
+                }}
+                extraActions={
+                  <Button
+                    type="button"
+                    size="xs"
+                    color="gray"
+                    onClick={() => setIsEditingCredential(false)}
+                  >
+                    Cancel
+                  </Button>
+                }
+              />
+            </Card>
+          )}
         </>
       ) : (
         <>

@@ -1,6 +1,7 @@
 import logging
 import time
 from datetime import datetime
+from typing import Any
 
 import dask
 from dask.distributed import Client
@@ -16,6 +17,7 @@ from danswer.configs.app_configs import CLEANUP_INDEXING_JOBS_TIMEOUT
 from danswer.configs.app_configs import DASK_JOB_CLIENT_ENABLED
 from danswer.configs.app_configs import DISABLE_INDEX_UPDATE_ON_SWAP
 from danswer.configs.app_configs import NUM_INDEXING_WORKERS
+from danswer.configs.indexing_concurrency import PER_SOURCE_CAP
 from danswer.db.connector import fetch_connectors
 from danswer.db.embedding_model import get_current_db_embedding_model
 from danswer.db.embedding_model import get_secondary_db_embedding_model
@@ -277,6 +279,23 @@ def kickoff_indexing_jobs(
             if attempt.id not in existing_jobs
         ]
 
+        # Count IN_PROGRESS attempts per source type so we can defer
+        # submissions that would exceed the per-source cap. Deferred
+        # attempts stay NOT_STARTED and get reconsidered on the next tick
+        # when a slot frees up — no FAILED rows, no extra Dask work.
+        running_per_source: dict[str, int] = {}
+        if PER_SOURCE_CAP > 0:
+            in_progress = (
+                db_session.query(IndexAttempt)
+                .filter(IndexAttempt.status == IndexingStatus.IN_PROGRESS)
+                .all()
+            )
+            for ip in in_progress:
+                if ip.connector is None:
+                    continue
+                key = ip.connector.source.value
+                running_per_source[key] = running_per_source.get(key, 0) + 1
+
     logger.info(f"Found {len(new_indexing_attempts)} new indexing tasks.")
 
     if not new_indexing_attempts:
@@ -307,28 +326,53 @@ def kickoff_indexing_jobs(
                 )
             continue
 
+        # Per-source-type concurrency cap. Defer over-cap attempts: leave
+        # them NOT_STARTED so the next tick picks them up once a running
+        # attempt for the same source finishes. PER_SOURCE_CAP=0 disables.
+        if PER_SOURCE_CAP > 0:
+            source_key = attempt.connector.source.value
+            if running_per_source.get(source_key, 0) >= PER_SOURCE_CAP:
+                logger.info(
+                    f"Deferring indexing attempt {attempt.id} for connector "
+                    f"'{attempt.connector.name}' (source={source_key}): "
+                    f"cap of {PER_SOURCE_CAP} reached. "
+                    "Will retry on next scheduler tick."
+                )
+                continue
+            running_per_source[source_key] = (
+                running_per_source.get(source_key, 0) + 1
+            )
+
+        # Per-attempt indexing priority. SimpleJobClient ignores the kwarg;
+        # the real Dask Client honors it (higher number = scheduled first).
+        priority = int(attempt.indexing_priority or 0)
+        submit_kwargs: dict[str, Any] = {"pure": False}
+        if isinstance(client, Client):
+            submit_kwargs["priority"] = priority
+
         if use_secondary_index:
             run = secondary_client.submit(
                 run_indexing_entrypoint,
                 attempt.id,
                 global_version.get_is_ee_version(),
-                pure=False,
+                **submit_kwargs,
             )
         else:
             run = client.submit(
                 run_indexing_entrypoint,
                 attempt.id,
                 global_version.get_is_ee_version(),
-                pure=False,
+                **submit_kwargs,
             )
 
         if run:
             secondary_str = "(secondary index) " if use_secondary_index else ""
+            priority_str = f", priority: {priority}" if priority else ""
             logger.info(
                 f"Kicked off {secondary_str}"
                 f"indexing attempt for connector: '{attempt.connector.name}', "
                 f"with config: '{attempt.connector.connector_specific_config}', and "
-                f"with credentials: '{attempt.credential_id}'"
+                f"with credentials: '{attempt.credential_id}'{priority_str}"
             )
             existing_jobs_copy[attempt.id] = run
 

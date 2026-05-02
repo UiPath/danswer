@@ -45,6 +45,10 @@ interface PartialSourceMetadata {
   icon: React.FC<{ size?: number; className?: string }>;
   displayName: string;
   category: SourceCategory;
+  // Optional explicit admin URL. If unset, the URL is derived from
+  // displayName. Use this when you want the URL to differ from the
+  // displayName-derived default (e.g. when retaining a legacy route).
+  adminUrl?: string;
 }
 
 type SourceMap = {
@@ -80,6 +84,11 @@ const SOURCE_METADATA_MAP: SourceMap = {
   github: {
     icon: GithubIcon,
     displayName: "Github",
+    category: SourceCategory.AppConnection,
+  },
+  github_files: {
+    icon: GithubIcon,
+    displayName: "GitHub-Files",
     category: SourceCategory.AppConnection,
   },
   gitlab: {
@@ -169,12 +178,12 @@ const SOURCE_METADATA_MAP: SourceMap = {
   },
   salesforce: {
     icon: SalesforceIcon,
-    displayName: "Salesforce",
+    displayName: "SF-Account",
     category: SourceCategory.AppConnection,
   },
   sfkbarticles: {
     icon: SalesforceIcon,
-    displayName: "SfKbArticles",
+    displayName: "SF-KBArticles",
     category: SourceCategory.AppConnection,
   },
   sharepoint: {
@@ -246,9 +255,11 @@ function fillSourceMetadata(
   return {
     internalName: internalName,
     ...partialMetadata,
-    adminUrl: `/admin/connectors/${partialMetadata.displayName
-      .toLowerCase()
-      .replaceAll(" ", "-")}`,
+    adminUrl:
+      partialMetadata.adminUrl ??
+      `/admin/connectors/${partialMetadata.displayName
+        .toLowerCase()
+        .replaceAll(" ", "-")}`,
   };
 }
 

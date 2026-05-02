@@ -8,3 +8,19 @@
 *.sw?
 docker-compose.dev.yml
 venv/
+
+# Claude Code: keep shared project settings (.claude/settings.json) but not
+# personal overrides or session state.
+.claude/settings.local.json
+.claude/projects/
+.claude/cache/
+
+# Claude Code /export outputs (timestamped conversation transcripts).
+# Pattern: YYYY-MM-DD-HHMMSS-<slug>.txt — typically dropped into the cwd
+# from which Claude Code was launched.
+[0-9][0-9][0-9][0-9]-[0-1][0-9]-[0-3][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]-*.txt
+
+# Stray LLM API request payloads sometimes dumped during local debugging.
+# These contain prompt content (chat history, internal references, names).
+backend/requestdata.json
+requestdata.json

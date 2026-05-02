@@ -273,7 +273,18 @@ def handle_followup_button(
                 if dri_ids:
                     tag_ids.extend(dri_ids)
 
-    blocks = build_follow_up_resolved_blocks(tag_ids=tag_ids, group_ids=group_ids)
+    # Pass the message_id (decoded from the followup button's block_id)
+    # so the "Mark Resolved" button can attribute its feedback row to the
+    # right chat_message.
+    resolved_message_id: int | None = None
+    if action_id is not None:
+        try:
+            resolved_message_id, _, _ = decompose_action_id(action_id)
+        except ValueError:
+            resolved_message_id = None
+    blocks = build_follow_up_resolved_blocks(
+        tag_ids=tag_ids, group_ids=group_ids, message_id=resolved_message_id
+    )
 
     # Check for curated response based on user title
     curated_response_sent = handle_curated_response(
@@ -339,6 +350,39 @@ def handle_followup_resolved_button(
     thread_ts = req.payload["container"]["thread_ts"]
 
     clicker_name = get_clicker_name(req, client)
+
+    # Record a chat_feedback row marking this message as resolved so the
+    # NPS / analytics pipeline can count "resolved" alongside "like" as
+    # a positive signal. Best-effort: if the action_id / block_id doesn't
+    # carry a message_id (e.g. older button payloads from before this
+    # change), we just log and move on rather than blocking the UX.
+    action_block_id: str | None = None
+    if actions := req.payload.get("actions"):
+        action = cast(dict[str, Any], actions[0])
+        action_block_id = cast(str | None, action.get("block_id"))
+    if action_block_id:
+        try:
+            resolved_message_id, _, _ = decompose_action_id(action_block_id)
+            with Session(get_sqlalchemy_engine()) as db_session:
+                create_chat_message_feedback(
+                    is_positive=None,
+                    feedback_text="",
+                    chat_message_id=resolved_message_id,
+                    user_id=None,  # no "user" for Slack bot for now
+                    db_session=db_session,
+                    predefined_feedback="resolved",
+                )
+        except (ValueError, Exception) as e:  # noqa: BLE001 — best effort
+            logger_base.warning(
+                f"Could not record 'resolved' feedback (block_id="
+                f"{action_block_id!r}): {e}"
+            )
+    else:
+        logger_base.info(
+            "Resolved button clicked but the ActionsBlock had no block_id; "
+            "feedback row not recorded. Older message — expected to phase "
+            "out as new bot replies use the updated build_follow_up_block."
+        )
 
     update_emote_react(
         emoji=DANSWER_FOLLOWUP_EMOJI,

@@ -1,7 +1,8 @@
 "use client";
 
+import { useState } from "react";
 import * as Yup from "yup";
-import { JiraIcon, TrashIcon } from "@/components/icons/icons";
+import { EditIcon, JiraIcon, TrashIcon } from "@/components/icons/icons";
 import {
   TextFormField,
   TextArrayFieldBuilder,
@@ -24,10 +25,11 @@ import { ConnectorsTable } from "@/components/admin/connectors/table/ConnectorsT
 import { usePopup } from "@/components/admin/connectors/Popup";
 import { usePublicCredentials } from "@/lib/hooks";
 import { AdminPageTitle } from "@/components/admin/Title";
-import { Card, Divider, Text, Title } from "@tremor/react";
+import { Button, Card, Divider, Text, Title } from "@tremor/react";
 
 const Main = () => {
   const { popup, setPopup } = usePopup();
+  const [isEditingCredential, setIsEditingCredential] = useState(false);
 
   const { mutate } = useSWRConfig();
   const {
@@ -92,13 +94,21 @@ const Main = () => {
 
       {jiraCredential ? (
         <>
-          <div className="flex mb-1 text-sm">
+          <div className="flex mb-1 text-sm items-center">
             <p className="my-auto">Existing Access Token: </p>
             <p className="ml-1 italic my-auto max-w-md truncate">
               {jiraCredential.credential_json?.jira_api_token}
             </p>
             <button
+              className="ml-1 hover:bg-hover rounded p-1"
+              title="Edit credential"
+              onClick={() => setIsEditingCredential((v) => !v)}
+            >
+              <EditIcon size={16} />
+            </button>
+            <button
               className="ml-1 hover:bg-gray-700 rounded-full p-1"
+              title="Delete credential"
               onClick={async () => {
                 if (jiraConnectorIndexingStatuses.length > 0) {
                   setPopup({
@@ -121,12 +131,109 @@ const Main = () => {
                     message: `Failed to delete credential - ${errorMsg}`,
                   });
                 }
+                setIsEditingCredential(false);
                 refreshCredentials();
               }}
             >
               <TrashIcon />
             </button>
           </div>
+          {isEditingCredential && (
+            <Card className="mt-2">
+              <Text className="mb-2">
+                Update the Jira credential below. The form shape matches your
+                existing credential type ({jiraCredential.credential_json
+                  ?.jira_user_email
+                  ? "Cloud"
+                  : "Server"}
+                ).
+              </Text>
+              {jiraCredential.credential_json?.jira_user_email !== undefined ? (
+                <CredentialForm<JiraCredentialJson>
+                  existingCredentialId={jiraCredential.id}
+                  formBody={
+                    <>
+                      <TextFormField
+                        name="jira_user_email"
+                        label="Username:"
+                      />
+                      <TextFormField
+                        name="jira_api_token"
+                        label="Access Token:"
+                        type="password"
+                      />
+                    </>
+                  }
+                  validationSchema={Yup.object().shape({
+                    jira_user_email: Yup.string().required(
+                      "Please enter your username on Jira"
+                    ),
+                    jira_api_token: Yup.string().required(
+                      "Please enter your Jira access token"
+                    ),
+                  })}
+                  initialValues={{
+                    jira_user_email:
+                      jiraCredential.credential_json?.jira_user_email || "",
+                    jira_api_token:
+                      jiraCredential.credential_json?.jira_api_token || "",
+                  }}
+                  onSubmit={(isSuccess) => {
+                    if (isSuccess) {
+                      setIsEditingCredential(false);
+                      refreshCredentials();
+                    }
+                  }}
+                  extraActions={
+                    <Button
+                      type="button"
+                      size="xs"
+                      color="gray"
+                      onClick={() => setIsEditingCredential(false)}
+                    >
+                      Cancel
+                    </Button>
+                  }
+                />
+              ) : (
+                <CredentialForm<JiraServerCredentialJson>
+                  existingCredentialId={jiraCredential.id}
+                  formBody={
+                    <TextFormField
+                      name="jira_api_token"
+                      label="Personal Access Token:"
+                      type="password"
+                    />
+                  }
+                  validationSchema={Yup.object().shape({
+                    jira_api_token: Yup.string().required(
+                      "Please enter your Jira personal access token"
+                    ),
+                  })}
+                  initialValues={{
+                    jira_api_token:
+                      jiraCredential.credential_json?.jira_api_token || "",
+                  }}
+                  onSubmit={(isSuccess) => {
+                    if (isSuccess) {
+                      setIsEditingCredential(false);
+                      refreshCredentials();
+                    }
+                  }}
+                  extraActions={
+                    <Button
+                      type="button"
+                      size="xs"
+                      color="gray"
+                      onClick={() => setIsEditingCredential(false)}
+                    >
+                      Cancel
+                    </Button>
+                  }
+                />
+              )}
+            </Card>
+          )}
         </>
       ) : (
         <>

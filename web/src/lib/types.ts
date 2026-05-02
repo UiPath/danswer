@@ -29,6 +29,7 @@ export interface MinimalUserSnapshot {
 export type ValidSources =
   | "web"
   | "github"
+  | "github_files"
   | "gitlab"
   | "slack"
   | "google_drive"
@@ -111,6 +112,14 @@ export interface GithubConfig {
   repo_name: string;
   include_prs: boolean;
   include_issues: boolean;
+}
+
+export interface GithubFilesConfig {
+  repo_owner: string;
+  repo_name: string;
+  path_prefix: string;
+  file_extension: string;
+  branch?: string;
 }
 
 export interface GitlabConfig {
@@ -278,6 +287,8 @@ export interface IndexAttemptSnapshot {
   full_exception_trace: string | null;
   time_started: string | null;
   time_updated: string;
+  // 0 = normal (auto-scheduled). Higher values jump the indexing queue.
+  indexing_priority?: number;
 }
 
 export interface ConnectorIndexingStatus<
@@ -459,9 +470,15 @@ export interface OCICredentialJson {
 }
 
 export interface SalesforceCredentialJson {
+  sf_client_id: string;
+  sf_client_secret: string;
   sf_username: string;
   sf_password: string;
-  sf_security_token: string;
+  // Discriminator so the salesforce + sfkbarticles pages don't pick up each
+  // other's credentials. "account" for the salesforce/Account connector,
+  // "kbarticles" for the sfkbarticles connector. Optional for backward
+  // compat with credentials created before this field existed.
+  sf_credential_kind?: "account" | "kbarticles";
 }
 
 export interface SfKbArticlesCredentialJson {
@@ -469,6 +486,7 @@ export interface SfKbArticlesCredentialJson {
   sf_client_secret: string;
   sf_username: string;
   sf_password: string;
+  sf_credential_kind?: "account" | "kbarticles";
 }
 
 export interface SharepointCredentialJson {
