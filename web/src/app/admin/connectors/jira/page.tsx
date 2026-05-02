@@ -142,8 +142,8 @@ const Main = () => {
             <Card className="mt-2">
               <Text className="mb-2">
                 Update the Jira credential below. The form shape matches your
-                existing credential type ({jiraCredential.credential_json
-                  ?.jira_user_email
+                existing credential type (
+                {jiraCredential.credential_json?.jira_user_email
                   ? "Cloud"
                   : "Server"}
                 ).
@@ -153,10 +153,7 @@ const Main = () => {
                   existingCredentialId={jiraCredential.id}
                   formBody={
                     <>
-                      <TextFormField
-                        name="jira_user_email"
-                        label="Username:"
-                      />
+                      <TextFormField name="jira_user_email" label="Username:" />
                       <TextFormField
                         name="jira_api_token"
                         label="Access Token:"

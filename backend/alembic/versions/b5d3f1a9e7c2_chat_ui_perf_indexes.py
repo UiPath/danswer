@@ -56,9 +56,5 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     with op.get_context().autocommit_block():
-        op.execute(
-            "DROP INDEX CONCURRENTLY IF EXISTS ix_chat_session_user_id"
-        )
-        op.execute(
-            "DROP INDEX CONCURRENTLY IF EXISTS ix_chat_message_chat_session_id"
-        )
+        op.execute("DROP INDEX CONCURRENTLY IF EXISTS ix_chat_session_user_id")
+        op.execute("DROP INDEX CONCURRENTLY IF EXISTS ix_chat_message_chat_session_id")

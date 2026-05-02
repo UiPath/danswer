@@ -20,7 +20,6 @@ Usage:
     [SF_KEEP_ATTRIBUTES=1]        # keep Salesforce 'attributes' block (default: stripped)
     python backend/scripts/dump_salesforce_account.py
 """
-
 import json
 import os
 import sys
@@ -109,9 +108,7 @@ def _execute_soql(
 def _strip_attributes(value: Any) -> Any:
     """Recursively remove Salesforce's noisy 'attributes' blocks."""
     if isinstance(value, dict):
-        return {
-            k: _strip_attributes(v) for k, v in value.items() if k != "attributes"
-        }
+        return {k: _strip_attributes(v) for k, v in value.items() if k != "attributes"}
     if isinstance(value, list):
         return [_strip_attributes(v) for v in value]
     return value

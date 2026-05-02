@@ -14,9 +14,7 @@ from sqlalchemy.orm import Session
 from danswer.auth.api_key import validate_api_key
 from danswer.auth.users import current_admin_user
 from danswer.auth.users import current_user
-from danswer.background.celery.celery_utils import get_deletion_status
 from danswer.background.task_utils import name_cc_cleanup_task
-from danswer.db.tasks import get_latest_tasks_by_names
 from danswer.configs.app_configs import ENABLED_CONNECTOR_TYPES
 from danswer.configs.constants import DocumentSource
 from danswer.configs.constants import FileOrigin
@@ -59,7 +57,6 @@ from danswer.db.credentials import create_credential
 from danswer.db.credentials import delete_gmail_service_account_credentials
 from danswer.db.credentials import delete_google_drive_service_account_credentials
 from danswer.db.credentials import fetch_credential_by_id
-from danswer.db.deletion_attempt import check_deletion_attempt_is_allowed
 from danswer.db.document import get_document_cnts_for_cc_pairs
 from danswer.db.embedding_model import get_current_db_embedding_model
 from danswer.db.engine import get_session
@@ -71,7 +68,7 @@ from danswer.db.index_attempt import get_latest_index_attempts
 from danswer.db.index_attempt import update_index_attempt_priority
 from danswer.db.models import IndexingStatus
 from danswer.db.models import User
-from danswer.server.documents.models import DeletionAttemptSnapshot
+from danswer.db.tasks import get_latest_tasks_by_names
 from danswer.dynamic_configs.interface import ConfigNotFoundError
 from danswer.file_store.file_store import get_default_file_store
 from danswer.server.documents.models import AuthStatus
@@ -81,6 +78,7 @@ from danswer.server.documents.models import ConnectorCredentialPairIdentifier
 from danswer.server.documents.models import ConnectorIndexingStatus
 from danswer.server.documents.models import ConnectorSnapshot
 from danswer.server.documents.models import CredentialSnapshot
+from danswer.server.documents.models import DeletionAttemptSnapshot
 from danswer.server.documents.models import FileUploadResponse
 from danswer.server.documents.models import GDriveCallback
 from danswer.server.documents.models import GmailCallback
@@ -442,9 +440,7 @@ def get_connector_indexing_status(
 
         # Build deletion_attempt snapshot from the bulk-fetched task row.
         cleanup_task_row = cleanup_task_by_name.get(
-            name_cc_cleanup_task(
-                connector_id=connector.id, credential_id=credential.id
-            )
+            name_cc_cleanup_task(connector_id=connector.id, credential_id=credential.id)
         )
         deletion_attempt = (
             DeletionAttemptSnapshot(

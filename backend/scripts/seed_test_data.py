@@ -33,29 +33,26 @@ from danswer.configs.constants import DocumentSource
 from danswer.configs.constants import MessageType
 from danswer.connectors.models import InputType
 from danswer.db.engine import get_sqlalchemy_engine
-from danswer.db.models import (
-    ChatMessage,
-    ChatMessageFeedback,
-    ChatSession,
-    ChatSessionSharedStatus,
-    ChatMessage__SearchDoc,
-    Connector,
-    ConnectorCredentialPair,
-    Credential,
-    Document,
-    DocumentByConnectorCredentialPair,
-    EmbeddingModel,
-    IndexAttempt,
-    IndexingStatus,
-    PermissionSyncJobType,
-    PermissionSyncRun,
-    PermissionSyncStatus,
-    Persona,
-    SearchDoc,
-    SlackBotConfig,
-    SlackBotResponseType,
-    User,
-)
+from danswer.db.models import ChatMessage
+from danswer.db.models import ChatMessage__SearchDoc
+from danswer.db.models import ChatMessageFeedback
+from danswer.db.models import ChatSession
+from danswer.db.models import ChatSessionSharedStatus
+from danswer.db.models import Connector
+from danswer.db.models import ConnectorCredentialPair
+from danswer.db.models import Credential
+from danswer.db.models import Document
+from danswer.db.models import DocumentByConnectorCredentialPair
+from danswer.db.models import EmbeddingModel
+from danswer.db.models import IndexAttempt
+from danswer.db.models import IndexingStatus
+from danswer.db.models import PermissionSyncJobType
+from danswer.db.models import PermissionSyncStatus
+from danswer.db.models import Persona
+from danswer.db.models import SearchDoc
+from danswer.db.models import SlackBotConfig
+from danswer.db.models import SlackBotResponseType
+from danswer.db.models import User
 
 
 SEED_PREFIX = "__test_seed__"
@@ -418,11 +415,7 @@ def seed_search_docs_for_messages(
             )
             db.add(sd)
             db.flush()
-            db.add(
-                ChatMessage__SearchDoc(
-                    chat_message_id=msg.id, search_doc_id=sd.id
-                )
-            )
+            db.add(ChatMessage__SearchDoc(chat_message_id=msg.id, search_doc_id=sd.id))
             created += 1
         db.commit()
     return created
@@ -438,9 +431,7 @@ def seed_slack_bot_configs(
     """
     for i in range(count):
         n_channels = rng.randint(2, 5)
-        channels = [
-            f"{SEED_PREFIX}-channel-{i}-{j}" for j in range(n_channels)
-        ]
+        channels = [f"{SEED_PREFIX}-channel-{i}-{j}" for j in range(n_channels)]
         db.add(
             SlackBotConfig(
                 persona_id=persona_id,
@@ -566,21 +557,27 @@ def clean_seeded_data(db: Session) -> dict[str, int]:
     counts: dict[str, int] = {}
 
     # 0. chat_message__search_doc → search_doc rows we created
-    counts["chat_message__search_doc"] = db.execute(
-        text(
-            """
+    counts["chat_message__search_doc"] = (
+        db.execute(
+            text(
+                """
             DELETE FROM chat_message__search_doc
             WHERE search_doc_id IN (
                 SELECT id FROM search_doc WHERE semantic_id LIKE :p
             )
             """
-        ),
-        {"p": f"{SEED_PREFIX}%"},
-    ).rowcount or 0
-    counts["search_doc"] = db.execute(
-        text("DELETE FROM search_doc WHERE semantic_id LIKE :p"),
-        {"p": f"{SEED_PREFIX}%"},
-    ).rowcount or 0
+            ),
+            {"p": f"{SEED_PREFIX}%"},
+        ).rowcount
+        or 0
+    )
+    counts["search_doc"] = (
+        db.execute(
+            text("DELETE FROM search_doc WHERE semantic_id LIKE :p"),
+            {"p": f"{SEED_PREFIX}%"},
+        ).rowcount
+        or 0
+    )
     db.commit()
 
     # 1. chat_message__search_doc → chat_message (where session is tagged)
@@ -630,42 +627,52 @@ def clean_seeded_data(db: Session) -> dict[str, int]:
     )
 
     # 4. chat_message
-    counts["chat_message"] = db.execute(
-        text(
-            """
+    counts["chat_message"] = (
+        db.execute(
+            text(
+                """
             DELETE FROM chat_message
             WHERE chat_session_id IN (
                 SELECT id FROM chat_session WHERE description LIKE :p
             )
             """
-        ),
-        {"p": f"{SEED_PREFIX}%"},
-    ).rowcount or 0
+            ),
+            {"p": f"{SEED_PREFIX}%"},
+        ).rowcount
+        or 0
+    )
 
     # 5. chat_session
-    counts["chat_session"] = db.execute(
-        text("DELETE FROM chat_session WHERE description LIKE :p"),
-        {"p": f"{SEED_PREFIX}%"},
-    ).rowcount or 0
+    counts["chat_session"] = (
+        db.execute(
+            text("DELETE FROM chat_session WHERE description LIKE :p"),
+            {"p": f"{SEED_PREFIX}%"},
+        ).rowcount
+        or 0
+    )
     db.commit()
 
     # 6. permission_sync_run linked to seeded ccps
-    counts["permission_sync_run"] = db.execute(
-        text(
-            """
+    counts["permission_sync_run"] = (
+        db.execute(
+            text(
+                """
             DELETE FROM permission_sync_run
             WHERE cc_pair_id IN (
                 SELECT id FROM connector_credential_pair WHERE name LIKE :p
             )
             """
-        ),
-        {"p": f"{SEED_PREFIX}%"},
-    ).rowcount or 0
+            ),
+            {"p": f"{SEED_PREFIX}%"},
+        ).rowcount
+        or 0
+    )
 
     # 7. slack_bot_config — tagged via channel_config JSON
-    counts["slack_bot_config"] = db.execute(
-        text(
-            """
+    counts["slack_bot_config"] = (
+        db.execute(
+            text(
+                """
             DELETE FROM slack_bot_config
             WHERE EXISTS (
                 SELECT 1
@@ -673,45 +680,60 @@ def clean_seeded_data(db: Session) -> dict[str, int]:
                 WHERE c LIKE :p
             )
             """
-        ),
-        {"p": f"{SEED_PREFIX}%"},
-    ).rowcount or 0
+            ),
+            {"p": f"{SEED_PREFIX}%"},
+        ).rowcount
+        or 0
+    )
 
     # 8. index_attempt linked to seeded connectors
-    counts["index_attempt"] = db.execute(
-        text(
-            """
+    counts["index_attempt"] = (
+        db.execute(
+            text(
+                """
             DELETE FROM index_attempt
             WHERE connector_id IN (
                 SELECT id FROM connector WHERE name LIKE :p
             )
             """
-        ),
-        {"p": f"{SEED_PREFIX}%"},
-    ).rowcount or 0
+            ),
+            {"p": f"{SEED_PREFIX}%"},
+        ).rowcount
+        or 0
+    )
 
     # 9. document_by_connector_credential_pair + document
-    counts["document_by_connector_credential_pair"] = db.execute(
-        text(
-            "DELETE FROM document_by_connector_credential_pair WHERE id LIKE :p"
-        ),
-        {"p": f"{SEED_PREFIX}%"},
-    ).rowcount or 0
-    counts["document"] = db.execute(
-        text("DELETE FROM document WHERE id LIKE :p"),
-        {"p": f"{SEED_PREFIX}%"},
-    ).rowcount or 0
+    counts["document_by_connector_credential_pair"] = (
+        db.execute(
+            text("DELETE FROM document_by_connector_credential_pair WHERE id LIKE :p"),
+            {"p": f"{SEED_PREFIX}%"},
+        ).rowcount
+        or 0
+    )
+    counts["document"] = (
+        db.execute(
+            text("DELETE FROM document WHERE id LIKE :p"),
+            {"p": f"{SEED_PREFIX}%"},
+        ).rowcount
+        or 0
+    )
     db.commit()
 
     # 10. connector_credential_pair → connector + credential
-    counts["connector_credential_pair"] = db.execute(
-        text("DELETE FROM connector_credential_pair WHERE name LIKE :p"),
-        {"p": f"{SEED_PREFIX}%"},
-    ).rowcount or 0
-    counts["connector"] = db.execute(
-        text("DELETE FROM connector WHERE name LIKE :p"),
-        {"p": f"{SEED_PREFIX}%"},
-    ).rowcount or 0
+    counts["connector_credential_pair"] = (
+        db.execute(
+            text("DELETE FROM connector_credential_pair WHERE name LIKE :p"),
+            {"p": f"{SEED_PREFIX}%"},
+        ).rowcount
+        or 0
+    )
+    counts["connector"] = (
+        db.execute(
+            text("DELETE FROM connector WHERE name LIKE :p"),
+            {"p": f"{SEED_PREFIX}%"},
+        ).rowcount
+        or 0
+    )
     # Credentials don't have a "name" column; we created admin_public=true
     # rows linked to seeded cc_pairs. Find via the JSON marker we put in
     # connector_specific_config? Cleaner: orphan credentials with no
@@ -724,10 +746,13 @@ def clean_seeded_data(db: Session) -> dict[str, int]:
     #     checkpoint when needed.
 
     # 12. users (last — many FKs reference user.id)
-    counts["user"] = db.execute(
-        text("""DELETE FROM "user" WHERE email LIKE :p"""),
-        {"p": f"{SEED_PREFIX}%"},
-    ).rowcount or 0
+    counts["user"] = (
+        db.execute(
+            text("""DELETE FROM "user" WHERE email LIKE :p"""),
+            {"p": f"{SEED_PREFIX}%"},
+        ).rowcount
+        or 0
+    )
     db.commit()
     return counts
 
@@ -739,8 +764,12 @@ def clean_seeded_data(db: Session) -> dict[str, int]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--clean", action="store_true", help="Wipe seeded data and exit.")
-    parser.add_argument("--yes", action="store_true", help="Skip the confirmation prompt.")
+    parser.add_argument(
+        "--clean", action="store_true", help="Wipe seeded data and exit."
+    )
+    parser.add_argument(
+        "--yes", action="store_true", help="Skip the confirmation prompt."
+    )
     parser.add_argument("--days", type=int, default=60)
     parser.add_argument("--chats-per-day", type=int, default=20)
     parser.add_argument("--slackbot-share", type=float, default=0.7)
@@ -793,7 +822,9 @@ def main() -> int:
         persona = lookup_default_persona(db)
         embedding_model = lookup_default_embedding_model(db)
 
-        print(f"  using persona id={persona.id}, embedding_model id={embedding_model.id}")
+        print(
+            f"  using persona id={persona.id}, embedding_model id={embedding_model.id}"
+        )
 
         users = seed_users(db, cfg.users_count)
         print(f"  ✓ {len(users)} users")
@@ -804,9 +835,7 @@ def main() -> int:
         n_docs = seed_documents(db, pairs, cfg.docs_per_connector)
         print(f"  ✓ {n_docs} documents (+ join rows)")
 
-        n_threads, msgs = seed_chat_data(
-            db, cfg, users, persona.id, rng, days_offset=0
-        )
+        n_threads, msgs = seed_chat_data(db, cfg, users, persona.id, rng, days_offset=0)
         print(f"  ✓ {n_threads} chat threads (last {cfg.days} days)")
 
         if cfg.with_old_data:
@@ -823,7 +852,12 @@ def main() -> int:
         print(f"  ✓ {n_sb} slack_bot_config rows")
 
         n_ia = seed_index_attempts(
-            db, pairs, embedding_model, count_per_pair=4, with_old=cfg.with_old_data, rng=rng
+            db,
+            pairs,
+            embedding_model,
+            count_per_pair=4,
+            with_old=cfg.with_old_data,
+            rng=rng,
         )
         print(f"  ✓ {n_ia} index_attempts")
 

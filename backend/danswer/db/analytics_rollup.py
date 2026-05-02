@@ -80,9 +80,7 @@ def _env_int(name: str, default: int, minimum: int = 0) -> int:
 # late-feedback grace period: most reactions arrive within minutes, but
 # a "resolved" mark from a Slack helper can take a day or two. We recompute
 # those days each run so the updated counts win via the upsert.
-ANALYTICS_LATE_FEEDBACK_BUFFER_DAYS = _env_int(
-    "ANALYTICS_LATE_FEEDBACK_BUFFER_DAYS", 2
-)
+ANALYTICS_LATE_FEEDBACK_BUFFER_DAYS = _env_int("ANALYTICS_LATE_FEEDBACK_BUFFER_DAYS", 2)
 
 # Checkpoint row in `key_value_store`. Stored as JSON like
 # `{"last_rolled_up_to": "2026-05-14"}`. The daily task starts from
@@ -96,7 +94,9 @@ ROLLUP_CHECKPOINT_KEY = "analytics_rollup_state"
 # ---------------------------------------------------------------------------
 
 
-def _day_bounds(target_date: datetime.date) -> tuple[datetime.datetime, datetime.datetime]:
+def _day_bounds(
+    target_date: datetime.date,
+) -> tuple[datetime.datetime, datetime.datetime]:
     """[start, end) UTC datetimes for one calendar day."""
     start = datetime.datetime.combine(
         target_date, datetime.time.min, tzinfo=datetime.timezone.utc
@@ -297,9 +297,7 @@ def upsert_rollup_for_date(
         "slackbot_auto_resolved": slackbot_auto_resolved,
     }
 
-    stmt = pg_insert(AnalyticsDailyRollup.__table__).values(
-        date=target_date, **metrics
-    )
+    stmt = pg_insert(AnalyticsDailyRollup.__table__).values(date=target_date, **metrics)
     update_cols = {col: stmt.excluded[col] for col in metrics.keys()}
     update_cols["rolled_up_at"] = func.now()
     stmt = stmt.on_conflict_do_update(
@@ -343,9 +341,7 @@ def _get_checkpoint(db_session: Session) -> datetime.date | None:
         return None
 
 
-def _set_checkpoint(
-    db_session: Session, last_rolled_up_to: datetime.date
-) -> None:
+def _set_checkpoint(db_session: Session, last_rolled_up_to: datetime.date) -> None:
     """Upsert the checkpoint row in `key_value_store`. Pure SQL upsert
     via INSERT…ON CONFLICT — avoids a separate read."""
     payload = {"last_rolled_up_to": last_rolled_up_to.isoformat()}
@@ -408,9 +404,7 @@ def run_rollup(today: datetime.date | None = None) -> int:
     with Session(engine) as db_session:
         checkpoint = _get_checkpoint(db_session)
         if checkpoint is None:
-            start = today - datetime.timedelta(
-                days=ANALYTICS_LATE_FEEDBACK_BUFFER_DAYS
-            )
+            start = today - datetime.timedelta(days=ANALYTICS_LATE_FEEDBACK_BUFFER_DAYS)
             logger.info(
                 "Analytics rollup: no checkpoint found (first run after "
                 f"deploy?); processing last {ANALYTICS_LATE_FEEDBACK_BUFFER_DAYS}+1 "
@@ -446,9 +440,7 @@ def run_rollup(today: datetime.date | None = None) -> int:
     return n
 
 
-def backfill_all_rollups(
-    start_date: datetime.date, end_date: datetime.date
-) -> int:
+def backfill_all_rollups(start_date: datetime.date, end_date: datetime.date) -> int:
     """Walk every date in [start_date, end_date] and upsert. Used by the
     one-time backfill CLI before retention starts deleting chat data.
 

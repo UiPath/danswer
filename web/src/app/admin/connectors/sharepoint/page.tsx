@@ -124,9 +124,8 @@ const MainSection = () => {
           {isEditingCredential && (
             <Card className="mt-2">
               <Text className="mb-2">
-                Update the Azure AD application credential below. All
-                connectors using this credential pick up the change on their
-                next poll.
+                Update the Azure AD application credential below. All connectors
+                using this credential pick up the change on their next poll.
               </Text>
               <CredentialForm<SharepointCredentialJson>
                 existingCredentialId={sharepointCredential.id}
@@ -164,8 +163,7 @@ const MainSection = () => {
                   sp_directory_id:
                     sharepointCredential.credential_json.sp_directory_id || "",
                   sp_client_secret:
-                    sharepointCredential.credential_json.sp_client_secret ||
-                    "",
+                    sharepointCredential.credential_json.sp_client_secret || "",
                 }}
                 onSubmit={(isSuccess) => {
                   if (isSuccess) {

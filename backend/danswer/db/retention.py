@@ -45,11 +45,11 @@ from __future__ import annotations
 
 import os
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from datetime import timedelta
 from datetime import timezone
-from typing import Callable
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -64,6 +64,7 @@ logger = setup_logger()
 # ---------------------------------------------------------------------------
 # Defaults — overridable by env var
 # ---------------------------------------------------------------------------
+
 
 def _env_int(name: str, default: int, minimum: int = 0) -> int:
     raw = os.environ.get(name, "").strip()
@@ -109,7 +110,7 @@ RETENTION_MAX_BATCHES = _env_int("RETENTION_MAX_BATCHES", 200, minimum=1)
 
 # Postgres advisory lock id, arbitrary 64-bit int. Keeps two concurrent
 # retention runs from racing. Picked from /dev/urandom; no domain meaning.
-_RETENTION_ADVISORY_LOCK_ID = 0x52455445_4e54494f  # b"RETENTIO" packed
+_RETENTION_ADVISORY_LOCK_ID = 0x52455445_4E54494F  # b"RETENTIO" packed
 
 
 # ---------------------------------------------------------------------------
@@ -395,24 +396,30 @@ def _delete_old_chat(
     if dry_run:
         # Count messages in those sessions (so the user sees both
         # numbers); return session count as the headline.
-        msg_count = db_session.execute(
-            text(
-                "SELECT count(*) FROM chat_message "
-                "WHERE chat_session_id = ANY(:ids)"
-            ),
-            {"ids": session_ids},
-        ).scalar() or 0
+        msg_count = (
+            db_session.execute(
+                text(
+                    "SELECT count(*) FROM chat_message "
+                    "WHERE chat_session_id = ANY(:ids)"
+                ),
+                {"ids": session_ids},
+            ).scalar()
+            or 0
+        )
         # Count search_doc rows that would become orphans (or are already).
         # The query mirrors the orphan-cleanup DELETE at the end of the
         # real path, but bounded to a counter only.
-        orphan_count = db_session.execute(
-            text(
-                "SELECT count(*) FROM search_doc sd "
-                "LEFT JOIN chat_message__search_doc cmsd "
-                "  ON cmsd.search_doc_id = sd.id "
-                "WHERE cmsd.chat_message_id IS NULL"
-            )
-        ).scalar() or 0
+        orphan_count = (
+            db_session.execute(
+                text(
+                    "SELECT count(*) FROM search_doc sd "
+                    "LEFT JOIN chat_message__search_doc cmsd "
+                    "  ON cmsd.search_doc_id = sd.id "
+                    "WHERE cmsd.chat_message_id IS NULL"
+                )
+            ).scalar()
+            or 0
+        )
         logger.info(
             f"chat dry-run: {len(session_ids)} sessions would be deleted "
             f"(plus {msg_count} messages, "
@@ -440,19 +447,13 @@ def _delete_old_chat(
         # Sessions older than RETENTION_DAYS_CHAT (default 30d) almost
         # never see new activity, so the lock wait is effectively zero.
         db_session.execute(
-            text(
-                "SELECT id FROM chat_session "
-                "WHERE id = ANY(:ids) FOR UPDATE"
-            ),
+            text("SELECT id FROM chat_session " "WHERE id = ANY(:ids) FOR UPDATE"),
             {"ids": batch_session_ids},
         )
 
         # Find this batch's message IDs.
         message_id_rows = db_session.execute(
-            text(
-                "SELECT id FROM chat_message "
-                "WHERE chat_session_id = ANY(:ids)"
-            ),
+            text("SELECT id FROM chat_message " "WHERE chat_session_id = ANY(:ids)"),
             {"ids": batch_session_ids},
         ).all()
         message_ids = [r[0] for r in message_id_rows]
@@ -659,9 +660,7 @@ def run_retention_policies(
     engine = get_sqlalchemy_engine()
     with Session(engine) as db_session:
         if not _try_advisory_lock(db_session):
-            logger.warning(
-                "Retention: advisory lock held by another run; skipping."
-            )
+            logger.warning("Retention: advisory lock held by another run; skipping.")
             return results
         try:
             now = datetime.now(tz=timezone.utc)
@@ -682,9 +681,7 @@ def run_retention_policies(
                 cutoff = now - timedelta(days=policy.days)
                 started = time.monotonic()
                 try:
-                    deleted = _run_one(
-                        db_session, policy, cutoff, dry_run
-                    )
+                    deleted = _run_one(db_session, policy, cutoff, dry_run)
                 except Exception as e:
                     logger.exception(
                         f"Retention: {name} failed after "

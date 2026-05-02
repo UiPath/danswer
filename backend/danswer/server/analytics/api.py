@@ -58,8 +58,7 @@ def get_query_analytics(
     simply absent from the response.
     """
     daily_query_usage_info = fetch_query_analytics_from_rollup(
-        start=start
-        or (datetime.datetime.utcnow() - datetime.timedelta(days=30)),
+        start=start or (datetime.datetime.utcnow() - datetime.timedelta(days=30)),
         end=end or datetime.datetime.utcnow(),
         db_session=db_session,
     )
@@ -97,8 +96,7 @@ def get_user_analytics(
 ) -> list[UserAnalyticsResponse]:
     """Distinct active users per day, served from `analytics_daily_rollup`."""
     rows = fetch_user_analytics_from_rollup(
-        start=start
-        or (datetime.datetime.utcnow() - datetime.timedelta(days=30)),
+        start=start or (datetime.datetime.utcnow() - datetime.timedelta(days=30)),
         end=end or datetime.datetime.utcnow(),
         db_session=db_session,
     )
@@ -125,8 +123,7 @@ def get_danswerbot_analytics(
     already stores `slackbot_auto_resolved` (clamped to ≥0 at write
     time) so we pass it straight through."""
     rows = fetch_danswerbot_analytics_from_rollup(
-        start=start
-        or (datetime.datetime.utcnow() - datetime.timedelta(days=30)),
+        start=start or (datetime.datetime.utcnow() - datetime.timedelta(days=30)),
         end=end or datetime.datetime.utcnow(),
         db_session=db_session,
     )

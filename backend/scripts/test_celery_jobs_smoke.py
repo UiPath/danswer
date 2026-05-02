@@ -41,18 +41,14 @@ from sqlalchemy import select
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from danswer.background.celery.celery_app import (
-    run_analytics_rollup_task,
-    run_retention_policies_task,
-)
+from danswer.background.celery.celery_app import run_analytics_rollup_task
+from danswer.background.celery.celery_app import run_retention_policies_task
 from danswer.configs.constants import MessageType
 from danswer.db.engine import get_sqlalchemy_engine
-from danswer.db.models import (
-    ChatMessage,
-    ChatSession,
-    ChatSessionSharedStatus,
-    Persona,
-)
+from danswer.db.models import ChatMessage
+from danswer.db.models import ChatSession
+from danswer.db.models import ChatSessionSharedStatus
+from danswer.db.models import Persona
 
 
 CELERY_PREFIX = "__test_celery__"
@@ -222,14 +218,11 @@ def snapshot() -> dict:
                 text("SELECT max(rolled_up_at) FROM analytics_daily_rollup")
             ).scalar(),
             "rollup_row_count": int(
-                db.execute(
-                    text("SELECT count(*) FROM analytics_daily_rollup")
-                ).scalar()
+                db.execute(text("SELECT count(*) FROM analytics_daily_rollup")).scalar()
                 or 0
             ),
             "kombu_message_count": int(
-                db.execute(text("SELECT count(*) FROM kombu_message")).scalar()
-                or 0
+                db.execute(text("SELECT count(*) FROM kombu_message")).scalar() or 0
             ),
         }
 
@@ -260,7 +253,9 @@ def fire_and_wait(task, label: str, timeout: int = 180) -> None:
         ret = result.get(timeout=timeout)
     except Exception as e:
         elapsed = time.monotonic() - started
-        fail(f"{label} did not complete within {timeout}s ({elapsed:.1f}s elapsed): {e}")
+        fail(
+            f"{label} did not complete within {timeout}s ({elapsed:.1f}s elapsed): {e}"
+        )
         info(
             "If the script hung here, the celery worker likely isn't "
             "running or isn't connected to this DB. Check "
@@ -278,7 +273,9 @@ def fire_and_wait(task, label: str, timeout: int = 180) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--yes", action="store_true", help="Skip the destructive-op confirm.")
+    parser.add_argument(
+        "--yes", action="store_true", help="Skip the destructive-op confirm."
+    )
     parser.add_argument(
         "--keep-data",
         action="store_true",

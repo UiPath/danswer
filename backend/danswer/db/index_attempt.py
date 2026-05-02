@@ -14,6 +14,12 @@ from sqlalchemy.orm import Session
 
 from danswer.db.models import EmbeddingModel
 from danswer.db.models import IndexAttempt
+from danswer.db.models import IndexingStatus
+from danswer.db.models import IndexModelStatus
+from danswer.server.documents.models import ConnectorCredentialPairIdentifier
+from danswer.utils.logger import setup_logger
+from danswer.utils.telemetry import optional_telemetry
+from danswer.utils.telemetry import RecordType
 
 
 # ---------------------------------------------------------------------------
@@ -85,13 +91,6 @@ def release_cc_pair_lock(
     key = _cc_pair_lock_key(connector_id, credential_id)
     db_session.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": key})
 
-
-from danswer.db.models import IndexingStatus
-from danswer.db.models import IndexModelStatus
-from danswer.server.documents.models import ConnectorCredentialPairIdentifier
-from danswer.utils.logger import setup_logger
-from danswer.utils.telemetry import optional_telemetry
-from danswer.utils.telemetry import RecordType
 
 logger = setup_logger()
 

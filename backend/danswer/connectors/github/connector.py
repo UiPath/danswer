@@ -181,7 +181,9 @@ def _convert_issue_to_document(issue: Issue) -> Document:
     body = issue.body or ""
     comments_text = _fetch_issue_comments(issue)
     if comments_text:
-        full_text = f"{body}\nComment: {comments_text}" if body else f"Comment: {comments_text}"
+        full_text = (
+            f"{body}\nComment: {comments_text}" if body else f"Comment: {comments_text}"
+        )
     else:
         full_text = body
 
@@ -370,9 +372,7 @@ class GithubConnector(LoadConnector, PollConnector):
         start_datetime = datetime.fromtimestamp(start, tz=timezone.utc).replace(
             tzinfo=None
         )
-        end_datetime = datetime.fromtimestamp(end, tz=timezone.utc).replace(
-            tzinfo=None
-        )
+        end_datetime = datetime.fromtimestamp(end, tz=timezone.utc).replace(tzinfo=None)
 
         # Move start time back by 3 hours, since some Issues/PRs are getting dropped
         # Could be due to delayed processing on GitHub side

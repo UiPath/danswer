@@ -190,8 +190,8 @@ const Main = () => {
                 })}
                 initialValues={{
                   confluence_username:
-                    confluenceCredential.credential_json
-                      ?.confluence_username || "",
+                    confluenceCredential.credential_json?.confluence_username ||
+                    "",
                   confluence_access_token:
                     confluenceCredential.credential_json
                       ?.confluence_access_token || "",

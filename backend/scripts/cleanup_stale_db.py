@@ -67,7 +67,9 @@ def main() -> int:
 
     width = max(len(k) for k in results.keys())
     print()
-    print(f"{'policy':<{width}}  rows {'(would delete)' if args.dry_run else 'deleted'}")
+    print(
+        f"{'policy':<{width}}  rows {'(would delete)' if args.dry_run else 'deleted'}"
+    )
     print(f"{'-' * width}  -----")
     for name, n in sorted(results.items(), key=lambda kv: -kv[1]):
         print(f"{name:<{width}}  {n}")

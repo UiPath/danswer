@@ -200,10 +200,7 @@ export default function AnalyticsPage() {
       (s, r) => s + r.total_queries,
       0
     );
-    const totalLikes = (queryData ?? []).reduce(
-      (s, r) => s + r.total_likes,
-      0
-    );
+    const totalLikes = (queryData ?? []).reduce((s, r) => s + r.total_likes, 0);
     const totalDislikes = (queryData ?? []).reduce(
       (s, r) => s + r.total_dislikes,
       0
@@ -237,7 +234,6 @@ export default function AnalyticsPage() {
             ((strictPromoters - strictDetractors) / strictDenominator) * 100
           )
         : null;
-
 
     // "Peak daily" instead of sum-of-distinct because the per-day
     // distinct counts can't be added across days without double-counting
@@ -304,7 +300,8 @@ export default function AnalyticsPage() {
     [queryPerformanceDaily, granularity]
   );
   const feedbackData = useMemo(
-    () => (granularity === "day" ? feedbackDaily : bucketToMonth(feedbackDaily)),
+    () =>
+      granularity === "day" ? feedbackDaily : bucketToMonth(feedbackDaily),
     [feedbackDaily, granularity]
   );
 
@@ -372,9 +369,7 @@ export default function AnalyticsPage() {
             <Card>
               <Text>Auto-Resolution Rate (Slack)</Text>
               <Metric>
-                {kpis.autoResolvePct !== null
-                  ? `${kpis.autoResolvePct}%`
-                  : "—"}
+                {kpis.autoResolvePct !== null ? `${kpis.autoResolvePct}%` : "—"}
               </Metric>
             </Card>
             <Card>
@@ -437,9 +432,7 @@ export default function AnalyticsPage() {
                 {docsBySource ? docsBySourceBars.length.toLocaleString() : "—"}
               </Metric>
               <Text className="mt-1 text-xs">
-                {docsBySource
-                  ? `of ${docsBySource.length} configured`
-                  : ""}
+                {docsBySource ? `of ${docsBySource.length} configured` : ""}
               </Text>
             </Card>
           </Grid>

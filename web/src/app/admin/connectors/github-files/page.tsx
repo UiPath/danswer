@@ -157,8 +157,8 @@ const Main = () => {
       ) : (
         <>
           <Text>
-            The same access token used for the standard GitHub connector
-            works here. The token needs <code>repo</code> scope (or just
+            The same access token used for the standard GitHub connector works
+            here. The token needs <code>repo</code> scope (or just
             <code> public_repo</code> for public repos).
           </Text>
           <Card className="mt-4">
@@ -193,9 +193,9 @@ const Main = () => {
       {indexingStatuses.length > 0 && (
         <>
           <Text className="mb-2">
-            Configured GitHub-Files connectors below. We re-fetch matching
-            files every <b>10</b> minutes (and skip the run if nothing under
-            the path prefix has been committed since the last poll).
+            Configured GitHub-Files connectors below. We re-fetch matching files
+            every <b>10</b> minutes (and skip the run if nothing under the path
+            prefix has been committed since the last poll).
           </Text>
           <div className="mb-2">
             <ConnectorsTable<GithubFilesConfig, GithubCredentialJson>
@@ -245,8 +245,8 @@ const Main = () => {
             Indexes files matching{" "}
             <code>&lt;path_prefix&gt;/&lt;dir&gt;/&lt;file&gt;&lt;ext&gt;</code>{" "}
             — i.e. exactly one folder under the prefix, file directly inside.
-            Defaults target a <code>service-catalog/products/&lt;product&gt;/*.json</code>{" "}
-            layout.
+            Defaults target a{" "}
+            <code>service-catalog/products/&lt;product&gt;/*.json</code> layout.
           </Text>
 
           <ConnectorForm<GithubFilesConfig>
@@ -311,9 +311,7 @@ const Main = () => {
           />
         </Card>
       ) : (
-        <Text>
-          Provide your access token in Step 1 first.
-        </Text>
+        <Text>Provide your access token in Step 1 first.</Text>
       )}
     </>
   );

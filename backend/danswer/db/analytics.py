@@ -237,13 +237,13 @@ def fetch_total_docs_indexed(db_session: Session) -> tuple[int, int]:
     """
     total_docs_indexed = (
         db_session.execute(
-            select(func.coalesce(func.sum(ConnectorCredentialPair.total_docs_indexed), 0))
+            select(
+                func.coalesce(func.sum(ConnectorCredentialPair.total_docs_indexed), 0)
+            )
         ).scalar()
         or 0
     )
-    unique_docs = (
-        db_session.execute(select(func.count(Document.id))).scalar() or 0
-    )
+    unique_docs = db_session.execute(select(func.count(Document.id))).scalar() or 0
     return int(total_docs_indexed), int(unique_docs)
 
 
@@ -266,7 +266,9 @@ def fetch_docs_per_source(db_session: Session) -> Sequence[tuple[str, int]]:
         )
         .group_by(Connector.source)
         .order_by(
-            func.coalesce(func.sum(ConnectorCredentialPair.total_docs_indexed), 0).desc()
+            func.coalesce(
+                func.sum(ConnectorCredentialPair.total_docs_indexed), 0
+            ).desc()
         )
     )
     return [(str(src), int(n)) for src, n in db_session.execute(stmt).all()]
@@ -286,10 +288,7 @@ def fetch_slack_bot_channel_stats(db_session: Session) -> tuple[int, int]:
     SQL is the cleaner option here.
     """
     total_configs = (
-        db_session.execute(
-            text("SELECT count(*) FROM slack_bot_config")
-        ).scalar()
-        or 0
+        db_session.execute(text("SELECT count(*) FROM slack_bot_config")).scalar() or 0
     )
     distinct_channels = (
         db_session.execute(

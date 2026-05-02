@@ -15,7 +15,6 @@ Usage:
     [SF_ONLY_CUSTOM=1] \\
     python backend/scripts/list_salesforce_account_fields.py
 """
-
 import os
 import sys
 
@@ -112,7 +111,9 @@ def main() -> int:
     print(header)
     print("-" * len(header))
     for api_name, label, ftype, ref in rows:
-        print(f"{api_name.ljust(name_w)}  {label.ljust(label_w)}  {ftype.ljust(type_w)}  {ref}")
+        print(
+            f"{api_name.ljust(name_w)}  {label.ljust(label_w)}  {ftype.ljust(type_w)}  {ref}"
+        )
 
     print(f"\n{len(rows)} field(s){' (custom only)' if only_custom else ''}.")
     if rows and any(r[2] == "reference" for r in rows):

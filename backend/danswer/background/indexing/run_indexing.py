@@ -355,9 +355,7 @@ def run_indexing_entrypoint(index_attempt_id: int, is_ee: bool = False) -> None:
                 return
 
             # Per-cc-pair concurrency guard. See module docstring for rationale.
-            if not try_acquire_cc_pair_lock(
-                db_session, connector_id, credential_id
-            ):
+            if not try_acquire_cc_pair_lock(db_session, connector_id, credential_id):
                 logger.info(
                     f"Skipping indexing attempt {index_attempt_id} for "
                     f"connector_id={connector_id} credential_id={credential_id}: "

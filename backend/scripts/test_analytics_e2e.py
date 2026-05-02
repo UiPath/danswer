@@ -134,7 +134,8 @@ def phase_migrate() -> None:
         sys.exit(1)
     # Print just the final "Running upgrade ..." lines for context.
     tail = [
-        ln for ln in (result.stdout or "").splitlines()
+        ln
+        for ln in (result.stdout or "").splitlines()
         if "Running upgrade" in ln or "INFO" in ln
     ][-5:]
     for line in tail:
@@ -210,9 +211,7 @@ def phase_clear_rollup_state() -> None:
         db.execute(
             text("DELETE FROM key_value_store WHERE key = 'analytics_rollup_state'")
         )
-        n_pre = db.execute(
-            text("SELECT count(*) FROM analytics_daily_rollup")
-        ).scalar()
+        n_pre = db.execute(text("SELECT count(*) FROM analytics_daily_rollup")).scalar()
         db.execute(text("TRUNCATE TABLE analytics_daily_rollup"))
         db.commit()
     passed(f"cleared {n_pre} prior rollup rows + checkpoint")
@@ -277,7 +276,7 @@ def phase_verify_endpoints() -> None:
     assert_ge(len(u_rows), 60, "fetch_user_analytics_from_rollup row count")
     assert_ge(len(b_rows), 60, "fetch_danswerbot_analytics_from_rollup row count")
 
-    total_q = sum(int(r[0]) for r in q_rows)
+    sum(int(r[0]) for r in q_rows)
     total_likes = sum(int(r[1]) for r in q_rows)
     total_resolved = sum(int(r[3]) for r in q_rows)
 
@@ -287,11 +286,11 @@ def phase_verify_endpoints() -> None:
     nps_denom = promoters + detractors
     assert_ge(nps_denom, 1, "NPS-strict denominator (promoters + detractors)")
 
-    nps = (
-        round((promoters - detractors) / nps_denom * 100) if nps_denom else None
-    )
+    nps = round((promoters - detractors) / nps_denom * 100) if nps_denom else None
     if nps is not None:
-        passed(f"NPS-strict computed = {nps:+d} (promoters={promoters}, detractors={detractors})")
+        passed(
+            f"NPS-strict computed = {nps:+d} (promoters={promoters}, detractors={detractors})"
+        )
     else:
         failed("NPS-strict undefined (no feedback)")
 
@@ -312,8 +311,7 @@ def phase_real_retention() -> None:
     # during the retention sweep. The chats we seeded are spread across
     # 60 days; the 28-day window is well-separated from the deletion edge.
     fresh_boundary_iso = (
-        datetime.datetime.now(tz=datetime.timezone.utc)
-        - datetime.timedelta(days=28)
+        datetime.datetime.now(tz=datetime.timezone.utc) - datetime.timedelta(days=28)
     ).isoformat()
 
     with Session(get_sqlalchemy_engine()) as db:
@@ -434,7 +432,9 @@ def phase_rollup_idempotent() -> None:
     )
     today_iso = datetime.datetime.now(tz=datetime.timezone.utc).date().isoformat()
     if after and isinstance(after, dict):
-        assert_eq(after.get("last_rolled_up_to"), today_iso, "checkpoint advanced to today")
+        assert_eq(
+            after.get("last_rolled_up_to"), today_iso, "checkpoint advanced to today"
+        )
     assert_ge(int(n_days or 0), 60, "rollup row count unchanged by re-run")
     print(f"  (info) checkpoint before={before}, after={after}")
 

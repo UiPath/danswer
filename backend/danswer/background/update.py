@@ -339,9 +339,7 @@ def kickoff_indexing_jobs(
                     "Will retry on next scheduler tick."
                 )
                 continue
-            running_per_source[source_key] = (
-                running_per_source.get(source_key, 0) + 1
-            )
+            running_per_source[source_key] = running_per_source.get(source_key, 0) + 1
 
         # Per-attempt indexing priority. SimpleJobClient ignores the kwarg;
         # the real Dask Client honors it (higher number = scheduled first).

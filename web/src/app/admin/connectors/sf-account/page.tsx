@@ -81,8 +81,8 @@ const MainSection = () => {
       <Text>
         The Salesforce connector indexes Account records — including standard
         and custom fields like Name, Owner, RecordType, CSM, TAM, CSD,
-        Maintenance Flag, Vertical, and Annual Revenue — making them
-        queryable within Darwin.
+        Maintenance Flag, Vertical, and Annual Revenue — making them queryable
+        within Darwin.
       </Text>
 
       <Title className="mb-2 mt-6 ml-auto mr-auto">
@@ -163,8 +163,7 @@ const MainSection = () => {
                   sf_client_id:
                     SalesforceCredential.credential_json.sf_client_id || "",
                   sf_client_secret:
-                    SalesforceCredential.credential_json.sf_client_secret ||
-                    "",
+                    SalesforceCredential.credential_json.sf_client_secret || "",
                   sf_username:
                     SalesforceCredential.credential_json.sf_username || "",
                   sf_password:
@@ -194,9 +193,9 @@ const MainSection = () => {
       ) : (
         <>
           <Text className="mb-2">
-            As a first step, please provide the Salesforce Connected
-            App&apos;s client_id and client_secret along with the Salesforce
-            account&apos;s username and password.
+            As a first step, please provide the Salesforce Connected App&apos;s
+            client_id and client_secret along with the Salesforce account&apos;s
+            username and password.
           </Text>
           <Card className="mt-2">
             <CredentialForm<SalesforceCredentialJson>
@@ -260,8 +259,8 @@ const MainSection = () => {
       {SalesforceConnectorIndexingStatuses.length > 0 && (
         <>
           <Text className="mb-2">
-            The latest state of your Salesforce Account records is fetched
-            every 10 minutes.
+            The latest state of your Salesforce Account records is fetched every
+            10 minutes.
           </Text>
           <div className="mb-2">
             <ConnectorsTable<SalesforceConfig, SalesforceCredentialJson>
@@ -290,8 +289,8 @@ const MainSection = () => {
           <Text className="mb-2">
             The Salesforce connector indexes the <b>Account</b> object using a
             curated set of fields. Filtering is configured at the indexer
-            process via environment variables — restart the indexer worker
-            after changing them:
+            process via environment variables — restart the indexer worker after
+            changing them:
           </Text>
           <ul className="list-disc list-inside text-sm mb-4">
             <li>

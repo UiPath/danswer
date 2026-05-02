@@ -55,20 +55,18 @@ from danswer.db.feedback import create_chat_message_feedback
 from danswer.db.index_attempt import get_not_started_index_attempts
 from danswer.db.index_attempt import mark_attempt_in_progress__no_commit
 from danswer.db.index_attempt import update_index_attempt_priority
-from danswer.db.models import (
-    ChatMessage,
-    ChatMessageFeedback,
-    ChatSession,
-    ChatSessionSharedStatus,
-    Connector,
-    ConnectorCredentialPair,
-    Credential,
-    EmbeddingModel,
-    IndexAttempt,
-    IndexingStatus,
-    Persona,
-    User,
-)
+from danswer.db.models import ChatMessage
+from danswer.db.models import ChatMessageFeedback
+from danswer.db.models import ChatSession
+from danswer.db.models import ChatSessionSharedStatus
+from danswer.db.models import Connector
+from danswer.db.models import ConnectorCredentialPair
+from danswer.db.models import Credential
+from danswer.db.models import EmbeddingModel
+from danswer.db.models import IndexAttempt
+from danswer.db.models import IndexingStatus
+from danswer.db.models import Persona
+from danswer.db.models import User
 
 
 FEATURE_PREFIX = "__test_features__"
@@ -227,9 +225,9 @@ def phase_priority_ordering() -> None:
 
     engine = get_sqlalchemy_engine()
     with Session(engine) as db:
-        persona = lookup_persona(db)
+        lookup_persona(db)
         em = lookup_embedding_model(db)
-        _u = make_user(db)
+        make_user(db)
         _conn, _cred, ccp = make_connector_and_pair(db)
 
         # Insert 5 NOT_STARTED with priorities, in this creation order:
@@ -326,9 +324,9 @@ def phase_index_attempt_retention() -> None:
 
     engine = get_sqlalchemy_engine()
     with Session(engine) as db:
-        persona = lookup_persona(db)
+        lookup_persona(db)
         em = lookup_embedding_model(db)
-        _u = make_user(db)
+        make_user(db)
         _conn, _cred, ccp = make_connector_and_pair(db)
 
         # Seed 25 SUCCESS attempts for one cc-pair, all 70 days old.
@@ -355,7 +353,9 @@ def phase_index_attempt_retention() -> None:
     # Run retention with index_attempt enabled via env-var injection.
     # cleanup_stale_db.py reads RETENTION_DAYS_* at module import time, so
     # we have to spawn a subprocess with the env baked in.
-    print("  $ RETENTION_DAYS_INDEX_ATTEMPT=60 RETENTION_KEEP_LAST_N_INDEX_ATTEMPTS=20 \\")
+    print(
+        "  $ RETENTION_DAYS_INDEX_ATTEMPT=60 RETENTION_KEEP_LAST_N_INDEX_ATTEMPTS=20 \\"
+    )
     print("    cleanup_stale_db.py --policy=index_attempt")
     env = {
         **os.environ,
@@ -414,9 +414,8 @@ def phase_permission_sync_retention() -> None:
         # are declared without native_enum=False; SA bulk insert tries to
         # cast to a non-existent PG enum type. (Same workaround as the
         # main seeder.)
-        old = (
-            datetime.datetime.now(tz=datetime.timezone.utc)
-            - datetime.timedelta(days=90)
+        old = datetime.datetime.now(tz=datetime.timezone.utc) - datetime.timedelta(
+            days=90
         )
         rows = [
             ("github", "user_level", ccp.id, "success", old),
@@ -444,9 +443,7 @@ def phase_permission_sync_retention() -> None:
         db.commit()
 
         before_total = db.execute(
-            text(
-                "SELECT count(*) FROM permission_sync_run WHERE cc_pair_id = :id"
-            ),
+            text("SELECT count(*) FROM permission_sync_run WHERE cc_pair_id = :id"),
             {"id": ccp.id},
         ).scalar()
         before_in_progress = db.execute(
@@ -457,9 +454,7 @@ def phase_permission_sync_retention() -> None:
             {"id": ccp.id},
         ).scalar()
         assert_eq(int(before_total or 0), 8, "seeded permission_sync_run rows")
-        assert_eq(
-            int(before_in_progress or 0), 3, "seeded in_progress rows"
-        )
+        assert_eq(int(before_in_progress or 0), 3, "seeded in_progress rows")
 
     print("  $ cleanup_stale_db.py --policy=permission_sync_run")
     result = subprocess.run(
@@ -480,9 +475,7 @@ def phase_permission_sync_retention() -> None:
 
     with Session(engine) as db:
         after_total = db.execute(
-            text(
-                "SELECT count(*) FROM permission_sync_run WHERE cc_pair_id = :id"
-            ),
+            text("SELECT count(*) FROM permission_sync_run WHERE cc_pair_id = :id"),
             {"id": ccp.id},
         ).scalar()
         after_in_progress = db.execute(

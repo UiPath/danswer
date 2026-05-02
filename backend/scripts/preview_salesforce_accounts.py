@@ -19,7 +19,6 @@ Usage:
     [SF_FORMAT=text|json]                 # default text
     python backend/scripts/preview_salesforce_accounts.py
 """
-
 import json
 import os
 import sys
@@ -77,6 +76,7 @@ def _resolve_path(record: dict[str, Any], path: str) -> Any:
             return None
         value = value.get(part)
     return value
+
 
 def _to_friendly_dict(record: dict[str, Any]) -> dict[str, Any]:
     """Re-key a SOQL record using ACCOUNT_FIELDS' friendly labels, flattening
@@ -137,7 +137,9 @@ def _build_query() -> str:
     if maintenance_flag:
         values = [v.strip() for v in maintenance_flag.split(",") if v.strip()]
         if values:
-            quoted = ", ".join(f"'{v.replace(chr(39), chr(92) + chr(39))}'" for v in values)
+            quoted = ", ".join(
+                f"'{v.replace(chr(39), chr(92) + chr(39))}'" for v in values
+            )
             clauses.append(f"Maintenance_Flag__c IN ({quoted})")
 
     where = f" WHERE {' AND '.join(clauses)}" if clauses else ""

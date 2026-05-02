@@ -14,7 +14,6 @@ Anything deeper or shallower is skipped, as are files at intermediate
 directories. The connector reuses the existing GitHub access token credential
 shape, so users don't need to re-enter their PAT.
 """
-
 import time
 from datetime import datetime
 from datetime import timedelta
@@ -114,9 +113,7 @@ class GithubFilesConnector(LoadConnector, PollConnector):
     def _list_matching_paths(self, repo, branch: str) -> list[tuple[str, str]]:
         """Walk the git tree once, returning (path, blob_sha) pairs for files
         matching `<prefix>/<single_dir>/<file><extension>`."""
-        branch_obj = _retry_on_rate_limit(
-            self.github_client, repo.get_branch, branch
-        )
+        branch_obj = _retry_on_rate_limit(self.github_client, repo.get_branch, branch)
         head_sha = branch_obj.commit.sha
         tree = _retry_on_rate_limit(
             self.github_client, repo.get_git_tree, head_sha, True
@@ -184,7 +181,9 @@ class GithubFilesConnector(LoadConnector, PollConnector):
             id=doc_id,
             sections=[Section(link=html_url, text=text)],
             source=DocumentSource.GITHUB_FILES,
-            semantic_identifier=f"{product_dir}/{filename}" if product_dir else filename,
+            semantic_identifier=f"{product_dir}/{filename}"
+            if product_dir
+            else filename,
             doc_updated_at=doc_updated_at,
             metadata={
                 "repo": repo.full_name,

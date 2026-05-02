@@ -47,7 +47,5 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index(
-        "ix_index_attempt_status_priority_time", table_name="index_attempt"
-    )
+    op.drop_index("ix_index_attempt_status_priority_time", table_name="index_attempt")
     op.drop_column("index_attempt", "indexing_priority")

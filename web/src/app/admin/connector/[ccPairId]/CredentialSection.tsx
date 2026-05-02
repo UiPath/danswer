@@ -10,7 +10,13 @@ import { TextFormField } from "@/components/admin/connectors/Field";
 import { EditIcon } from "@/components/icons/icons";
 import { Popup } from "@/components/admin/connectors/Popup";
 
-const SENSITIVE_KEY_PATTERNS = ["password", "secret", "token", "key", "private"];
+const SENSITIVE_KEY_PATTERNS = [
+  "password",
+  "secret",
+  "token",
+  "key",
+  "private",
+];
 
 function isSensitiveKey(key: string): boolean {
   const lower = key.toLowerCase();
@@ -18,9 +24,7 @@ function isSensitiveKey(key: string): boolean {
 }
 
 function humanizeKey(key: string): string {
-  return key
-    .replace(/_/g, " ")
-    .replace(/\b\w/g, (c) => c.toUpperCase());
+  return key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 function maskValue(key: string, value: unknown): string {

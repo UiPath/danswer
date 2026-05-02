@@ -112,6 +112,7 @@ def _soql_datetime(dt: datetime) -> str:
         dt = dt.astimezone(timezone.utc)
     return dt.strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
+
 logger = setup_logger()
 
 

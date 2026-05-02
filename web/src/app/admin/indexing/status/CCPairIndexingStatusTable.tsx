@@ -129,9 +129,7 @@ export function CCPairIndexingStatusTable({
   // styling), otherwise it's the latest IndexAttempt status. Keeping
   // this in sync with `CCPairIndexingStatusDisplay` ensures the filter
   // matches what the user sees on screen.
-  const effectiveStatus = (
-    s: ConnectorIndexingStatus<any, any>
-  ): string => {
+  const effectiveStatus = (s: ConnectorIndexingStatus<any, any>): string => {
     if (s.connector.disabled) return "paused";
     return s.last_status || "not_started";
   };
@@ -158,7 +156,9 @@ export function CCPairIndexingStatusTable({
   }, [sourceFilter, statusFilter, nameSearch]);
 
   const anyFilterActive =
-    sourceFilter !== "all" || statusFilter !== "all" || nameSearch.trim() !== "";
+    sourceFilter !== "all" ||
+    statusFilter !== "all" ||
+    nameSearch.trim() !== "";
 
   const clearAllFilters = () => {
     setSourceFilter("all");
@@ -176,9 +176,7 @@ export function CCPairIndexingStatusTable({
   const idsOnPage = rowsForPage.map((r) => r.cc_pair_id);
   const allOnPageSelected =
     idsOnPage.length > 0 && idsOnPage.every((id) => selectedCcPairIds.has(id));
-  const anyOnPageSelected = idsOnPage.some((id) =>
-    selectedCcPairIds.has(id)
-  );
+  const anyOnPageSelected = idsOnPage.some((id) => selectedCcPairIds.has(id));
 
   const togglePageSelection = () => {
     setSelectedCcPairIds((prev) => {
@@ -215,9 +213,7 @@ export function CCPairIndexingStatusTable({
     setIsMutating(true);
 
     const results = await Promise.allSettled(
-      selectedRows.map((s) =>
-        updateConnector({ ...s.connector, disabled })
-      )
+      selectedRows.map((s) => updateConnector({ ...s.connector, disabled }))
     );
     const failures = results.filter((r) => r.status === "rejected").length;
     const successes = results.length - failures;
