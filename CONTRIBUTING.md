@@ -557,126 +557,22 @@ FAILED rows produced by capping — only a `Deferring indexing attempt
   edits. `rm -rf web/.next && (cd web && npm run dev)` from the repo root,
   then hard-refresh.
 
-### Testing analytics + retention with seeded data
+### Testing
 
-Five scripts under `backend/scripts/` exercise the analytics rollup +
-retention + indexing pipelines against auto-generated, tag-isolated data
-(`__test_seed__` / `__test_features__` / `__test_celery__` prefixes;
-`--clean` only touches its own rows). Full reference and assertion
-checklist live in [`TESTING.md`](./TESTING.md). The fast paths:
+See [`TESTING.md`](./TESTING.md) for the full testing reference: the
+four orchestrator scripts under `backend/scripts/` (`test_analytics_e2e.py`,
+`test_features_e2e.py`, `test_celery_jobs_smoke.py`, `seed_test_data.py`),
+their assertion checklists, manual UI smoke steps, stress-test profiles,
+the seed-script knob reference, and troubleshooting.
+
+Quickest path to confidence — assumes a dev DB:
 
 ```bash
 cd backend
-
-# 1. Analytics + chat-retention end-to-end. Exits 0 on full pass.
-PYTHONPATH=$(pwd) python scripts/test_analytics_e2e.py --yes
-
-# 2. Non-analytics features end-to-end (priority ordering, index_attempt
-#    retention, permission_sync_run terminal-only retention, resolved-
-#    button feedback DB write). Self-contained, ~5 seconds.
-PYTHONPATH=$(pwd) python scripts/test_features_e2e.py --yes
-
-# 3. Live Celery plumbing check — fires both daily tasks via `.delay()`
-#    against the running worker and asserts side effects in the DB.
-#    ~10 seconds. Run this if the daily 07:30/08:00 UTC fires don't
-#    seem to be happening (verifies broker → worker → DB pipeline).
-PYTHONPATH=$(pwd) python scripts/test_celery_jobs_smoke.py --yes
-
-# 4. Analytics flow but keeps seeded data + populated rollup so you can
-#    poke the dashboard at /admin/analytics afterward.
-PYTHONPATH=$(pwd) python scripts/test_analytics_e2e.py --yes --keep-data
+PYTHONPATH=$(pwd) python scripts/test_analytics_e2e.py --yes   # ~30s, full pipeline
+PYTHONPATH=$(pwd) python scripts/test_features_e2e.py --yes    # ~5s, feature regressions
+PYTHONPATH=$(pwd) python scripts/test_celery_jobs_smoke.py --yes  # ~10s, broker→worker
 ```
-
-#### Seeding-only (skip the orchestrator) for manual UI testing
-
-```bash
-PYTHONPATH=$(pwd) python -m alembic upgrade head
-PYTHONPATH=$(pwd) python scripts/seed_test_data.py --yes --days=60 --chats-per-day=10 --slackbot-share=0.7 --feedback-rate=0.6 --like-share=0.5 --resolved-share=0.2 --needs-help-share=0.1 --users=15 --connectors=4 --docs-per-connector=50 --with-old-data --with-search-docs
-PYTHONPATH=$(pwd) python scripts/backfill_analytics_rollup.py
-```
-
-Then open `/admin/analytics` to see ~60 days of charts populated.
-
-#### Stress-test profiles (single-line so paste can't break)
-
-```bash
-# Medium — 1 year × 50 chats/day, ~18k chats, 30k docs across 6 sources.
-PYTHONPATH=$(pwd) python scripts/seed_test_data.py --yes --days=365 --chats-per-day=50 --users=100 --connectors=6 --docs-per-connector=5000 --with-old-data --with-search-docs && PYTHONPATH=$(pwd) python scripts/backfill_analytics_rollup.py
-
-# Heavy — 6 months × 200 chats/day, ~36k chats, 160k docs.
-PYTHONPATH=$(pwd) python scripts/seed_test_data.py --yes --days=180 --chats-per-day=200 --users=500 --connectors=8 --docs-per-connector=20000 --with-search-docs && PYTHONPATH=$(pwd) python scripts/backfill_analytics_rollup.py
-
-# Massive — 1 year × 500 chats/day, ~180k chats. Slow seeder (~10 min).
-PYTHONPATH=$(pwd) python scripts/seed_test_data.py --yes --days=365 --chats-per-day=500 --users=1000 --connectors=10 --docs-per-connector=50000 && PYTHONPATH=$(pwd) python scripts/backfill_analytics_rollup.py
-```
-
-The seeder doesn't dedupe — running it N times stacks N× users / chats /
-connectors / configs. Useful for compounding without bumping any single
-knob too high:
-
-```bash
-for i in 1 2 3 4 5; do PYTHONPATH=$(pwd) python scripts/seed_test_data.py --yes --seed=$i --days=90 --chats-per-day=100; done && PYTHONPATH=$(pwd) python scripts/backfill_analytics_rollup.py
-```
-
-#### Caveat on what "stress" actually exercises
-
-The dashboard reads from `analytics_daily_rollup` — one row per UTC
-day. So even 365 days × 500 chats/day still renders only ~365 chart
-points. Bumping volume mostly stresses **(a)** the snapshot KPIs and
-"Docs Indexed by Source" BarList, **(b)** the rollup backfill speed
-(per-day SQL aggregation × N days), and **(c)** retention sweep volume
-when `--with-old-data` is set. The time-series charts themselves render
-the same regardless of underlying chat volume.
-
-#### Edge-case scenarios
-
-```bash
-# All-positive feedback → NPS-strict ≈ +100
-PYTHONPATH=$(pwd) python scripts/seed_test_data.py --yes --feedback-rate=1.0 --like-share=0.7 --resolved-share=0.3 --needs-help-share=0.0
-
-# All-negative → NPS-strict ≈ -100
-PYTHONPATH=$(pwd) python scripts/seed_test_data.py --yes --feedback-rate=1.0 --like-share=0.0 --resolved-share=0.0 --needs-help-share=0.0
-
-# Slackbot-only workspace
-PYTHONPATH=$(pwd) python scripts/seed_test_data.py --yes --slackbot-share=1.0
-```
-
-#### Quick state check after seeding
-
-```bash
-psql "$POSTGRES_URL" -c "SELECT count(*), min(date), max(date), sum(total_queries), sum(slackbot_total) FROM analytics_daily_rollup;"
-```
-
-Should show `count` matching your `--days`, with non-zero sums.
-
-#### Cleanup
-
-`--clean` is tag-scoped — won't touch real rows.
-
-```bash
-PYTHONPATH=$(pwd) python scripts/seed_test_data.py --clean --yes
-psql "$POSTGRES_URL" -c "TRUNCATE TABLE analytics_daily_rollup; DELETE FROM key_value_store WHERE key = 'analytics_rollup_state';"
-```
-
-#### Knob reference
-
-| Flag | Stresses |
-|---|---|
-| `--days=N` | Date-range slider, granularity toggle, rollup row count |
-| `--chats-per-day=N` | Per-day SQL aggregation in backfill, total-queries KPI |
-| `--users=N` | Active-users KPI, distinct-user counts |
-| `--connectors=N` | Docs-per-source BarList width, total docs KPI |
-| `--docs-per-connector=N` | Total Docs KPI, snapshot endpoint speed |
-| `--with-search-docs` | Orphan-search_doc count after retention |
-| `--with-old-data` | Retention sweep volume |
-| `--slackbot-share=N` | Auto-resolution rate denominator |
-| `--feedback-rate=N` | NPS denominator |
-| `--like-share / --resolved-share / --needs-help-share` | NPS sign + magnitude |
-
-`--slack-configs` and `index attempts per cc-pair` aren't exposed as
-flags yet — bump the literal counts in `seed_slack_bot_configs(...,
-count=3)` / `seed_index_attempts(..., count_per_pair=4)` if you need
-more, or just re-run the seeder.
 
 ### Formatting and Linting
 #### Backend

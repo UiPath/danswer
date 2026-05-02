@@ -146,6 +146,80 @@ PYTHONPATH=$(pwd) python scripts/backfill_analytics_rollup.py --yes 2>/dev/null 
 
 ---
 
+## Stress-test profiles (single-line so paste can't break)
+
+```bash
+# Medium — 1 year × 50 chats/day, ~18k chats, 30k docs across 6 sources.
+PYTHONPATH=$(pwd) python scripts/seed_test_data.py --yes --days=365 --chats-per-day=50 --users=100 --connectors=6 --docs-per-connector=5000 --with-old-data --with-search-docs && PYTHONPATH=$(pwd) python scripts/backfill_analytics_rollup.py
+
+# Heavy — 6 months × 200 chats/day, ~36k chats, 160k docs.
+PYTHONPATH=$(pwd) python scripts/seed_test_data.py --yes --days=180 --chats-per-day=200 --users=500 --connectors=8 --docs-per-connector=20000 --with-search-docs && PYTHONPATH=$(pwd) python scripts/backfill_analytics_rollup.py
+
+# Massive — 1 year × 500 chats/day, ~180k chats. Slow seeder (~10 min).
+PYTHONPATH=$(pwd) python scripts/seed_test_data.py --yes --days=365 --chats-per-day=500 --users=1000 --connectors=10 --docs-per-connector=50000 && PYTHONPATH=$(pwd) python scripts/backfill_analytics_rollup.py
+```
+
+The seeder doesn't dedupe — running it N times stacks N× users / chats /
+connectors / configs. Useful for compounding without bumping any single
+knob too high:
+
+```bash
+for i in 1 2 3 4 5; do PYTHONPATH=$(pwd) python scripts/seed_test_data.py --yes --seed=$i --days=90 --chats-per-day=100; done && PYTHONPATH=$(pwd) python scripts/backfill_analytics_rollup.py
+```
+
+### Caveat on what "stress" actually exercises
+
+The dashboard reads from `analytics_daily_rollup` — one row per UTC
+day. So even 365 days × 500 chats/day still renders only ~365 chart
+points. Bumping volume mostly stresses **(a)** the snapshot KPIs and
+"Docs Indexed by Source" BarList, **(b)** the rollup backfill speed
+(per-day SQL aggregation × N days), and **(c)** retention sweep volume
+when `--with-old-data` is set. The time-series charts themselves render
+the same regardless of underlying chat volume.
+
+### Edge-case scenarios
+
+```bash
+# All-positive feedback → NPS-strict ≈ +100
+PYTHONPATH=$(pwd) python scripts/seed_test_data.py --yes --feedback-rate=1.0 --like-share=0.7 --resolved-share=0.3 --needs-help-share=0.0
+
+# All-negative → NPS-strict ≈ -100
+PYTHONPATH=$(pwd) python scripts/seed_test_data.py --yes --feedback-rate=1.0 --like-share=0.0 --resolved-share=0.0 --needs-help-share=0.0
+
+# Slackbot-only workspace
+PYTHONPATH=$(pwd) python scripts/seed_test_data.py --yes --slackbot-share=1.0
+```
+
+### Quick state check after seeding
+
+```bash
+psql "$POSTGRES_URL" -c "SELECT count(*), min(date), max(date), sum(total_queries), sum(slackbot_total) FROM analytics_daily_rollup;"
+```
+
+Should show `count` matching your `--days`, with non-zero sums.
+
+### Knob reference
+
+| Flag | Stresses |
+|---|---|
+| `--days=N` | Date-range slider, granularity toggle, rollup row count |
+| `--chats-per-day=N` | Per-day SQL aggregation in backfill, total-queries KPI |
+| `--users=N` | Active-users KPI, distinct-user counts |
+| `--connectors=N` | Docs-per-source BarList width, total docs KPI |
+| `--docs-per-connector=N` | Total Docs KPI, snapshot endpoint speed |
+| `--with-search-docs` | Orphan-search_doc count after retention |
+| `--with-old-data` | Retention sweep volume |
+| `--slackbot-share=N` | Auto-resolution rate denominator |
+| `--feedback-rate=N` | NPS denominator |
+| `--like-share / --resolved-share / --needs-help-share` | NPS sign + magnitude |
+
+`--slack-configs` and `index attempts per cc-pair` aren't exposed as
+flags yet — bump the literal counts in `seed_slack_bot_configs(...,
+count=3)` / `seed_index_attempts(..., count_per_pair=4)` if you need
+more, or just re-run the seeder.
+
+---
+
 ## Manual UI smoke checklist
 
 Open `/admin/analytics` after seeding (and after a backfill). Verify
