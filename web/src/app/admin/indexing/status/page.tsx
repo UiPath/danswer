@@ -10,6 +10,7 @@ import { CCPairIndexingStatusTable } from "./CCPairIndexingStatusTable";
 import { AdminPageTitle } from "@/components/admin/Title";
 import Link from "next/link";
 import { Button, Text } from "@tremor/react";
+import { FiRefreshCw } from "react-icons/fi";
 
 const INDEXING_STATUS_URL = "/api/manage/admin/connector/indexing-status";
 
@@ -17,6 +18,7 @@ function Main() {
   const {
     data: indexAttemptData,
     isLoading: indexAttemptIsLoading,
+    isValidating: indexAttemptIsValidating,
     error: indexAttemptError,
     mutate: refetchIndexAttempt,
   } = useSWR<ConnectorIndexingStatus<any, any>[]>(
@@ -61,10 +63,24 @@ function Main() {
   });
 
   return (
-    <CCPairIndexingStatusTable
-      ccPairsIndexingStatuses={indexAttemptData}
-      onRefresh={() => refetchIndexAttempt()}
-    />
+    <>
+      <div className="flex justify-end mb-3">
+        <Button
+          size="xs"
+          color="gray"
+          variant="secondary"
+          icon={FiRefreshCw}
+          loading={indexAttemptIsValidating}
+          onClick={() => refetchIndexAttempt()}
+        >
+          Refresh
+        </Button>
+      </div>
+      <CCPairIndexingStatusTable
+        ccPairsIndexingStatuses={indexAttemptData}
+        onRefresh={() => refetchIndexAttempt()}
+      />
+    </>
   );
 }
 

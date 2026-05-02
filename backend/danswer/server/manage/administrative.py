@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from danswer.auth.api_key import validate_api_key
 from danswer.auth.users import current_admin_user
+from danswer.background.task_utils import name_cc_cleanup_task
 from danswer.configs.app_configs import GENERATIVE_MODEL_ACCESS_CHECK_FREQ
 from danswer.configs.constants import DocumentSource
 from danswer.db.connector_credential_pair import get_connector_credential_pair
@@ -20,6 +21,8 @@ from danswer.db.feedback import update_document_boost
 from danswer.db.feedback import update_document_hidden
 from danswer.db.index_attempt import cancel_indexing_attempts_for_connector
 from danswer.db.models import User
+from danswer.db.tasks import check_task_is_live_and_not_timed_out
+from danswer.db.tasks import get_latest_task
 from danswer.document_index.document_index_utils import get_both_index_names
 from danswer.document_index.factory import get_default_document_index
 from danswer.dynamic_configs.factory import get_dynamic_config_store
@@ -178,6 +181,30 @@ def create_deletion_attempt_for_connector_id(
         raise HTTPException(
             status_code=400,
             detail=deletion_attempt_disallowed_reason,
+        )
+
+    # Dedup: refuse if a deletion task for this same cc-pair is already
+    # in flight. The bug we're guarding against — repeated clicks on
+    # "Delete connector" each call apply_async, which spawns parallel
+    # workers that all race on `SELECT ... FOR UPDATE NOWAIT` over the
+    # same documents in `prepare_to_modify_documents`. They retry 10 ×
+    # 30s and all raise "Failed to acquire locks after 10 attempts".
+    # The worker-side advisory lock in `cleanup_connector_credential_pair_task`
+    # is the safety net; this 409 is the user-friendly path that avoids
+    # ever submitting the duplicate work.
+    cleanup_task_name = name_cc_cleanup_task(
+        connector_id=connector_id, credential_id=credential_id
+    )
+    latest_cleanup = get_latest_task(task_name=cleanup_task_name, db_session=db_session)
+    if latest_cleanup and check_task_is_live_and_not_timed_out(
+        latest_cleanup, db_session
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "A deletion is already in progress for this connector. "
+                "Wait for it to complete before retrying."
+            ),
         )
 
     cleanup_connector_credential_pair_task.apply_async(

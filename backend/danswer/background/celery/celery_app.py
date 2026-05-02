@@ -19,6 +19,8 @@ from danswer.connectors.factory import instantiate_connector
 from danswer.connectors.models import InputType
 from danswer.db.connector_credential_pair import get_connector_credential_pair
 from danswer.db.connector_credential_pair import get_connector_credential_pairs
+from danswer.db.connector_credential_pair import release_deletion_lock
+from danswer.db.connector_credential_pair import try_acquire_deletion_lock
 from danswer.db.deletion_attempt import check_deletion_attempt_is_allowed
 from danswer.db.document import get_documents_for_connector_credential_pair
 from danswer.db.document import prepare_to_modify_documents
@@ -64,38 +66,79 @@ def cleanup_connector_credential_pair_task(
     or updating the ACL"""
     engine = get_sqlalchemy_engine()
     with Session(engine) as db_session:
-        # validate that the connector / credential pair is deletable
-        cc_pair = get_connector_credential_pair(
-            db_session=db_session,
-            connector_id=connector_id,
-            credential_id=credential_id,
-        )
-        if not cc_pair:
-            raise ValueError(
-                f"Cannot run deletion attempt - connector_credential_pair with Connector ID: "
-                f"{connector_id} and Credential ID: {credential_id} does not exist."
+        # Per-cc-pair deletion advisory lock. Without this guard, multiple
+        # `apply_async` dispatches (e.g. user clicking Delete several times,
+        # or an upstream caller retrying) all race on `SELECT ... FOR UPDATE
+        # NOWAIT` over the same documents in `prepare_to_modify_documents`.
+        # `NOWAIT` aborts on contention, the deletion code retries 10 × 30s
+        # = 5min, then raises `Failed to acquire locks after 10 attempts`.
+        # The first task usually succeeds; the others spin uselessly. The
+        # API-side dedup in `administrative.py` catches the common case,
+        # but this is the safety net (and the only thing protecting against
+        # any future caller that bypasses that endpoint).
+        if not try_acquire_deletion_lock(db_session, connector_id, credential_id):
+            logger.info(
+                f"Skipping deletion task for connector_id={connector_id}, "
+                f"credential_id={credential_id}: another worker is already "
+                "running a deletion for this cc-pair."
             )
-
-        deletion_attempt_disallowed_reason = check_deletion_attempt_is_allowed(
-            connector_credential_pair=cc_pair, db_session=db_session
-        )
-        if deletion_attempt_disallowed_reason:
-            raise ValueError(deletion_attempt_disallowed_reason)
-
+            return 0
         try:
-            # The bulk of the work is in here, updates Postgres and Vespa
-            curr_ind_name, sec_ind_name = get_both_index_names(db_session)
-            document_index = get_default_document_index(
-                primary_index_name=curr_ind_name, secondary_index_name=sec_ind_name
-            )
-            return delete_connector_credential_pair(
+            # validate that the connector / credential pair is deletable
+            cc_pair = get_connector_credential_pair(
                 db_session=db_session,
-                document_index=document_index,
-                cc_pair=cc_pair,
+                connector_id=connector_id,
+                credential_id=credential_id,
             )
-        except Exception as e:
-            logger.exception(f"Failed to run connector_deletion due to {e}")
-            raise e
+            if not cc_pair:
+                raise ValueError(
+                    f"Cannot run deletion attempt - connector_credential_pair with Connector ID: "
+                    f"{connector_id} and Credential ID: {credential_id} does not exist."
+                )
+
+            deletion_attempt_disallowed_reason = check_deletion_attempt_is_allowed(
+                connector_credential_pair=cc_pair, db_session=db_session
+            )
+            if deletion_attempt_disallowed_reason:
+                raise ValueError(deletion_attempt_disallowed_reason)
+
+            try:
+                # The bulk of the work is in here, updates Postgres and Vespa
+                curr_ind_name, sec_ind_name = get_both_index_names(db_session)
+                document_index = get_default_document_index(
+                    primary_index_name=curr_ind_name,
+                    secondary_index_name=sec_ind_name,
+                )
+                return delete_connector_credential_pair(
+                    db_session=db_session,
+                    document_index=document_index,
+                    cc_pair=cc_pair,
+                )
+            except Exception as e:
+                logger.exception(f"Failed to run connector_deletion due to {e}")
+                raise e
+        finally:
+            # Robustness: same trap as the indexing cc-pair lock — if the
+            # session is in an aborted-transaction state, the unlock SQL
+            # would also raise and the lock would ride the connection back
+            # into the SA pool, silently blocking every subsequent
+            # deletion task on this cc-pair. Rollback first, then unlock,
+            # then commit. If unlock still fails, the lock auto-releases
+            # when this connection drops out of the pool — bounded latency,
+            # not infinite leak.
+            try:
+                db_session.rollback()
+            except Exception:
+                pass
+            try:
+                release_deletion_lock(db_session, connector_id, credential_id)
+                db_session.commit()
+            except Exception:
+                logger.exception(
+                    f"Could not release deletion lock for "
+                    f"connector_id={connector_id} credential_id={credential_id}; "
+                    "lock will release when this connection drops out of the SA pool."
+                )
 
 
 @build_celery_task_wrapper(name_cc_prune_task)

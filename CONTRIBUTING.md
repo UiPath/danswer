@@ -456,11 +456,21 @@ By default `NUM_INDEXING_WORKERS=1` — the indexer process spawns a single
 Dask worker, so only one indexing attempt runs at a time. Bump this when
 you have many connectors and the queue keeps growing. The runtime guards
 against the most dangerous race (two attempts for the same cc-pair
-running concurrently) via a per-cc-pair Postgres advisory lock acquired
-at the start of `run_indexing_entrypoint` — if the lock can't be
-acquired, the attempt is marked failed with reason
-`skipped_concurrent_cc_pair_run` and the next scheduler tick re-creates
-a fresh `NOT_STARTED` row.
+running concurrently) with two layers, both of which leave the attempt
+in `NOT_STARTED` rather than marking it FAILED:
+
+1. **Scheduler-side defer** (`update.py::kickoff_indexing_jobs`) — before
+   submitting a NOT_STARTED attempt to Dask, check whether another
+   attempt for the same `(connector, credential, embedding_model)` is
+   already IN_PROGRESS. If yes, skip the submission this tick.
+2. **Worker-side advisory lock** (`run_indexing_entrypoint` +
+   `try_acquire_cc_pair_lock`) — true-race safety net for the case where
+   two NOT_STARTED rows for the same cc-pair are submitted to two
+   workers in the same scheduler tick. If the lock fails, the worker
+   reverts the attempt back to `NOT_STARTED` (clears `time_started`) so
+   the next scheduler tick picks it up again. **No FAILED row is
+   produced.** The previous behaviour wrote `skipped_concurrent_cc_pair_run`
+   FAILED rows; this no longer happens.
 
 Three downstream things to scale alongside it:
 
@@ -490,13 +500,10 @@ Three downstream things to scale alongside it:
    default, four GitHub repos still serialize, and the other workers
    are free to run other sources.
 
-Filtering for benign skipped-attempt rows in the indexing-status table:
-- `error_msg = 'skipped_concurrent_cc_pair_run'` — same cc-pair was
-  already running on another worker. This is the only "skipped" reason
-  the runtime emits today; it retries on the next scheduler tick.
-
-(The per-source cap doesn't produce FAILED rows — over-cap attempts
-stay in `NOT_STARTED` until a slot frees, see below.)
+Both queueing decisions (per-cc-pair collision + per-source cap) leave
+attempts as `NOT_STARTED` — neither produces FAILED rows. So the
+indexing-status table never accumulates "skipped" failure rows for
+routine deferral. Only real indexing errors show up as FAILED.
 
 #### Per-Source Indexing Concurrency Cap
 Even with `NUM_INDEXING_WORKERS > 1`, you typically don't want N parallel

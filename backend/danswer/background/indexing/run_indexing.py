@@ -306,9 +306,6 @@ def _prepare_index_attempt(db_session: Session, index_attempt_id: int) -> IndexA
     return attempt
 
 
-_SKIPPED_CONCURRENT_REASON = "skipped_concurrent_cc_pair_run"
-
-
 def run_indexing_entrypoint(index_attempt_id: int, is_ee: bool = False) -> None:
     """Entrypoint for indexing run when using dask distributed.
     Wraps the actual logic in a `try` block so that we can catch any exceptions
@@ -319,14 +316,22 @@ def run_indexing_entrypoint(index_attempt_id: int, is_ee: bool = False) -> None:
     e.g. a manual Re-Index click colliding with an auto-scheduled run. To
     prevent racing on Vespa writes / last_successful_index_time / connector
     checkpoint state, we acquire a per-cc-pair Postgres advisory lock before
-    doing real work. If we can't acquire it, the attempt fails fast with
-    `skipped_concurrent_cc_pair_run` and the next scheduler tick creates a
-    fresh NOT_STARTED row.
+    doing real work. If we can't acquire it, the attempt is **reverted to
+    NOT_STARTED** (status + time_started cleared) and the next scheduler
+    tick will dispatch it again. We deliberately do NOT mark FAILED — that
+    polluted the indexing-status table with spurious "skipped_concurrent_*"
+    rows for routine race conditions.
 
-    Per-source-type rate-limit caps are enforced *upstream* in the
-    scheduler (`update.py::kickoff_indexing_jobs`) — over-cap attempts
-    are simply not submitted to Dask and stay NOT_STARTED until a slot
-    frees. So no source-cap fail-fast logic lives here.
+    The scheduler-side guard in `update.py::kickoff_indexing_jobs` defers
+    submission whenever an IN_PROGRESS attempt already exists for the same
+    cc-pair, so worker-side lock contention is now extremely rare —
+    effectively a safety net for the case where two attempts are
+    submitted to two workers in the same scheduler tick before either
+    flips to IN_PROGRESS.
+
+    Per-source-type rate-limit caps are also enforced upstream in the
+    scheduler — over-cap attempts stay NOT_STARTED until a slot frees.
+    No source-cap fail-fast logic lives here.
     """
     try:
         if is_ee:
@@ -354,19 +359,28 @@ def run_indexing_entrypoint(index_attempt_id: int, is_ee: bool = False) -> None:
                 )
                 return
 
-            # Per-cc-pair concurrency guard. See module docstring for rationale.
+            # Per-cc-pair concurrency guard. See module docstring for
+            # rationale. If we can't acquire the lock another worker
+            # already holds it for the same (connector, credential) pair —
+            # revert this attempt to NOT_STARTED so the scheduler picks it
+            # up again on its next tick (instead of marking it FAILED with
+            # a `skipped_concurrent_cc_pair_run` reason, which polluted
+            # the indexing-status table with spurious failure rows).
             if not try_acquire_cc_pair_lock(db_session, connector_id, credential_id):
                 logger.info(
-                    f"Skipping indexing attempt {index_attempt_id} for "
+                    f"Re-queueing indexing attempt {index_attempt_id} for "
                     f"connector_id={connector_id} credential_id={credential_id}: "
-                    "another worker is already running an attempt for this "
-                    "cc-pair. The scheduler will retry on its next tick."
+                    "another worker holds the cc-pair lock. Reverting status "
+                    "to NOT_STARTED — the scheduler will retry on its next tick."
                 )
-                mark_attempt_failed(
-                    attempt,
-                    db_session,
-                    failure_reason=_SKIPPED_CONCURRENT_REASON,
-                )
+                # _prepare_index_attempt already flipped the row to
+                # IN_PROGRESS (and committed for primary index). Roll it
+                # back to NOT_STARTED + clear time_started so the next
+                # pick-up looks like a fresh dispatch.
+                attempt.status = IndexingStatus.NOT_STARTED
+                attempt.time_started = None
+                db_session.add(attempt)
+                db_session.commit()
                 return
 
             try:
@@ -390,8 +404,33 @@ def run_indexing_entrypoint(index_attempt_id: int, is_ee: bool = False) -> None:
                     f"with credentials: '{attempt.credential_id}'"
                 )
             finally:
-                # Session-scoped lock auto-releases on disconnect, but explicit
-                # release is faster — no waiting for the connection to time out.
-                release_cc_pair_lock(db_session, connector_id, credential_id)
+                # Robustness: a failing `_run_indexing` (Vespa hiccup, Slack
+                # API blip, model-server timeout, anything that raises) can
+                # leave the SQLAlchemy session in an aborted-transaction
+                # state. The unlock SQL would then ALSO raise, the lock
+                # would NOT release, and the DB connection would go back
+                # to the SA pool with the advisory lock still held. The
+                # next worker that pulls that connection from the pool
+                # silently inherits the orphan — every subsequent task on
+                # that cc-pair sees phantom lock contention. Same trap we
+                # hit with the retention advisory lock.
+                #
+                # Fix: rollback to clear the aborted-txn state, THEN try
+                # the unlock; log-and-continue if even that fails (lock
+                # auto-releases when this connection drops out of the SA
+                # pool — bounded latency, not infinite leak).
+                try:
+                    db_session.rollback()
+                except Exception:
+                    pass
+                try:
+                    release_cc_pair_lock(db_session, connector_id, credential_id)
+                    db_session.commit()
+                except Exception:
+                    logger.exception(
+                        f"Could not release cc-pair lock for "
+                        f"connector_id={connector_id} credential_id={credential_id}; "
+                        "lock will release when this connection drops out of the SA pool."
+                    )
     except Exception as e:
         logger.exception(f"Indexing job with ID '{index_attempt_id}' failed due to {e}")

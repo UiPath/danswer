@@ -191,14 +191,19 @@ If you need to change indexing behavior (priority, queueing, concurrency),
 size; default is 1. Safe to scale to N>1. Two independent guards prevent
 the failure modes that show up beyond a single worker:
 
-1. **Worker-side per-cc-pair lock**
-   (`db/index_attempt.py::try_acquire_cc_pair_lock`, keyed on
-   `(connector_id, credential_id)`): prevents two attempts for the *same
-   cc-pair* from running concurrently. If a worker can't acquire it, the
-   attempt fails fast with `error_msg = 'skipped_concurrent_cc_pair_run'`
-   and the next scheduler tick re-creates a fresh NOT_STARTED row.
-   Replaces upstream Onyx's per-cc-pair Redis fence. Lock is
-   session-scoped, so it auto-releases if a worker crashes.
+1. **Per-cc-pair collision guard** — two layers, both leave the row as
+   `NOT_STARTED` (never FAILED), so the indexing-status table never
+   accumulates "skipped" failure rows for routine deferral:
+   - Scheduler-side: `update.py::kickoff_indexing_jobs` defers any
+     NOT_STARTED attempt whose `(connector, credential, embedding_model)`
+     tuple already has an IN_PROGRESS attempt. Catches the common case
+     (manual Re-Index colliding with an auto-scheduled run).
+   - Worker-side: `try_acquire_cc_pair_lock` (Postgres advisory lock,
+     session-scoped) covers the true-race case where two NOT_STARTED
+     rows are submitted in the same scheduler tick. If the lock fails,
+     the worker **reverts the attempt to NOT_STARTED** (clears
+     `time_started`) so the next tick re-dispatches it.
+   Replaces upstream Onyx's per-cc-pair Redis fence pattern.
 
 2. **Scheduler-side per-source-type cap**
    (`background/update.py::kickoff_indexing_jobs`, configured by

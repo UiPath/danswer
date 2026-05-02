@@ -262,6 +262,91 @@ def cleanup_indexing_jobs(
     return existing_jobs_copy
 
 
+_DISPATCH = "dispatch"
+_DEFER_CC_PAIR = "defer_cc_pair"
+_DEFER_SOURCE_CAP = "defer_source_cap"
+
+
+def _build_running_view(
+    in_progress_rows: list[IndexAttempt],
+    dispatched_pre_completion_rows: list[IndexAttempt],
+    per_source_cap: int,
+) -> tuple[dict[str, int], set[tuple[int | None, int | None, int]]]:
+    """Build the scheduler's running-attempt view.
+
+    Counts BOTH:
+      - Attempts that have flipped to IN_PROGRESS in the DB.
+      - Attempts that the scheduler has already dispatched to Dask but
+        which haven't yet flipped to IN_PROGRESS (still queued in Dask
+        or with a worker spinning up).
+
+    Counting only the DB view leaks the per-source cap: an attempt
+    sitting in Dask's queue for a few seconds doesn't register, and
+    the next scheduler tick can submit a second same-source attempt
+    past the cap. That was the actual cause of "two slack runs at
+    once despite cap=1" + "lower-priority attempt running while a
+    higher-priority attempt sits NOT_STARTED".
+    """
+    running_per_source: dict[str, int] = {}
+    in_progress_cc_pair_keys: set[tuple[int | None, int | None, int]] = set()
+    accounted: set[int] = set()
+    for ip in in_progress_rows:
+        if ip.id in accounted:
+            continue
+        accounted.add(ip.id)
+        if ip.connector is None:
+            continue
+        in_progress_cc_pair_keys.add(
+            (ip.connector_id, ip.credential_id, ip.embedding_model_id)
+        )
+        if per_source_cap > 0:
+            key = ip.connector.source.value
+            running_per_source[key] = running_per_source.get(key, 0) + 1
+    for d in dispatched_pre_completion_rows:
+        if d.id in accounted:
+            continue
+        accounted.add(d.id)
+        if d.connector is None:
+            continue
+        in_progress_cc_pair_keys.add(
+            (d.connector_id, d.credential_id, d.embedding_model_id)
+        )
+        if per_source_cap > 0:
+            key = d.connector.source.value
+            running_per_source[key] = running_per_source.get(key, 0) + 1
+    return running_per_source, in_progress_cc_pair_keys
+
+
+def _evaluate_dispatch_for_attempt(
+    attempt: IndexAttempt,
+    running_per_source: dict[str, int],
+    in_progress_cc_pair_keys: set[tuple[int | None, int | None, int]],
+    per_source_cap: int,
+) -> str:
+    """Pure decision: should this attempt dispatch now, or defer?
+
+    Mutates `running_per_source` and `in_progress_cc_pair_keys` only
+    when returning _DISPATCH, so subsequent same-tick iterations see
+    this attempt as in-flight.
+    """
+    if attempt.connector is None:
+        return _DISPATCH  # caller handles connector-null path separately
+    cc_pair_key = (
+        attempt.connector_id,
+        attempt.credential_id,
+        attempt.embedding_model_id,
+    )
+    if cc_pair_key in in_progress_cc_pair_keys:
+        return _DEFER_CC_PAIR
+    if per_source_cap > 0:
+        source_key = attempt.connector.source.value
+        if running_per_source.get(source_key, 0) >= per_source_cap:
+            return _DEFER_SOURCE_CAP
+        running_per_source[source_key] = running_per_source.get(source_key, 0) + 1
+    in_progress_cc_pair_keys.add(cc_pair_key)
+    return _DISPATCH
+
+
 def kickoff_indexing_jobs(
     existing_jobs: dict[int, Future | SimpleJob],
     client: Client | SimpleJobClient,
@@ -279,22 +364,42 @@ def kickoff_indexing_jobs(
             if attempt.id not in existing_jobs
         ]
 
-        # Count IN_PROGRESS attempts per source type so we can defer
-        # submissions that would exceed the per-source cap. Deferred
-        # attempts stay NOT_STARTED and get reconsidered on the next tick
-        # when a slot frees up — no FAILED rows, no extra Dask work.
-        running_per_source: dict[str, int] = {}
-        if PER_SOURCE_CAP > 0:
-            in_progress = (
+        # One DB read fuels two scheduler-side guards:
+        #   (a) per-source-type concurrency cap — defer when the source
+        #       group is full (`PER_SOURCE_CAP`).
+        #   (b) per-cc-pair collision guard — defer when this exact
+        #       (connector, credential, embedding_model) tuple already
+        #       has an IN_PROGRESS attempt. Common case: a manual
+        #       Re-Index click while an auto-scheduled run is mid-flight.
+        # Both deferrals leave the row as NOT_STARTED — never FAILED —
+        # so the indexing-status table doesn't get polluted with
+        # "skipped_concurrent_*" rows for routine queueing decisions.
+        in_progress_rows = (
+            db_session.query(IndexAttempt)
+            .filter(IndexAttempt.status == IndexingStatus.IN_PROGRESS)
+            .all()
+        )
+        accounted_attempt_ids = {ip.id for ip in in_progress_rows}
+        unaccounted_dispatched_ids = [
+            aid for aid in existing_jobs if aid not in accounted_attempt_ids
+        ]
+        dispatched_pre_completion_rows: list[IndexAttempt] = []
+        if unaccounted_dispatched_ids:
+            dispatched_pre_completion_rows = (
                 db_session.query(IndexAttempt)
-                .filter(IndexAttempt.status == IndexingStatus.IN_PROGRESS)
+                .filter(IndexAttempt.id.in_(unaccounted_dispatched_ids))
+                .filter(
+                    IndexAttempt.status.notin_(
+                        [IndexingStatus.SUCCESS, IndexingStatus.FAILED]
+                    )
+                )
                 .all()
             )
-            for ip in in_progress:
-                if ip.connector is None:
-                    continue
-                key = ip.connector.source.value
-                running_per_source[key] = running_per_source.get(key, 0) + 1
+        running_per_source, in_progress_cc_pair_keys = _build_running_view(
+            in_progress_rows,
+            dispatched_pre_completion_rows,
+            PER_SOURCE_CAP,
+        )
 
     logger.info(f"Found {len(new_indexing_attempts)} new indexing tasks.")
 
@@ -326,20 +431,28 @@ def kickoff_indexing_jobs(
                 )
             continue
 
-        # Per-source-type concurrency cap. Defer over-cap attempts: leave
-        # them NOT_STARTED so the next tick picks them up once a running
-        # attempt for the same source finishes. PER_SOURCE_CAP=0 disables.
-        if PER_SOURCE_CAP > 0:
-            source_key = attempt.connector.source.value
-            if running_per_source.get(source_key, 0) >= PER_SOURCE_CAP:
-                logger.info(
-                    f"Deferring indexing attempt {attempt.id} for connector "
-                    f"'{attempt.connector.name}' (source={source_key}): "
-                    f"cap of {PER_SOURCE_CAP} reached. "
-                    "Will retry on next scheduler tick."
-                )
-                continue
-            running_per_source[source_key] = running_per_source.get(source_key, 0) + 1
+        decision = _evaluate_dispatch_for_attempt(
+            attempt,
+            running_per_source,
+            in_progress_cc_pair_keys,
+            PER_SOURCE_CAP,
+        )
+        if decision == _DEFER_CC_PAIR:
+            logger.info(
+                f"Deferring indexing attempt {attempt.id} for connector "
+                f"'{attempt.connector.name}': cc-pair already has an "
+                "IN_PROGRESS attempt. Will retry on next scheduler tick."
+            )
+            continue
+        if decision == _DEFER_SOURCE_CAP:
+            logger.info(
+                f"Deferring indexing attempt {attempt.id} for connector "
+                f"'{attempt.connector.name}' "
+                f"(source={attempt.connector.source.value}): "
+                f"cap of {PER_SOURCE_CAP} reached. "
+                "Will retry on next scheduler tick."
+            )
+            continue
 
         # Per-attempt indexing priority. SimpleJobClient ignores the kwarg;
         # the real Dask Client honors it (higher number = scheduled first).
