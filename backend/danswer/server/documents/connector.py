@@ -372,12 +372,26 @@ def upload_files(
 @router.get("/admin/connector/indexing-status")
 def get_connector_indexing_status(
     secondary_index: bool = False,
+    # Optional server-side filter on `connector.disabled`:
+    #   `disabled=false` → only enabled connectors (default page view)
+    #   `disabled=true`  → only disabled connectors
+    #   omitted          → all connectors
+    # Drives the network/serialization win on environments with hundreds
+    # of cc-pairs where most are intentionally paused (e.g. one-off
+    # historical web-scrape connectors).
+    disabled: bool | None = None,
     _: User = Depends(current_admin_user),
     db_session: Session = Depends(get_session),
 ) -> list[ConnectorIndexingStatus]:
     indexing_statuses: list[ConnectorIndexingStatus] = []
 
     cc_pairs = get_connector_credential_pairs(db_session)
+    if disabled is not None:
+        cc_pairs = [
+            cc_pair
+            for cc_pair in cc_pairs
+            if cc_pair.connector is not None and cc_pair.connector.disabled == disabled
+        ]
     cc_pair_identifiers = [
         ConnectorCredentialPairIdentifier(
             connector_id=cc_pair.connector_id, credential_id=cc_pair.credential_id

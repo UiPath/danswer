@@ -80,7 +80,7 @@ spec:
           # backend code (the analytics_rollup module + new migration).
           # The api-server deployment is currently on vha-119; you'll
           # likely roll a vha-120 (or similar) once the PR merges.
-          image: sfbrdevhelmweacr.azurecr.io/danswer/danswer-backend:vha-120
+          image: sfbrdevhelmweacr.azurecr.io/danswer/danswer-backend:vha-121
           imagePullPolicy: IfNotPresent
           command:
             - /bin/sh
