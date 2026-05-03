@@ -109,7 +109,11 @@ export interface WebConfig {
 
 export interface GithubConfig {
   repo_owner: string;
-  repo_name: string;
+  // Optional: blank means index every repo the access token can see
+  // under this owner. The form's helper text ("leave blank to index
+  // every repo ...") and the page's `repo_name || ""` consumers all
+  // expect this; the yup schema doesn't `.required()` it either.
+  repo_name?: string;
   include_prs: boolean;
   include_issues: boolean;
 }

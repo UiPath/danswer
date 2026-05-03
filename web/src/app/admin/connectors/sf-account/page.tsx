@@ -158,6 +158,12 @@ const MainSection = () => {
                   sf_password: Yup.string().required(
                     "Please enter your Salesforce password"
                   ),
+                  // Hidden discriminator (set in initialValues below);
+                  // declared here so the schema's inferred Shape matches
+                  // SalesforceCredentialJson.
+                  sf_credential_kind: Yup.string()
+                    .oneOf(["account", "kbarticles"])
+                    .optional(),
                 })}
                 initialValues={{
                   sf_client_id:
@@ -234,6 +240,9 @@ const MainSection = () => {
                 sf_password: Yup.string().required(
                   "Please enter your Salesforce password"
                 ),
+                sf_credential_kind: Yup.string()
+                  .oneOf(["account", "kbarticles"])
+                  .optional(),
               })}
               initialValues={{
                 sf_client_id: "",
@@ -309,7 +318,15 @@ const MainSection = () => {
             source="salesforce"
             inputType="poll"
             formBody={<></>}
-            validationSchema={Yup.object().shape({})}
+            // SalesforceConfig has `requested_objects?: string[]`; the
+            // SF-Account flow doesn't render an input for it (the
+            // backend hard-codes the Account object set), but yup's
+            // Shape inference still requires the field be declared.
+            validationSchema={Yup.object().shape({
+              requested_objects: Yup.array()
+                .of(Yup.string().required())
+                .optional(),
+            })}
             initialValues={{}}
             credentialId={SalesforceCredential.id}
             refreshFreq={10 * 60} // 10 minutes

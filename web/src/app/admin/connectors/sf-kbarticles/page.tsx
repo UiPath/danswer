@@ -157,6 +157,9 @@ const MainSection = () => {
                   sf_password: Yup.string().required(
                     "Please enter your Salesforce password"
                   ),
+                  sf_credential_kind: Yup.string()
+                    .oneOf(["account", "kbarticles"])
+                    .optional(),
                 })}
                 initialValues={{
                   sf_client_id:
@@ -233,6 +236,9 @@ const MainSection = () => {
                 sf_password: Yup.string().required(
                   "Please enter your Salesforce password"
                 ),
+                sf_credential_kind: Yup.string()
+                  .oneOf(["account", "kbarticles"])
+                  .optional(),
               })}
               initialValues={{
                 sf_client_id: "",
