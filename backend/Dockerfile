@@ -94,6 +94,10 @@ COPY supervisord.conf /usr/etc/supervisord.conf
 # Escape hatch
 COPY ./scripts/force_delete_connector_by_id.py /app/scripts/force_delete_connector_by_id.py
 
+# One-time analytics backfill (used by the analytics-bootstrap Job;
+# safe to keep in the runtime image — it's idempotent and admin-run).
+COPY ./scripts/backfill_analytics_rollup.py /app/scripts/backfill_analytics_rollup.py
+
 # Put logo in assets
 COPY ./assets /app/assets
 

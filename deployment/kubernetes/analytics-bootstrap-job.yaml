@@ -80,13 +80,16 @@ spec:
           # backend code (the analytics_rollup module + new migration).
           # The api-server deployment is currently on vha-119; you'll
           # likely roll a vha-120 (or similar) once the PR merges.
-          image: sfbrdevhelmweacr.azurecr.io/danswer/danswer-backend:vha-119
+          image: sfbrdevhelmweacr.azurecr.io/danswer/danswer-backend:vha-120
           imagePullPolicy: IfNotPresent
           command:
             - /bin/sh
             - -c
             - |
-              set -euo pipefail
+              # `pipefail` isn't supported by the image's /bin/sh
+              # (BusyBox ash / dash). The script has no pipes anyway,
+              # so plain `-eu` is sufficient: any non-zero exit aborts.
+              set -eu
               echo "=== Step 1/2: alembic upgrade heads ==="
               alembic upgrade heads
               echo
