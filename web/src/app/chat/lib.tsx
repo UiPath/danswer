@@ -589,7 +589,7 @@ export async function uploadFilesForChat(
   return [responseJson.files as FileDescriptor[], null];
 }
 
-export async function useScrollonStream({
+export function useScrollonStream({
   isStreaming,
   scrollableDivRef,
   scrollDist,
