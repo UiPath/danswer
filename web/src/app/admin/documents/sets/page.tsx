@@ -104,7 +104,12 @@ const DocumentSetTable = ({
   return (
     <div>
       <Title>Existing Document Sets</Title>
-      <Table className="overflow-visible mt-2 table-fixed w-full">
+      {/* Tremor's <Table> wraps the actual <table> in a div and forwards
+          className to that wrapper, not the table. Use the [&_table] arbitrary
+          variant to apply table-fixed to the inner table so the column widths
+          below are respected. Without this the table is auto-layout and a
+          single wide Connectors cell pushes Status/Delete off-screen. */}
+      <Table className="overflow-visible mt-2 [&_table]:table-fixed [&_table]:w-full">
         <TableHead>
           <TableRow>
             <TableHeaderCell className="w-[28%]">Name</TableHeaderCell>
