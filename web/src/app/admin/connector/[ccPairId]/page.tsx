@@ -11,6 +11,7 @@ import { ConfigDisplay } from "./ConfigDisplay";
 import { ModifyStatusButtonCluster } from "./ModifyStatusButtonCluster";
 import { DeletionButton } from "./DeletionButton";
 import { RefreshFrequencyEdit } from "./RefreshFrequencyEdit";
+import { CCPairNameEdit } from "./CCPairNameEdit";
 import { ErrorCallout } from "@/components/ErrorCallout";
 import { ReIndexButton } from "./ReIndexButton";
 import { CredentialSection } from "./CredentialSection";
@@ -67,8 +68,12 @@ function Main({ ccPairId }: { ccPairId: number }) {
   return (
     <>
       <BackButton />
-      <div className="pb-1 flex mt-1">
-        <h1 className="text-3xl text-emphasis font-bold">{ccPair.name}</h1>
+      <div className="pb-1 flex mt-1 items-center">
+        <CCPairNameEdit
+          ccPairId={ccPair.id}
+          name={ccPair.name}
+          onUpdated={() => mutateCcPair()}
+        />
 
         <div className="ml-auto">
           <ModifyStatusButtonCluster ccPair={ccPair} />
