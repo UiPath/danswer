@@ -64,6 +64,9 @@ from danswer.tools.search.search_tool import SearchTool
 from danswer.document_index.factory import get_default_document_index
 from danswer.indexing.embedder import DefaultIndexingEmbedder
 from danswer.indexing.indexing_pipeline import build_indexing_pipeline
+from danswer.one_shot_answer.answer_question import get_search_answer
+from danswer.one_shot_answer.models import DirectQARequest
+from danswer.one_shot_answer.models import ThreadMessage
 from danswer.search.enums import OptionalSearchSetting
 from danswer.search.enums import RecencyBiasSetting
 from danswer.search.models import RetrievalDetails
@@ -769,6 +772,112 @@ def phase_non_english(persona_ml: Persona) -> bool:
     return failures == 0
 
 
+def probe_slack(persona: Persona, query: str) -> ChatProbeResult:
+    """Drive the one-shot answer path that the Slack listener uses.
+    `get_search_answer` runs the same Answer pipeline as chat but with
+    its own retry loop and citation enforcement."""
+    with get_session_context_manager() as db_session:
+        req = DirectQARequest(
+            messages=[ThreadMessage(message=query, sender=None)],
+            prompt_id=None,
+            persona_id=persona.id,
+            retrieval_options=RetrievalDetails(
+                run_search=OptionalSearchSetting.ALWAYS, real_time=True
+            ),
+        )
+        try:
+            response = get_search_answer(
+                query_req=req,
+                user=None,
+                max_document_tokens=None,
+                max_history_tokens=None,
+                db_session=db_session,
+                use_citations=True,
+                danswerbot_flow=True,
+            )
+        except Exception as exc:
+            return ChatProbeResult(
+                answer_text="",
+                retrieved_doc_ids=[],
+                retrieved_titles=[],
+                error=f"{type(exc).__name__}: {exc}",
+            )
+
+        retrieved_doc_ids: list[str] = []
+        retrieved_titles: list[str] = []
+        if response.docs and response.docs.top_documents:
+            for d in response.docs.top_documents:
+                retrieved_doc_ids.append(d.document_id)
+                retrieved_titles.append(d.semantic_identifier or "")
+        return ChatProbeResult(
+            answer_text=(response.answer or "").strip(),
+            retrieved_doc_ids=retrieved_doc_ids,
+            retrieved_titles=retrieved_titles,
+            error=response.error_msg,
+        )
+
+
+def phase_slack(persona_ml: Persona) -> bool:
+    """Smoke test for the Slack one-shot path. Same hard contract as
+    Phase 3 (retrieval hit + entity in answer + answer in user's
+    language), but driven through `get_search_answer` — the function
+    the slack listener calls."""
+    section("Phase 5 — Slack one-shot path with multilingual flag ON")
+    failures = 0
+    lang_match = 0
+    lang_total = 0
+    for case in CASES:
+        if case.code == "en":
+            continue
+        # One query per language is plenty for a smoke test (each
+        # query takes 2× LLM round-trips: answer + translate).
+        query, expected_doc = case.queries[0]
+        result = probe_slack(persona_ml, query)
+        if result.error:
+            fail(f"[slack {case.code}] '{query[:60]}' error: {result.error}")
+            failures += 1
+            continue
+
+        if expected_doc.doc_id in result.retrieved_doc_ids:
+            ok(f"[slack {case.code}] retrieval hit expected doc")
+        else:
+            fail(
+                f"[slack {case.code}] expected doc NOT in top docs. "
+                f"retrieved: {result.retrieved_titles[:3]}"
+            )
+            failures += 1
+
+        if expected_doc.expected_entity.lower() in result.answer_text.lower():
+            ok(
+                f"[slack {case.code}] answer contains entity "
+                f"'{expected_doc.expected_entity}'"
+            )
+        else:
+            fail(
+                f"[slack {case.code}] answer missing entity "
+                f"'{expected_doc.expected_entity}'. Answer head: "
+                f"{result.answer_text[:120]!r}"
+            )
+            failures += 1
+
+        detected = detect_language(result.answer_text)
+        lang_total += 1
+        if detected == case.code:
+            lang_match += 1
+            ok(f"[slack {case.code}] answer language: {detected}")
+        else:
+            fail(
+                f"[slack {case.code}] expected {case.code}, detected "
+                f"{detected}. Answer head: {result.answer_text[:200]!r}"
+            )
+            failures += 1
+    info(
+        f"slack-path language-match summary: {lang_match}/{lang_total} "
+        f"non-English answers came back in the user's language"
+    )
+    return failures == 0
+
+
 def phase_control(persona_ctrl: Persona) -> None:
     section("Phase 4 — control: same queries with flag OFF (informational)")
     for case in CASES:
@@ -829,6 +938,9 @@ def main() -> int:
         overall_ok = False
 
     if not phase_non_english(persona_ml):
+        overall_ok = False
+
+    if not phase_slack(persona_ml):
         overall_ok = False
 
     phase_control(persona_ctrl)
