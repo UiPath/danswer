@@ -113,7 +113,10 @@ export const ConnectorTitle = ({
   const mainDisplay = (
     <>
       {sourceMetadata.icon({ size: 20 })}
-      <div className={nameClassName} title={truncateName ? displayName : undefined}>
+      <div
+        className={nameClassName}
+        title={truncateName ? displayName : undefined}
+      >
         {displayName}
       </div>
     </>

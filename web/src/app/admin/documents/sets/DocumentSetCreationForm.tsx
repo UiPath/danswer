@@ -161,8 +161,7 @@ export const DocumentSetCreationForm = ({
                 );
                 const availableOptions = ccPairs
                   .filter(
-                    (ccPair) =>
-                      !values.cc_pair_ids.includes(ccPair.cc_pair_id)
+                    (ccPair) => !values.cc_pair_ids.includes(ccPair.cc_pair_id)
                   )
                   .map((ccPair) => ({
                     name: ccPair.name?.toString() || "",
@@ -229,9 +228,7 @@ export const DocumentSetCreationForm = ({
                           >
                             <div className="my-auto min-w-0">
                               <ConnectorTitle
-                                ccPairId={
-                                  option?.metadata?.ccPairId as number
-                                }
+                                ccPairId={option?.metadata?.ccPairId as number}
                                 ccPairName={option.name}
                                 connector={
                                   option?.metadata?.connector as Connector<any>
