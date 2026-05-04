@@ -28,6 +28,29 @@ interface SetCreationPopupProps {
   existingDocumentSet?: DocumentSet;
 }
 
+// Summarize the connector_specific_config so two cc-pairs with the
+// same display name (e.g. multiple Confluence entries pointing to
+// different wiki URLs) can be told apart in the picker.
+function summarizeConnectorConfig(
+  config: Record<string, any> | null | undefined
+): string {
+  if (!config) return "";
+  const parts: string[] = [];
+  for (const [key, value] of Object.entries(config)) {
+    if (value === undefined || value === null || value === "") continue;
+    if (typeof value === "boolean") continue;
+    if (Array.isArray(value)) {
+      if (value.length === 0) continue;
+      parts.push(`${key}: ${value.join(", ")}`);
+    } else if (typeof value === "object") {
+      continue;
+    } else {
+      parts.push(`${key}: ${value}`);
+    }
+  }
+  return parts.join(" • ");
+}
+
 export const DocumentSetCreationForm = ({
   ccPairs,
   userGroups,
@@ -147,6 +170,9 @@ export const DocumentSetCreationForm = ({
                     metadata: {
                       ccPairId: ccPair.cc_pair_id,
                       connector: ccPair.connector,
+                      configSummary: summarizeConnectorConfig(
+                        ccPair.connector.connector_specific_config
+                      ),
                     },
                   }));
                 return (
@@ -157,11 +183,15 @@ export const DocumentSetCreationForm = ({
                           const ind = values.cc_pair_ids.indexOf(
                             ccPair.cc_pair_id
                           );
+                          const configSummary = summarizeConnectorConfig(
+                            ccPair.connector.connector_specific_config
+                          );
                           return (
                             <div
                               key={`${ccPair.connector.id}-${ccPair.credential.id}`}
                               className="flex rounded-lg px-3 py-1 border border-border bg-background-strong hover:bg-hover cursor-pointer"
                               onClick={() => arrayHelpers.remove(ind)}
+                              title={configSummary || undefined}
                             >
                               <div className="my-auto">
                                 <ConnectorTitle
@@ -189,26 +219,38 @@ export const DocumentSetCreationForm = ({
                           arrayHelpers.push(ccPairId);
                         }
                       }}
-                      itemComponent={({ option }) => (
-                        <div className="flex px-4 py-2.5 hover:bg-hover cursor-pointer">
-                          <div className="my-auto">
-                            <ConnectorTitle
-                              ccPairId={
-                                option?.metadata?.ccPairId as number
-                              }
-                              ccPairName={option.name}
-                              connector={
-                                option?.metadata?.connector as Connector<any>
-                              }
-                              isLink={false}
-                              showMetadata={false}
-                            />
+                      itemComponent={({ option }) => {
+                        const configSummary =
+                          (option?.metadata?.configSummary as string) || "";
+                        return (
+                          <div
+                            className="flex px-4 py-2.5 hover:bg-hover cursor-pointer"
+                            title={configSummary || undefined}
+                          >
+                            <div className="my-auto min-w-0">
+                              <ConnectorTitle
+                                ccPairId={
+                                  option?.metadata?.ccPairId as number
+                                }
+                                ccPairName={option.name}
+                                connector={
+                                  option?.metadata?.connector as Connector<any>
+                                }
+                                isLink={false}
+                                showMetadata={false}
+                              />
+                              {configSummary && (
+                                <div className="text-xs text-subtle mt-0.5 truncate">
+                                  {configSummary}
+                                </div>
+                              )}
+                            </div>
+                            <div className="ml-auto my-auto pl-2">
+                              <FiPlus />
+                            </div>
                           </div>
-                          <div className="ml-auto my-auto">
-                            <FiPlus />
-                          </div>
-                        </div>
-                      )}
+                        );
+                      }}
                     />
                   </div>
                 );
