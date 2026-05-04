@@ -10,6 +10,7 @@ import { Text } from "@tremor/react";
 import { ConfigDisplay } from "./ConfigDisplay";
 import { ModifyStatusButtonCluster } from "./ModifyStatusButtonCluster";
 import { DeletionButton } from "./DeletionButton";
+import { RefreshFrequencyEdit } from "./RefreshFrequencyEdit";
 import { ErrorCallout } from "@/components/ErrorCallout";
 import { ReIndexButton } from "./ReIndexButton";
 import { CredentialSection } from "./CredentialSection";
@@ -98,6 +99,13 @@ function Main({ ccPairId }: { ccPairId: number }) {
         credential={ccPair.credential}
         onUpdated={() => mutateCcPair()}
       />
+
+      <div className="mt-6">
+        <RefreshFrequencyEdit
+          connector={ccPair.connector}
+          onUpdated={() => mutateCcPair()}
+        />
+      </div>
 
       <div className="mt-6">
         <div className="flex">

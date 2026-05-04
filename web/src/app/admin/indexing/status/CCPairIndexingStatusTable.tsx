@@ -19,7 +19,15 @@ import { ConnectorTitle } from "@/components/admin/connectors/ConnectorTitle";
 import { getDocsProcessedPerMinute } from "@/lib/indexAttempt";
 import { useRouter } from "next/navigation";
 import { isCurrentlyDeleting } from "@/lib/documentDeletion";
-import { FiCheck, FiEdit2, FiSearch, FiX, FiXCircle } from "react-icons/fi";
+import {
+  FiCheck,
+  FiChevronDown,
+  FiChevronUp,
+  FiEdit2,
+  FiSearch,
+  FiX,
+  FiXCircle,
+} from "react-icons/fi";
 import { getSourceMetadata } from "@/lib/sources";
 import { updateConnector } from "@/lib/connector";
 import { usePopup } from "@/components/admin/connectors/Popup";
@@ -110,6 +118,12 @@ export function CCPairIndexingStatusTable({
   const [sourceFilter, setSourceFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [nameSearch, setNameSearch] = useState<string>("");
+  // Sort state for the "Last Indexed" column. `none` falls back to the
+  // page's default ordering (source-name ascending, set in page.tsx).
+  // Click cycle: none → desc → asc → none.
+  const [lastIndexedSort, setLastIndexedSort] = useState<
+    "none" | "asc" | "desc"
+  >("none");
   const [selectedCcPairIds, setSelectedCcPairIds] = useState<Set<number>>(
     new Set()
   );
@@ -146,14 +160,44 @@ export function CCPairIndexingStatusTable({
     if (q) {
       rows = rows.filter((s) => s.name?.toLowerCase().includes(q));
     }
+
+    if (lastIndexedSort !== "none") {
+      // Sort by `last_success` timestamp. Connectors that have never
+      // indexed (null) are pushed to the bottom in either direction so
+      // they don't crowd out the meaningful comparisons at the top.
+      const NEVER = lastIndexedSort === "asc" ? Infinity : -Infinity;
+      rows = [...rows].sort((a, b) => {
+        const aT = a.last_success ? new Date(a.last_success).getTime() : NEVER;
+        const bT = b.last_success ? new Date(b.last_success).getTime() : NEVER;
+        return lastIndexedSort === "asc" ? aT - bT : bT - aT;
+      });
+    }
     return rows;
-  }, [ccPairsIndexingStatuses, sourceFilter, statusFilter, nameSearch]);
+  }, [
+    ccPairsIndexingStatuses,
+    sourceFilter,
+    statusFilter,
+    nameSearch,
+    lastIndexedSort,
+  ]);
 
   // Reset page + selection when any filter changes so we never act on hidden rows.
   useEffect(() => {
     setPage(1);
     setSelectedCcPairIds(new Set());
   }, [sourceFilter, statusFilter, nameSearch]);
+
+  // Reset to page 1 when sort changes — otherwise users on page 4 would
+  // jump to "page 4 of the new ordering" which is disorienting.
+  useEffect(() => {
+    setPage(1);
+  }, [lastIndexedSort]);
+
+  const cycleLastIndexedSort = () => {
+    setLastIndexedSort((prev) =>
+      prev === "none" ? "desc" : prev === "desc" ? "asc" : "none"
+    );
+  };
 
   const anyFilterActive =
     sourceFilter !== "all" ||
@@ -373,7 +417,33 @@ export function CCPairIndexingStatusTable({
             <TableHeaderCell>Connector</TableHeaderCell>
             <TableHeaderCell>Status</TableHeaderCell>
             <TableHeaderCell>Is Public</TableHeaderCell>
-            <TableHeaderCell>Last Indexed</TableHeaderCell>
+            <TableHeaderCell>
+              <button
+                type="button"
+                onClick={cycleLastIndexedSort}
+                className="flex items-center gap-1 hover:text-emphasis cursor-pointer select-none"
+                aria-label={
+                  lastIndexedSort === "none"
+                    ? "Sort by Last Indexed"
+                    : lastIndexedSort === "desc"
+                      ? "Last Indexed sorted newest first — click to flip"
+                      : "Last Indexed sorted oldest first — click to clear"
+                }
+                title="Click to sort by Last Indexed"
+              >
+                <span>Last Indexed</span>
+                {lastIndexedSort === "desc" ? (
+                  <FiChevronDown size={14} />
+                ) : lastIndexedSort === "asc" ? (
+                  <FiChevronUp size={14} />
+                ) : (
+                  // Neutral indicator when not sorted — same icon as
+                  // the active state but at low opacity so the column
+                  // looks "sortable" without faking a direction.
+                  <FiChevronDown size={14} className="opacity-30" />
+                )}
+              </button>
+            </TableHeaderCell>
             <TableHeaderCell>Docs Indexed</TableHeaderCell>
           </TableRow>
         </TableHead>

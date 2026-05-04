@@ -282,10 +282,9 @@ const MainSection = () => {
                     name: "channels",
                     label: "Channels:",
                     subtext: `
-                      Specify 0 or more channels to index by name or channel ID. For example,
+                      Specify at least one channel to index by name or channel ID. For example,
                       specifying "support" or "C04ABCDEF12" will index that channel.
-                      Using channel IDs is recommended as they remain stable even if a channel is renamed.
-                      If no channels are specified, all channels in your workspace will be indexed.`,
+                      Using channel IDs is recommended as they remain stable even if a channel is renamed.`,
                   })(values)}
                   <BooleanFormField
                     name="channel_regex_enabled"
@@ -311,11 +310,19 @@ const MainSection = () => {
               workspace: Yup.string().required(
                 "Please enter the workspace to index"
               ),
+              // Require at least one channel. Empty/no channels would
+              // cause the backend to index every channel the bot can see
+              // (including private channels it was added to) — that's a
+              // big enough blast radius that we don't allow it from the
+              // UI. Backend has a matching guard via the
+              // SLACK_CONNECTOR_REQUIRE_CHANNELS env var for callers
+              // that bypass the UI (e.g. direct API).
               channels: Yup.array()
                 .of(
                   Yup.string().required("Channel names or IDs must be strings")
                 )
-                .required(),
+                .min(1, "Please specify at least one channel")
+                .required("Please specify at least one channel"),
               channel_regex_enabled: Yup.boolean().required(),
             })}
             initialValues={{
