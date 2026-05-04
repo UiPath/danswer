@@ -246,4 +246,6 @@ class CustomModelServer(LLM):
             model_name=self._model_version,
             temperature=self._temperature,
             api_key=self._api_key,
+            api_base=self._endpoint,
+            api_version=None,
         )
