@@ -19,6 +19,11 @@ interface ConnectorTitleProps {
   owner?: string;
   isLink?: boolean;
   showMetadata?: boolean;
+  // When set, the outer flex no longer sizes to content (default
+  // `w-fit`) and the name renders with truncation. Lets callers in
+  // a constrained-width column (e.g. table cell) collapse long names
+  // to an ellipsis instead of forcing the column wider.
+  truncateName?: boolean;
 }
 
 export const ConnectorTitle = ({
@@ -29,15 +34,19 @@ export const ConnectorTitle = ({
   isPublic = true,
   isLink = true,
   showMetadata = true,
+  truncateName = false,
 }: ConnectorTitleProps) => {
   const sourceMetadata = getSourceMetadata(connector.source);
 
   let additionalMetadata = new Map<string, string>();
   if (connector.source === "github") {
     const typedConnector = connector as Connector<GithubConfig>;
+    const repoName = typedConnector.connector_specific_config.repo_name;
     additionalMetadata.set(
       "Repo",
-      `${typedConnector.connector_specific_config.repo_owner}/${typedConnector.connector_specific_config.repo_name}`
+      repoName
+        ? `${typedConnector.connector_specific_config.repo_owner}/${repoName}`
+        : typedConnector.connector_specific_config.repo_owner
     );
   } else if (connector.source === "gitlab") {
     const typedConnector = connector as Connector<GitlabConfig>;
@@ -94,17 +103,26 @@ export const ConnectorTitle = ({
     );
   }
 
-  const mainSectionClassName = "text-blue-500 flex w-fit";
+  const mainSectionClassName = truncateName
+    ? "text-blue-500 flex min-w-0 max-w-full"
+    : "text-blue-500 flex w-fit";
+  const nameClassName = truncateName
+    ? "ml-1 my-auto min-w-0 truncate"
+    : "ml-1 my-auto";
+  const displayName = ccPairName || sourceMetadata.displayName;
   const mainDisplay = (
     <>
       {sourceMetadata.icon({ size: 20 })}
-      <div className="ml-1 my-auto">
-        {ccPairName || sourceMetadata.displayName}
+      <div
+        className={nameClassName}
+        title={truncateName ? displayName : undefined}
+      >
+        {displayName}
       </div>
     </>
   );
   return (
-    <div className="my-auto">
+    <div className={truncateName ? "my-auto min-w-0 max-w-full" : "my-auto"}>
       {isLink ? (
         <Link
           className={mainSectionClassName}

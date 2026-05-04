@@ -7,6 +7,7 @@ from sqlalchemy import desc
 from sqlalchemy import func
 from sqlalchemy import or_
 from sqlalchemy import select
+from sqlalchemy import text
 from sqlalchemy import update
 from sqlalchemy.orm import joinedload
 from sqlalchemy.orm import Session
@@ -19,6 +20,77 @@ from danswer.server.documents.models import ConnectorCredentialPairIdentifier
 from danswer.utils.logger import setup_logger
 from danswer.utils.telemetry import optional_telemetry
 from danswer.utils.telemetry import RecordType
+
+
+# ---------------------------------------------------------------------------
+# Per-cc-pair indexing lock (Postgres advisory lock)
+# ---------------------------------------------------------------------------
+#
+# When NUM_INDEXING_WORKERS > 1, two indexing attempts for the same
+# (connector_id, credential_id) could otherwise be assigned to two Dask
+# workers and run concurrently — racing on Vespa writes, on
+# `last_successful_index_time`, and on connector-side checkpoint state.
+#
+# Upstream Onyx prevents this with per-cc-pair Redis fences. We don't
+# have Redis (the broker is Postgres), but advisory locks give the same
+# semantics: a lock acquired by one session is invisible to other
+# sessions until released or the holding session disconnects.
+#
+# `pg_try_advisory_lock(int8)` is the non-blocking form — we want a
+# fast-fail "someone else has it" signal, not to wait. Lock IDs are 64-
+# bit; we encode the cc-pair as `(offset || hash(connector_id, credential_id))`
+# so they don't collide with the retention sweep's lock id.
+_INDEXING_LOCK_KEY_OFFSET = 0x494E4458_00000000  # b"INDX" in the high bits
+
+
+def _cc_pair_lock_key(connector_id: int, credential_id: int) -> int:
+    """Stable 64-bit advisory-lock key for (connector_id, credential_id).
+
+    The high 32 bits are a fixed offset (`b"INDX"`) so this lock id can
+    never collide with the retention sweep's lock id (`b"RETENTIO"`) or
+    any other future advisory lock. The low 32 bits are a hash of the
+    cc-pair tuple — collisions there mean two unrelated cc-pairs would
+    share a lock, but with 32 bits of space and typical cc-pair counts in
+    the hundreds the birthday bound is well below 1%.
+    """
+    h = (connector_id * 0x9E3779B1 ^ credential_id) & 0xFFFFFFFF
+    # Combine into a signed 64-bit int (Postgres bigint range).
+    raw = _INDEXING_LOCK_KEY_OFFSET | h
+    if raw >= 1 << 63:
+        raw -= 1 << 64
+    return raw
+
+
+def try_acquire_cc_pair_lock(
+    db_session: Session, connector_id: int, credential_id: int
+) -> bool:
+    """Non-blocking attempt to acquire the indexing lock for this cc-pair.
+
+    Returns True if the lock was acquired (caller is now responsible for
+    eventually calling `release_cc_pair_lock`). Returns False if another
+    session already holds it.
+
+    The lock is *session-scoped*: it survives commits but is automatically
+    released when the database session disconnects. So even if a worker
+    process crashes mid-run without calling release, the lock won't be
+    permanently stuck once the connection times out.
+    """
+    key = _cc_pair_lock_key(connector_id, credential_id)
+    row = db_session.execute(
+        text("SELECT pg_try_advisory_lock(:k)"), {"k": key}
+    ).scalar()
+    return bool(row)
+
+
+def release_cc_pair_lock(
+    db_session: Session, connector_id: int, credential_id: int
+) -> None:
+    """Release the indexing lock for this cc-pair. Safe to call even if
+    we don't currently hold the lock — Postgres returns false but doesn't
+    raise."""
+    key = _cc_pair_lock_key(connector_id, credential_id)
+    db_session.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": key})
+
 
 logger = setup_logger()
 
@@ -36,6 +108,7 @@ def create_index_attempt(
     embedding_model_id: int,
     db_session: Session,
     from_beginning: bool = False,
+    indexing_priority: int = 0,
 ) -> int:
     new_attempt = IndexAttempt(
         connector_id=connector_id,
@@ -43,11 +116,32 @@ def create_index_attempt(
         embedding_model_id=embedding_model_id,
         from_beginning=from_beginning,
         status=IndexingStatus.NOT_STARTED,
+        indexing_priority=max(0, min(int(indexing_priority), 100)),
     )
     db_session.add(new_attempt)
     db_session.commit()
 
     return new_attempt.id
+
+
+def update_index_attempt_priority(
+    index_attempt_id: int,
+    indexing_priority: int,
+    db_session: Session,
+) -> IndexAttempt | None:
+    """Update the priority of a NOT_STARTED attempt. Returns None if the
+    attempt doesn't exist or is no longer in NOT_STARTED — once an attempt
+    has been dispatched the priority can't change its scheduling decision."""
+    attempt = db_session.execute(
+        select(IndexAttempt).where(IndexAttempt.id == index_attempt_id)
+    ).scalar_one_or_none()
+    if attempt is None:
+        return None
+    if attempt.status != IndexingStatus.NOT_STARTED:
+        return None
+    attempt.indexing_priority = max(0, min(int(indexing_priority), 100))
+    db_session.commit()
+    return attempt
 
 
 def get_inprogress_index_attempts(
@@ -65,9 +159,17 @@ def get_inprogress_index_attempts(
 
 def get_not_started_index_attempts(db_session: Session) -> list[IndexAttempt]:
     """This eagerly loads the connector and credential so that the db_session can be expired
-    before running long-living indexing jobs, which causes increasing memory usage"""
+    before running long-living indexing jobs, which causes increasing memory usage.
+
+    Higher-priority attempts come first; within the same priority band the
+    oldest attempt wins (FIFO) so we don't starve normal-priority queues.
+    """
     stmt = select(IndexAttempt)
     stmt = stmt.where(IndexAttempt.status == IndexingStatus.NOT_STARTED)
+    stmt = stmt.order_by(
+        desc(IndexAttempt.indexing_priority),
+        IndexAttempt.time_created.asc(),
+    )
     stmt = stmt.options(
         joinedload(IndexAttempt.connector), joinedload(IndexAttempt.credential)
     )

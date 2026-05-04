@@ -1,3 +1,4 @@
+import os
 import re
 from collections.abc import Callable
 from collections.abc import Generator
@@ -368,6 +369,29 @@ class SlackPollConnector(PollConnector):
         channel_regex_enabled: bool = False,
         batch_size: int = INDEX_BATCH_SIZE,
     ) -> None:
+        # Safety net: an empty `channels` list (or None) makes
+        # `filter_channels` (above) index every channel the bot can see —
+        # all public channels in the workspace plus every private
+        # channel it was added to. That's a huge blast radius (volume,
+        # rate-limits, sensitive-data exposure) and almost never what
+        # the operator actually wants. The frontend form already
+        # requires at least one channel; this guard catches API-direct
+        # callers that bypass the UI. Set
+        # `SLACK_CONNECTOR_REQUIRE_CHANNELS=false` only if you've
+        # explicitly decided you want to index everything.
+        require_channels = (
+            os.environ.get("SLACK_CONNECTOR_REQUIRE_CHANNELS", "true").lower()
+            != "false"
+        )
+        if require_channels and not (channels and any(c.strip() for c in channels)):
+            raise ValueError(
+                "Slack connector created without any channels. The bot "
+                "would otherwise index every channel it has access to. "
+                "Specify at least one channel name or ID, or set "
+                "SLACK_CONNECTOR_REQUIRE_CHANNELS=false to opt out of "
+                "this guard."
+            )
+
         self.workspace = workspace
         self.channels = channels
         self.channel_regex_enabled = channel_regex_enabled
@@ -407,7 +431,6 @@ class SlackPollConnector(PollConnector):
 
 
 if __name__ == "__main__":
-    import os
     import time
 
     slack_channel = os.environ.get("SLACK_CHANNEL")

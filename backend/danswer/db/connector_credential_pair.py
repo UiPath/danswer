@@ -4,6 +4,7 @@ from fastapi import HTTPException
 from sqlalchemy import delete
 from sqlalchemy import desc
 from sqlalchemy import select
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from danswer.db.connector import fetch_connector_by_id
@@ -18,6 +19,61 @@ from danswer.server.models import StatusResponse
 from danswer.utils.logger import setup_logger
 
 logger = setup_logger()
+
+
+# Per-cc-pair *deletion* advisory lock. Distinct namespace from the
+# indexing per-cc-pair lock (`b"INDX"` in db/index_attempt.py) so the
+# two never collide — a deletion sweep should serialize against other
+# deletions, not against indexing. The high 32 bits are `b"DELE"`.
+#
+# The bug this prevents: the API endpoint `/admin/deletion-attempt`
+# has no in-flight dedup, so each click of "Delete connector" queues a
+# fresh `cleanup_connector_credential_pair_task`. Each task does a
+# `SELECT ... FOR UPDATE NOWAIT` over the cc-pair's documents in
+# 1000-doc batches. Two-or-more concurrent tasks all see the lock
+# contention, retry 10 × 30s = 5min each, then raise. The user's
+# logs showed six task IDs all failing within 35ms because they had
+# all been retrying for 5min and timed out together.
+_DELETION_LOCK_KEY_OFFSET = 0x44454C45_00000000  # b"DELE" in the high bits
+
+
+def _deletion_lock_key(connector_id: int, credential_id: int) -> int:
+    """Stable 64-bit advisory-lock key for deletion of (connector_id,
+    credential_id). Same hashing scheme as the indexing lock — only the
+    namespace prefix differs, so the two locks are independent."""
+    h = (connector_id * 0x9E3779B1 ^ credential_id) & 0xFFFFFFFF
+    raw = _DELETION_LOCK_KEY_OFFSET | h
+    if raw >= 1 << 63:
+        raw -= 1 << 64
+    return raw
+
+
+def try_acquire_deletion_lock(
+    db_session: Session, connector_id: int, credential_id: int
+) -> bool:
+    """Non-blocking attempt to acquire the deletion lock for this cc-pair.
+
+    Returns True if acquired (caller must eventually call
+    `release_deletion_lock`). Returns False if another worker is
+    already running a deletion for this cc-pair.
+
+    The lock is session-scoped so a crashed worker won't strand it
+    forever — Postgres releases on connection drop.
+    """
+    key = _deletion_lock_key(connector_id, credential_id)
+    row = db_session.execute(
+        text("SELECT pg_try_advisory_lock(:k)"), {"k": key}
+    ).scalar()
+    return bool(row)
+
+
+def release_deletion_lock(
+    db_session: Session, connector_id: int, credential_id: int
+) -> None:
+    """Release the deletion lock for this cc-pair. Safe to call even if
+    we don't hold it — Postgres returns false but doesn't raise."""
+    key = _deletion_lock_key(connector_id, credential_id)
+    db_session.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": key})
 
 
 def get_connector_credential_pairs(

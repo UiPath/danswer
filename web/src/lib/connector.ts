@@ -75,17 +75,37 @@ export async function deleteConnector(
 export async function runConnector(
   connectorId: number,
   credentialIds: number[],
-  fromBeginning: boolean = false
+  fromBeginning: boolean = false,
+  indexingPriority: number = 0
 ): Promise<string | null> {
   const response = await fetch("/api/manage/admin/connector/run-once", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       connector_id: connectorId,
-      credentialIds,
+      credential_ids: credentialIds,
       from_beginning: fromBeginning,
+      indexing_priority: indexingPriority,
     }),
   });
+  if (!response.ok) {
+    return (await response.json()).detail;
+  }
+  return null;
+}
+
+export async function updateIndexAttemptPriority(
+  indexAttemptId: number,
+  indexingPriority: number
+): Promise<string | null> {
+  const response = await fetch(
+    `/api/manage/admin/index-attempt/${indexAttemptId}/priority`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ indexing_priority: indexingPriority }),
+    }
+  );
   if (!response.ok) {
     return (await response.json()).detail;
   }

@@ -4,14 +4,20 @@ import { ArrayHelpers, FieldArray, Form, Formik } from "formik";
 import * as Yup from "yup";
 import { PopupSpec } from "@/components/admin/connectors/Popup";
 import { createDocumentSet, updateDocumentSet } from "./lib";
-import { ConnectorIndexingStatus, DocumentSet, UserGroup } from "@/lib/types";
+import {
+  Connector,
+  ConnectorIndexingStatus,
+  DocumentSet,
+  UserGroup,
+} from "@/lib/types";
 import {
   BooleanFormField,
   TextFormField,
 } from "@/components/admin/connectors/Field";
 import { ConnectorTitle } from "@/components/admin/connectors/ConnectorTitle";
+import { SearchMultiSelectDropdown } from "@/components/Dropdown";
 import { Button, Divider, Text } from "@tremor/react";
-import { FiUsers } from "react-icons/fi";
+import { FiPlus, FiUsers, FiX } from "react-icons/fi";
 import { usePaidEnterpriseFeaturesEnabled } from "@/components/settings/usePaidEnterpriseFeaturesEnabled";
 
 interface SetCreationPopupProps {
@@ -20,6 +26,29 @@ interface SetCreationPopupProps {
   onClose: () => void;
   setPopup: (popupSpec: PopupSpec | null) => void;
   existingDocumentSet?: DocumentSet;
+}
+
+// Summarize the connector_specific_config so two cc-pairs with the
+// same display name (e.g. multiple Confluence entries pointing to
+// different wiki URLs) can be told apart in the picker.
+function summarizeConnectorConfig(
+  config: Record<string, any> | null | undefined
+): string {
+  if (!config) return "";
+  const parts: string[] = [];
+  for (const [key, value] of Object.entries(config)) {
+    if (value === undefined || value === null || value === "") continue;
+    if (typeof value === "boolean") continue;
+    if (Array.isArray(value)) {
+      if (value.length === 0) continue;
+      parts.push(`${key}: ${value.join(", ")}`);
+    } else if (typeof value === "object") {
+      continue;
+    } else {
+      parts.push(`${key}: ${value}`);
+    }
+  }
+  return parts.join(" • ");
 }
 
 export const DocumentSetCreationForm = ({
@@ -121,54 +150,108 @@ export const DocumentSetCreationForm = ({
             </h2>
             <p className="mb-3 text-xs">
               All documents indexed by the selected connectors will be a part of
-              this document set.
+              this document set. Search by connector name and click to add;
+              click a selected connector to remove it.
             </p>
             <FieldArray
               name="cc_pair_ids"
-              render={(arrayHelpers: ArrayHelpers) => (
-                <div className="mb-3 flex gap-2 flex-wrap">
-                  {ccPairs.map((ccPair) => {
-                    const ind = values.cc_pair_ids.indexOf(ccPair.cc_pair_id);
-                    let isSelected = ind !== -1;
-                    return (
-                      <div
-                        key={`${ccPair.connector.id}-${ccPair.credential.id}`}
-                        className={
-                          `
-                              px-3 
-                              py-1
-                              rounded-lg 
-                              border
-                              border-border 
-                              w-fit 
-                              flex 
-                              cursor-pointer ` +
-                          (isSelected
-                            ? " bg-background-strong"
-                            : " hover:bg-hover")
-                        }
-                        onClick={() => {
-                          if (isSelected) {
-                            arrayHelpers.remove(ind);
-                          } else {
-                            arrayHelpers.push(ccPair.cc_pair_id);
-                          }
-                        }}
-                      >
-                        <div className="my-auto">
-                          <ConnectorTitle
-                            connector={ccPair.connector}
-                            ccPairId={ccPair.cc_pair_id}
-                            ccPairName={ccPair.name}
-                            isLink={false}
-                            showMetadata={false}
-                          />
-                        </div>
+              render={(arrayHelpers: ArrayHelpers) => {
+                const selectedCCPairs = ccPairs.filter((ccPair) =>
+                  values.cc_pair_ids.includes(ccPair.cc_pair_id)
+                );
+                const availableOptions = ccPairs
+                  .filter(
+                    (ccPair) => !values.cc_pair_ids.includes(ccPair.cc_pair_id)
+                  )
+                  .map((ccPair) => ({
+                    name: ccPair.name?.toString() || "",
+                    value: ccPair.cc_pair_id?.toString() ?? "",
+                    metadata: {
+                      ccPairId: ccPair.cc_pair_id,
+                      connector: ccPair.connector,
+                      configSummary: summarizeConnectorConfig(
+                        ccPair.connector.connector_specific_config
+                      ),
+                    },
+                  }));
+                return (
+                  <div className="mb-3">
+                    {selectedCCPairs.length > 0 && (
+                      <div className="mb-3 flex flex-wrap gap-2">
+                        {selectedCCPairs.map((ccPair) => {
+                          const ind = values.cc_pair_ids.indexOf(
+                            ccPair.cc_pair_id
+                          );
+                          const configSummary = summarizeConnectorConfig(
+                            ccPair.connector.connector_specific_config
+                          );
+                          return (
+                            <div
+                              key={`${ccPair.connector.id}-${ccPair.credential.id}`}
+                              className="flex rounded-lg px-3 py-1 border border-border bg-background-strong hover:bg-hover cursor-pointer"
+                              onClick={() => arrayHelpers.remove(ind)}
+                              title={configSummary || undefined}
+                            >
+                              <div className="my-auto">
+                                <ConnectorTitle
+                                  connector={ccPair.connector}
+                                  ccPairId={ccPair.cc_pair_id}
+                                  ccPairName={ccPair.name}
+                                  isLink={false}
+                                  showMetadata={false}
+                                />
+                              </div>
+                              <FiX className="ml-2 my-auto" />
+                            </div>
+                          );
+                        })}
                       </div>
-                    );
-                  })}
-                </div>
-              )}
+                    )}
+                    <SearchMultiSelectDropdown
+                      options={availableOptions}
+                      onSelect={(option) => {
+                        const ccPairId = parseInt(option.value as string);
+                        if (
+                          !Number.isNaN(ccPairId) &&
+                          !values.cc_pair_ids.includes(ccPairId)
+                        ) {
+                          arrayHelpers.push(ccPairId);
+                        }
+                      }}
+                      itemComponent={({ option }) => {
+                        const configSummary =
+                          (option?.metadata?.configSummary as string) || "";
+                        return (
+                          <div
+                            className="flex px-4 py-2.5 hover:bg-hover cursor-pointer"
+                            title={configSummary || undefined}
+                          >
+                            <div className="my-auto min-w-0">
+                              <ConnectorTitle
+                                ccPairId={option?.metadata?.ccPairId as number}
+                                ccPairName={option.name}
+                                connector={
+                                  option?.metadata?.connector as Connector<any>
+                                }
+                                isLink={false}
+                                showMetadata={false}
+                              />
+                              {configSummary && (
+                                <div className="text-xs text-subtle mt-0.5 truncate">
+                                  {configSummary}
+                                </div>
+                              )}
+                            </div>
+                            <div className="ml-auto my-auto pl-2">
+                              <FiPlus />
+                            </div>
+                          </div>
+                        );
+                      }}
+                    />
+                  </div>
+                );
+              }}
             />
 
             {isPaidEnterpriseFeaturesEnabled &&

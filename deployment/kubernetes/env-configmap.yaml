@@ -54,6 +54,11 @@ data:
   MIN_THREADS_ML_MODELS: ""
   # Indexing Configs
   NUM_INDEXING_WORKERS: ""
+  # Per-DocumentSource concurrency cap when NUM_INDEXING_WORKERS > 1.
+  # Default 1 = at most one indexing attempt per source type at a time
+  # (prevents a single PAT/credential from getting rate-limited).
+  # 0 = uncapped. Enforced scheduler-side in update.py.
+  INDEXING_PER_SOURCE_CAP: ""
   ENABLED_CONNECTOR_TYPES: ""
   DISABLE_INDEX_UPDATE_ON_SWAP: ""
   DASK_JOB_CLIENT_ENABLED: ""
@@ -64,6 +69,22 @@ data:
   WEB_CONNECTOR_VALIDATE_URLS: ""
   GONG_CONNECTOR_START_TIME: ""
   NOTION_CONNECTOR_ENABLE_RECURSIVE_PAGE_LOOKUP: ""
+  # DB Retention (daily Celery beat at 08:00 UTC; backend/danswer/db/retention.py).
+  # All defaults are sensible — override only when you need a tighter window.
+  RETENTION_DAYS_KOMBU: ""             # default 7  (Celery broker queue)
+  RETENTION_DAYS_TASK_QUEUE: ""        # default 30 (terminal task_queue_jobs only)
+  RETENTION_DAYS_INDEX_ATTEMPT: ""     # default 0 = disabled (opt-in to keep history)
+  RETENTION_KEEP_LAST_N_INDEX_ATTEMPTS: ""  # default 20 per (cc-pair, embedding model)
+  RETENTION_DAYS_CHAT: ""              # default 30 (chat_session + chat_message + LO blobs)
+  RETENTION_DAYS_PERMISSION_SYNC: ""   # default 30 (terminal permission_sync_run only)
+  RETENTION_DAYS_USAGE_REPORTS: ""     # default 90 (usage_reports + file_store + LO blobs)
+  RETENTION_BATCH_SIZE: ""             # default 5000 rows per DELETE
+  RETENTION_MAX_BATCHES: ""            # default 200 batches per policy per run
+  # Analytics rollup (daily Celery beat at 07:30 UTC, 30 min before retention;
+  # backend/danswer/db/analytics_rollup.py). The lookback is the late-feedback
+  # grace period — MUST be < RETENTION_DAYS_CHAT to avoid recomputing days
+  # whose source rows have already been deleted.
+  ANALYTICS_LATE_FEEDBACK_BUFFER_DAYS: ""  # default 2
   # DanswerBot SlackBot Configs
   DANSWER_BOT_SLACK_APP_TOKEN: ""
   DANSWER_BOT_SLACK_BOT_TOKEN: ""

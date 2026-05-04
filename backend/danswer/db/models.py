@@ -12,6 +12,7 @@ from fastapi_users_db_sqlalchemy import SQLAlchemyBaseOAuthAccountTableUUID
 from fastapi_users_db_sqlalchemy import SQLAlchemyBaseUserTableUUID
 from fastapi_users_db_sqlalchemy.access_token import SQLAlchemyBaseAccessTokenTableUUID
 from sqlalchemy import Boolean
+from sqlalchemy import Date
 from sqlalchemy import DateTime
 from sqlalchemy import Enum
 from sqlalchemy import Float
@@ -505,6 +506,14 @@ class IndexAttempt(Base):
     embedding_model_id: Mapped[int] = mapped_column(
         ForeignKey("embedding_model.id"),
         nullable=False,
+    )
+    # Higher values dispatch to Dask first when this attempt is in NOT_STARTED.
+    # 0 is the default (set by the auto-scheduler in update_loop). Manual
+    # triggers can supply a higher value (steps of 10, conventional ceiling
+    # 100) to jump the queue without affecting any other attempts on the
+    # same cc-pair.
+    indexing_priority: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
     )
     time_created: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True),
@@ -1434,3 +1443,59 @@ class UsageReport(Base):
 
     requestor = relationship("User")
     file = relationship("PGFileStore")
+
+
+class AnalyticsDailyRollup(Base):
+    """Pre-aggregated daily analytics so the admin dashboard survives chat
+    retention deletes.
+
+    `chat_message` / `chat_session` rows older than RETENTION_DAYS_CHAT
+    (default 30d) are purged by the daily retention sweep. The analytics
+    endpoints used to read directly from those tables, so any date range
+    older than ~30 days returned zeros. This rollup table is computed
+    BEFORE the retention sweep each day (Celery beat at 07:30 UTC, sweep
+    at 08:00 UTC) and persisted indefinitely. The endpoints now read from
+    here.
+
+    One row per UTC date. Idempotent upserts let the rollup task re-run
+    over a sliding window (default last 7 days, configurable via
+    `ANALYTICS_ROLLUP_LOOKBACK_DAYS`) so feedback that arrives a few days
+    after the answer still gets counted. The window MUST be shorter than
+    `RETENTION_DAYS_CHAT` — otherwise the rollup would re-compute days
+    whose source rows have already been deleted, zeroing out historical
+    totals.
+    """
+
+    __tablename__ = "analytics_daily_rollup"
+
+    date: Mapped[datetime.date] = mapped_column(Date, primary_key=True)
+    total_queries: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    total_likes: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    total_dislikes: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    total_resolved: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    total_needs_help: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    active_users: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    slackbot_total: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    slackbot_auto_resolved: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    rolled_up_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )

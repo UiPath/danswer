@@ -10,8 +10,11 @@ import { Text } from "@tremor/react";
 import { ConfigDisplay } from "./ConfigDisplay";
 import { ModifyStatusButtonCluster } from "./ModifyStatusButtonCluster";
 import { DeletionButton } from "./DeletionButton";
+import { RefreshFrequencyEdit } from "./RefreshFrequencyEdit";
+import { CCPairNameEdit } from "./CCPairNameEdit";
 import { ErrorCallout } from "@/components/ErrorCallout";
 import { ReIndexButton } from "./ReIndexButton";
+import { CredentialSection } from "./CredentialSection";
 import { isCurrentlyDeleting } from "@/lib/documentDeletion";
 import { ValidSources } from "@/lib/types";
 import useSWR from "swr";
@@ -29,6 +32,7 @@ function Main({ ccPairId }: { ccPairId: number }) {
     data: ccPair,
     isLoading,
     error,
+    mutate: mutateCcPair,
   } = useSWR<CCPairFullInfo>(
     buildCCPairInfoUrl(ccPairId),
     errorHandlingFetcher,
@@ -64,8 +68,12 @@ function Main({ ccPairId }: { ccPairId: number }) {
   return (
     <>
       <BackButton />
-      <div className="pb-1 flex mt-1">
-        <h1 className="text-3xl text-emphasis font-bold">{ccPair.name}</h1>
+      <div className="pb-1 flex mt-1 items-center">
+        <CCPairNameEdit
+          ccPairId={ccPair.id}
+          name={ccPair.name}
+          onUpdated={() => mutateCcPair()}
+        />
 
         <div className="ml-auto">
           <ModifyStatusButtonCluster ccPair={ccPair} />
@@ -91,6 +99,18 @@ function Main({ ccPairId }: { ccPairId: number }) {
       />
       {/* NOTE: no divider / title here for `ConfigDisplay` since it is optional and we need
         to render these conditionally.*/}
+
+      <CredentialSection
+        credential={ccPair.credential}
+        onUpdated={() => mutateCcPair()}
+      />
+
+      <div className="mt-6">
+        <RefreshFrequencyEdit
+          connector={ccPair.connector}
+          onUpdated={() => mutateCcPair()}
+        />
+      </div>
 
       <div className="mt-6">
         <div className="flex">

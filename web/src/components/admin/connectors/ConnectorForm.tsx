@@ -55,6 +55,29 @@ const CCPairNameHaver = Yup.object().shape({
   cc_pair_name: Yup.string().required("Please enter a name for the connector"),
 });
 
+// Refresh-frequency presets exposed to the user. The connector page's
+// `refreshFreq` prop sets the *default* selection; the user can change
+// it before clicking Connect. Values are seconds, matching the
+// Connector schema's `refresh_freq` column.
+//
+// Exported so the cc-pair detail page's edit-frequency control can
+// share the same option list.
+export const REFRESH_FREQ_OPTIONS: { value: number; label: string }[] = [
+  { value: 10 * 60, label: "Every 10 minutes" },
+  { value: 60 * 60, label: "Every hour" },
+  { value: 60 * 60 * 24, label: "Daily" },
+  { value: 60 * 60 * 24 * 7, label: "Weekly" },
+  { value: 60 * 60 * 24 * 30, label: "Monthly (every 30 days)" },
+];
+
+// All new connectors default the dropdown to "Daily" regardless of
+// what the connector page passes via `refreshFreq`. The prop is still
+// the fallback when the dropdown isn't rendered (file / ingestion-API
+// connectors). This keeps API-rate-limit-sensitive sources from
+// silently getting hammered every 10 minutes — most setups don't need
+// that cadence and the user can dial it down if they do.
+const DEFAULT_REFRESH_FREQ_SECS = 60 * 60 * 24; // Daily
+
 interface BaseProps<T extends Yup.AnyObject> {
   nameBuilder: (values: T) => string;
   ccPairNameBuilder?: (values: T) => string | null;
@@ -102,6 +125,16 @@ export function ConnectorForm<T extends Yup.AnyObject>({
 }: ConnectorFormProps<T>): JSX.Element {
   const { mutate } = useSWRConfig();
   const { popup, setPopup } = usePopup();
+
+  // User-selectable refresh frequency. Local state — kept out of the
+  // Formik values so it doesn't accidentally land in
+  // `connector_specific_config` (built from initialValues keys below).
+  // Only rendered when the page actually supports scheduled refresh
+  // (i.e. passed a `refreshFreq` prop).
+  const [selectedRefreshFreq, setSelectedRefreshFreq] = useState<number>(
+    DEFAULT_REFRESH_FREQ_SECS
+  );
+  const showRefreshFreqSelector = refreshFreq !== undefined;
 
   // only show this option for EE, since groups are not supported in CE
   const showNonPublicOption = usePaidEnterpriseFeaturesEnabled();
@@ -168,7 +201,13 @@ export function ConnectorForm<T extends Yup.AnyObject>({
             source,
             input_type: inputType,
             connector_specific_config: connectorConfig,
-            refresh_freq: refreshFreq || 0,
+            // Use the value the user picked from the dropdown when the
+            // selector is shown; otherwise fall back to the page's
+            // `refreshFreq` prop (covers connectors that don't poll —
+            // e.g. file-upload, ingestion API).
+            refresh_freq: showRefreshFreqSelector
+              ? selectedRefreshFreq
+              : refreshFreq || 0,
             prune_freq: pruneFreq ?? null,
             disabled: false,
           });
@@ -246,6 +285,30 @@ export function ConnectorForm<T extends Yup.AnyObject>({
             )}
             {formBody && formBody}
             {formBodyBuilder && formBodyBuilder(values)}
+            {showRefreshFreqSelector && (
+              <div className="mt-4">
+                <label className="block text-sm font-medium text-emphasis mb-1">
+                  Refresh frequency
+                </label>
+                <p className="text-xs text-subtle mb-2">
+                  How often this connector should re-poll the source for new or
+                  updated documents.
+                </p>
+                <select
+                  value={selectedRefreshFreq}
+                  onChange={(e) =>
+                    setSelectedRefreshFreq(parseInt(e.target.value, 10))
+                  }
+                  className="h-9 rounded-md border border-border bg-background px-2 text-sm"
+                >
+                  {REFRESH_FREQ_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
             {showNonPublicOption && (
               <>
                 <Divider />

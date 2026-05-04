@@ -454,7 +454,9 @@ def build_follow_up_block(message_id: int | None) -> ActionsBlock:
 
 
 def build_follow_up_resolved_blocks(
-    tag_ids: list[str], group_ids: list[str]
+    tag_ids: list[str],
+    group_ids: list[str],
+    message_id: int | None = None,
 ) -> list[Block]:
     tag_str = " ".join([f"<@{tag}>" for tag in tag_ids])
     if tag_str:
@@ -470,14 +472,18 @@ def build_follow_up_resolved_blocks(
         + "Someone has requested more help.\n\n:point_down:Please mark this resolved after answering!"
     )
     text_block = SectionBlock(text=text)
+    # Encode `message_id` in the ActionsBlock's `block_id` so the resolved-
+    # button handler can recover it and record a chat_feedback row marking
+    # this message as resolved. Mirrors the pattern in `build_follow_up_block`.
     button_block = ActionsBlock(
+        block_id=build_feedback_id(message_id) if message_id is not None else None,
         elements=[
             ButtonElement(
                 action_id=FOLLOWUP_BUTTON_RESOLVED_ACTION_ID,
                 style="primary",
                 text="Mark Resolved",
             )
-        ]
+        ],
     )
     return [text_block, button_block]
 

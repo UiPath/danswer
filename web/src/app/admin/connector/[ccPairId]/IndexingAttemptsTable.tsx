@@ -19,6 +19,10 @@ import { localizeAndPrettify } from "@/lib/time";
 import { getDocsProcessedPerMinute } from "@/lib/indexAttempt";
 import { Modal } from "@/components/Modal";
 import { CheckmarkIcon, CopyIcon } from "@/components/icons/icons";
+import { updateIndexAttemptPriority } from "@/lib/connector";
+import { mutate } from "swr";
+import { buildCCPairInfoUrl } from "./lib";
+import { usePopup } from "@/components/admin/connectors/Popup";
 
 const NUM_IN_PAGE = 8;
 
@@ -31,6 +35,29 @@ export function IndexingAttemptsTable({ ccPair }: { ccPair: CCPairFullInfo }) {
     (indexAttempt) => indexAttempt.id === indexAttemptTracePopupId
   );
   const [copyClicked, setCopyClicked] = useState(false);
+  const { popup, setPopup } = usePopup();
+  const [updatingPriorityId, setUpdatingPriorityId] = useState<number | null>(
+    null
+  );
+
+  async function bumpPriority(indexAttemptId: number, nextValue: number) {
+    setUpdatingPriorityId(indexAttemptId);
+    const errorMsg = await updateIndexAttemptPriority(
+      indexAttemptId,
+      Math.max(0, Math.min(100, Math.floor(nextValue)))
+    );
+    setUpdatingPriorityId(null);
+    if (errorMsg) {
+      setPopup({ message: errorMsg, type: "error" });
+    } else {
+      setPopup({
+        message: `Priority updated to ${nextValue}`,
+        type: "success",
+      });
+    }
+    setTimeout(() => setPopup(null), 3000);
+    mutate(buildCCPairInfoUrl(ccPair.id));
+  }
 
   return (
     <>
@@ -74,11 +101,13 @@ export function IndexingAttemptsTable({ ccPair }: { ccPair: CCPairFullInfo }) {
             </div>
           </Modal>
         )}
+      {popup}
       <Table>
         <TableHead>
           <TableRow>
             <TableHeaderCell>Time Started</TableHeaderCell>
             <TableHeaderCell>Status</TableHeaderCell>
+            <TableHeaderCell>Priority</TableHeaderCell>
             <TableHeaderCell>New Doc Cnt</TableHeaderCell>
             <TableHeaderCell>Total Doc Cnt</TableHeaderCell>
             <TableHeaderCell>Error Msg</TableHeaderCell>
@@ -90,6 +119,9 @@ export function IndexingAttemptsTable({ ccPair }: { ccPair: CCPairFullInfo }) {
             .map((indexAttempt) => {
               const docsPerMinute =
                 getDocsProcessedPerMinute(indexAttempt)?.toFixed(2);
+              const priority = indexAttempt.indexing_priority ?? 0;
+              const isNotStarted = indexAttempt.status === "not_started";
+              const isUpdating = updatingPriorityId === indexAttempt.id;
               return (
                 <TableRow key={indexAttempt.id}>
                   <TableCell>
@@ -106,6 +138,47 @@ export function IndexingAttemptsTable({ ccPair }: { ccPair: CCPairFullInfo }) {
                       <div className="text-xs mt-1">
                         {docsPerMinute} docs / min
                       </div>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    {isNotStarted ? (
+                      <div className="flex items-center gap-1">
+                        <button
+                          className="px-1.5 py-0.5 border rounded text-xs hover:bg-hover-light disabled:opacity-50"
+                          disabled={isUpdating || priority <= 0}
+                          onClick={() =>
+                            bumpPriority(indexAttempt.id, priority - 10)
+                          }
+                          title="Decrease priority by 10"
+                        >
+                          −10
+                        </button>
+                        <span
+                          className={
+                            priority > 0
+                              ? "text-xs font-semibold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800"
+                              : "text-xs px-2 py-0.5 text-subtle"
+                          }
+                        >
+                          {priority}
+                        </span>
+                        <button
+                          className="px-1.5 py-0.5 border rounded text-xs hover:bg-hover-light disabled:opacity-50"
+                          disabled={isUpdating || priority >= 100}
+                          onClick={() =>
+                            bumpPriority(indexAttempt.id, priority + 10)
+                          }
+                          title="Increase priority by 10"
+                        >
+                          +10
+                        </button>
+                      </div>
+                    ) : priority > 0 ? (
+                      <span className="text-xs font-semibold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">
+                        {priority}
+                      </span>
+                    ) : (
+                      <span className="text-xs text-subtle">-</span>
                     )}
                   </TableCell>
                   <TableCell>

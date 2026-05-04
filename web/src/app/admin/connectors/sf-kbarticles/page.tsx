@@ -1,7 +1,8 @@
 "use client";
 
+import { useState } from "react";
 import * as Yup from "yup";
-import { TrashIcon, SalesforceIcon } from "@/components/icons/icons"; // Make sure you have a Document360 icon
+import { EditIcon, TrashIcon, SalesforceIcon } from "@/components/icons/icons";
 import { errorHandlingFetcher as fetcher } from "@/lib/fetcher";
 import useSWR, { useSWRConfig } from "swr";
 import { LoadingAnimation } from "@/components/Loading";
@@ -22,10 +23,11 @@ import { ConnectorsTable } from "@/components/admin/connectors/table/ConnectorsT
 import { ConnectorForm } from "@/components/admin/connectors/ConnectorForm";
 import { usePublicCredentials } from "@/lib/hooks";
 import { AdminPageTitle } from "@/components/admin/Title";
-import { Card, Text, Title } from "@tremor/react";
+import { Button, Card, Text, Title } from "@tremor/react";
 
 const MainSection = () => {
   const { mutate } = useSWRConfig();
+  const [isEditingCredential, setIsEditingCredential] = useState(false);
   const {
     data: connectorIndexingStatuses,
     isLoading: isConnectorIndexingStatusesLoading,
@@ -62,13 +64,18 @@ const MainSection = () => {
     SfKbArticlesCredentialJson
   >[] = connectorIndexingStatuses.filter(
     (connectorIndexingStatus) =>
-      connectorIndexingStatus.connector.source === "salesforce"
+      connectorIndexingStatus.connector.source === "sfkbarticles"
   );
 
+  // Strict match — legacy untagged credentials belong to the Account
+  // (salesforce/page.tsx) connector, so we only pick up credentials that
+  // were explicitly created via this page.
   const SfKbArticlesCredential:
     | Credential<SfKbArticlesCredentialJson>
     | undefined = credentialsData.find(
-    (credential) => credential.credential_json?.sf_username
+    (credential) =>
+      credential.credential_json?.sf_username &&
+      credential.credential_json?.sf_credential_kind === "kbarticles"
   );
 
   return (
@@ -84,21 +91,107 @@ const MainSection = () => {
       </Title>
       {SfKbArticlesCredential ? (
         <>
-          <div className="flex mb-1 text-sm">
+          <div className="flex mb-1 text-sm items-center">
             <Text className="my-auto">Existing SalesForce Username: </Text>
             <Text className="ml-1 italic my-auto">
               {SfKbArticlesCredential.credential_json.sf_username}
             </Text>
             <button
               className="ml-1 hover:bg-hover rounded p-1"
+              title="Edit credential"
+              onClick={() => setIsEditingCredential((v) => !v)}
+            >
+              <EditIcon size={16} />
+            </button>
+            <button
+              className="ml-1 hover:bg-hover rounded p-1"
+              title="Delete credential"
               onClick={async () => {
                 await adminDeleteCredential(SfKbArticlesCredential.id);
+                setIsEditingCredential(false);
                 refreshCredentials();
               }}
             >
               <TrashIcon />
             </button>
           </div>
+          {isEditingCredential && (
+            <Card className="mt-2">
+              <Text className="mb-2">
+                Update the Salesforce Connected App credentials below.
+              </Text>
+              <CredentialForm<SfKbArticlesCredentialJson>
+                existingCredentialId={SfKbArticlesCredential.id}
+                formBody={
+                  <>
+                    <TextFormField
+                      name="sf_client_id"
+                      label="Salesforce Client Id:"
+                    />
+                    <TextFormField
+                      name="sf_client_secret"
+                      label="Salesforce Client Secret:"
+                      type="password"
+                    />
+                    <TextFormField
+                      name="sf_username"
+                      label="Salesforce Username:"
+                    />
+                    <TextFormField
+                      name="sf_password"
+                      label="Salesforce Password:"
+                      type="password"
+                    />
+                  </>
+                }
+                validationSchema={Yup.object().shape({
+                  sf_client_id: Yup.string().required(
+                    "Please enter your Salesforce Client Id"
+                  ),
+                  sf_client_secret: Yup.string().required(
+                    "Please enter your Salesforce Client Secret"
+                  ),
+                  sf_username: Yup.string().required(
+                    "Please enter your Salesforce username"
+                  ),
+                  sf_password: Yup.string().required(
+                    "Please enter your Salesforce password"
+                  ),
+                  sf_credential_kind: Yup.string()
+                    .oneOf(["account", "kbarticles"])
+                    .optional(),
+                })}
+                initialValues={{
+                  sf_client_id:
+                    SfKbArticlesCredential.credential_json.sf_client_id || "",
+                  sf_client_secret:
+                    SfKbArticlesCredential.credential_json.sf_client_secret ||
+                    "",
+                  sf_username:
+                    SfKbArticlesCredential.credential_json.sf_username || "",
+                  sf_password:
+                    SfKbArticlesCredential.credential_json.sf_password || "",
+                  sf_credential_kind: "kbarticles",
+                }}
+                onSubmit={(isSuccess) => {
+                  if (isSuccess) {
+                    setIsEditingCredential(false);
+                    refreshCredentials();
+                  }
+                }}
+                extraActions={
+                  <Button
+                    type="button"
+                    size="xs"
+                    color="gray"
+                    onClick={() => setIsEditingCredential(false)}
+                  >
+                    Cancel
+                  </Button>
+                }
+              />
+            </Card>
+          )}
         </>
       ) : (
         <>
@@ -143,12 +236,16 @@ const MainSection = () => {
                 sf_password: Yup.string().required(
                   "Please enter your Salesforce password"
                 ),
+                sf_credential_kind: Yup.string()
+                  .oneOf(["account", "kbarticles"])
+                  .optional(),
               })}
               initialValues={{
                 sf_client_id: "",
                 sf_client_secret: "",
                 sf_username: "",
                 sf_password: "",
+                sf_credential_kind: "kbarticles",
               }}
               onSubmit={(isSuccess) => {
                 if (isSuccess) {
@@ -208,13 +305,13 @@ const MainSection = () => {
           <ConnectorForm<SfKbArticlesConfig>
             nameBuilder={(values) =>
               values.requested_objects && values.requested_objects.length > 0
-                ? `SfKbArticles-${values.requested_objects.join("-")}`
-                : "SfKbArticles"
+                ? `SF-KBArticles-${values.requested_objects.join("-")}`
+                : "SF-KBArticles"
             }
             ccPairNameBuilder={(values) =>
               values.requested_objects && values.requested_objects.length > 0
-                ? `SfKbArticles-${values.requested_objects.join("-")}`
-                : "SfKbArticles"
+                ? `SF-KBArticles-${values.requested_objects.join("-")}`
+                : "SF-KBArticles"
             }
             source="sfkbarticles"
             inputType="poll"
@@ -281,7 +378,7 @@ export default function Page() {
 
       <AdminPageTitle
         icon={<SalesforceIcon size={32} />}
-        title="Salesforce KB Articles"
+        title="SF-KBArticles"
       />
 
       <MainSection />

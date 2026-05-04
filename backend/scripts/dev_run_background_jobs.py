@@ -18,21 +18,24 @@ def monitor_process(process_name: str, process: subprocess.Popen) -> None:
 
 
 def run_jobs(exclude_indexing: bool) -> None:
+    # NOTE: --autoscale only works with the prefork pool (it calls pool.grow/
+    # pool.shrink, which the threads pool doesn't implement). Either drop
+    # autoscale and rely on a fixed concurrency (current choice), or switch
+    # to "--pool=prefork --autoscale=3,10".
     cmd_worker = [
         "celery",
         "-A",
-        "ee.danswer.background.celery",
+        "ee.danswer.background.celery.celery_app",
         "worker",
         "--pool=threads",
-        "--autoscale=3,10",
+        "--concurrency=10",
         "--loglevel=INFO",
-        "--concurrency=1",
     ]
 
     cmd_beat = [
         "celery",
         "-A",
-        "ee.danswer.background.celery",
+        "ee.danswer.background.celery.celery_app",
         "beat",
         "--loglevel=INFO",
     ]

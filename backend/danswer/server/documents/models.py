@@ -36,6 +36,7 @@ class IndexAttemptSnapshot(BaseModel):
     full_exception_trace: str | None
     time_started: str | None
     time_updated: str
+    indexing_priority: int = 0
 
     @classmethod
     def from_index_attempt_db_model(
@@ -53,6 +54,7 @@ class IndexAttemptSnapshot(BaseModel):
             if index_attempt.time_started
             else None,
             time_updated=index_attempt.time_updated.isoformat(),
+            indexing_priority=getattr(index_attempt, "indexing_priority", 0) or 0,
         )
 
 
@@ -197,6 +199,14 @@ class RunConnectorRequest(BaseModel):
     connector_id: int
     credential_ids: list[int] | None
     from_beginning: bool = False
+    # Optional priority for the resulting index attempt(s). Higher values
+    # are dispatched first by the indexing scheduler. 0 = normal (default
+    # for auto-scheduled runs), conventional ceiling = 10.
+    indexing_priority: int = 0
+
+
+class UpdateIndexAttemptPriorityRequest(BaseModel):
+    indexing_priority: int
 
 
 """Connectors Models"""

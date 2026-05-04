@@ -1,7 +1,8 @@
 "use client";
 
 import * as Yup from "yup";
-import { TrashIcon, SharepointIcon } from "@/components/icons/icons"; // Make sure you have a Document360 icon
+import { useState } from "react";
+import { EditIcon, TrashIcon, SharepointIcon } from "@/components/icons/icons";
 import { errorHandlingFetcher } from "@/lib/fetcher";
 import { ErrorCallout } from "@/components/ErrorCallout";
 import useSWR, { useSWRConfig } from "swr";
@@ -23,10 +24,11 @@ import { ConnectorsTable } from "@/components/admin/connectors/table/ConnectorsT
 import { ConnectorForm } from "@/components/admin/connectors/ConnectorForm";
 import { usePublicCredentials } from "@/lib/hooks";
 import { AdminPageTitle } from "@/components/admin/Title";
-import { Card, Text, Title } from "@tremor/react";
+import { Button, Card, Text, Title } from "@tremor/react";
 
 const MainSection = () => {
   const { mutate } = useSWRConfig();
+  const [isEditingCredential, setIsEditingCredential] = useState(false);
   const {
     data: connectorIndexingStatuses,
     isLoading: isConnectorIndexingStatusesLoading,
@@ -95,21 +97,93 @@ const MainSection = () => {
       </Title>
       {sharepointCredential ? (
         <>
-          <div className="flex mb-1 text-sm">
+          <div className="flex mb-1 text-sm items-center">
             <Text className="my-auto">Existing Azure AD Client ID: </Text>
             <Text className="ml-1 italic my-auto">
               {sharepointCredential.credential_json.sp_client_id}
             </Text>
             <button
               className="ml-1 hover:bg-hover rounded p-1"
+              title="Edit credential"
+              onClick={() => setIsEditingCredential((v) => !v)}
+            >
+              <EditIcon size={16} />
+            </button>
+            <button
+              className="ml-1 hover:bg-hover rounded p-1"
+              title="Delete credential"
               onClick={async () => {
                 await adminDeleteCredential(sharepointCredential.id);
+                setIsEditingCredential(false);
                 refreshCredentials();
               }}
             >
               <TrashIcon />
             </button>
           </div>
+          {isEditingCredential && (
+            <Card className="mt-2">
+              <Text className="mb-2">
+                Update the Azure AD application credential below. All connectors
+                using this credential pick up the change on their next poll.
+              </Text>
+              <CredentialForm<SharepointCredentialJson>
+                existingCredentialId={sharepointCredential.id}
+                formBody={
+                  <>
+                    <TextFormField
+                      name="sp_client_id"
+                      label="Application (client) ID:"
+                    />
+                    <TextFormField
+                      name="sp_directory_id"
+                      label="Directory (tenant) ID:"
+                    />
+                    <TextFormField
+                      name="sp_client_secret"
+                      label="Client Secret:"
+                      type="password"
+                    />
+                  </>
+                }
+                validationSchema={Yup.object().shape({
+                  sp_client_id: Yup.string().required(
+                    "Please enter your Application (client) ID"
+                  ),
+                  sp_directory_id: Yup.string().required(
+                    "Please enter your Directory (tenant) ID"
+                  ),
+                  sp_client_secret: Yup.string().required(
+                    "Please enter your Client Secret"
+                  ),
+                })}
+                initialValues={{
+                  sp_client_id:
+                    sharepointCredential.credential_json.sp_client_id || "",
+                  sp_directory_id:
+                    sharepointCredential.credential_json.sp_directory_id || "",
+                  sp_client_secret:
+                    sharepointCredential.credential_json.sp_client_secret || "",
+                }}
+                onSubmit={(isSuccess) => {
+                  if (isSuccess) {
+                    setIsEditingCredential(false);
+                    refreshCredentials();
+                  }
+                }}
+                extraActions={
+                  <Button
+                    type="button"
+                    size="xs"
+                    color="gray"
+                    onClick={() => setIsEditingCredential(false)}
+                  >
+                    Cancel
+                  </Button>
+                }
+              />
+            </Card>
+          )}
         </>
       ) : (
         <>

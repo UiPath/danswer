@@ -1,0 +1,142 @@
+# One-time Kubernetes Job for the Darwin analytics rollup bootstrap.
+#
+# What it does (in order):
+#   1. `alembic upgrade heads` — applies any pending migrations,
+#      including this PR's `c8a4e2f9d1b3_analytics_daily_rollup`. Idempotent:
+#      already-applied revisions are skipped. Safe to re-run.
+#   2. `scripts/backfill_analytics_rollup.py` — walks every historical
+#      date that still has chat data, computes the daily metrics, and
+#      writes them into `analytics_daily_rollup` (also seeds the
+#      `analytics_rollup_state` checkpoint in `key_value_store`).
+#      Idempotent via INSERT…ON CONFLICT(date) DO UPDATE.
+#
+# Why a Job and not a Deployment / Pod:
+#   - Deployment auto-restarts on container exit — wrong for one-time
+#     work; the migration would loop.
+#   - Bare Pod doesn't track success / failure cleanly.
+#   - Job has run-to-completion semantics + retry-on-failure +
+#     TTL-after-finish for auto-cleanup. Standard K8s pattern.
+#
+# When to apply:
+#   - ONCE, after the new backend image (with this PR's code) is rolled
+#     out to the api-server and background-deployment, and BEFORE the
+#     next 08:00 UTC retention sweep on a fresh DB. If retention runs
+#     first, it deletes chat data older than 30 days and the backfill
+#     will then write zero counts for those days.
+#   - Re-applying is safe (both steps are idempotent), but normally
+#     unnecessary — the daily Celery beat task takes over.
+#
+# How to apply:
+#   1. Update IMAGE_TAG to the tag containing the merged PR code
+#      (currently the api-server runs vha-119; replace as needed).
+#   2. kubectl apply -f deployment/kubernetes/analytics-bootstrap-job.yaml
+#   3. Watch logs:
+#        kubectl logs -n darwin -f job/darwin-analytics-bootstrap
+#   4. Verify completion:
+#        kubectl get -n darwin job/darwin-analytics-bootstrap
+#        # COMPLETIONS should read 1/1
+#   5. Verify the rollup table:
+#        kubectl exec -n darwin <postgres-pod> -- psql ... \
+#          -c "SELECT count(*), max(rolled_up_at) FROM analytics_daily_rollup;"
+#
+# How to clean up: nothing required — `ttlSecondsAfterFinished: 3600`
+# auto-deletes the Job and its Pod 1 hour after success. Manual delete:
+#   kubectl delete -n darwin job/darwin-analytics-bootstrap
+#
+# Behaviour on failure: `backoffLimit: 3` retries up to 3 times
+# (with exponential backoff). After that the Job is marked Failed and
+# you can inspect logs of the failed Pod via `kubectl logs ...`.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: darwin-analytics-bootstrap
+  namespace: darwin
+  labels:
+    app: darwin-analytics-bootstrap
+    purpose: one-time-migration
+spec:
+  # Auto-cleanup the Job + its completed Pod 1 hour after success.
+  # Tune higher if you want more time to inspect logs.
+  ttlSecondsAfterFinished: 3600
+  # Retry the whole pipeline up to 3 times on failure (each step is
+  # idempotent so retries are safe). 4xx/5xx pods are inspectable until
+  # ttlSecondsAfterFinished kicks in.
+  backoffLimit: 3
+  # Hard kill if the Job runs longer than 30 minutes — backfill on a
+  # large chat history can take a few minutes; 30m is a generous ceiling.
+  activeDeadlineSeconds: 1800
+  template:
+    metadata:
+      labels:
+        app: darwin-analytics-bootstrap
+    spec:
+      # OnFailure → if the container exits non-zero, kubelet restarts
+      # it within the same Pod (faster than scheduling a new Pod).
+      # Combined with backoffLimit above for the cross-Pod retry.
+      restartPolicy: OnFailure
+      containers:
+        - name: bootstrap
+          # IMPORTANT: bump this to the image tag that includes this PR's
+          # backend code (the analytics_rollup module + new migration).
+          # The api-server deployment is currently on vha-119; you'll
+          # likely roll a vha-120 (or similar) once the PR merges.
+          image: sfbrdevhelmweacr.azurecr.io/danswer/danswer-backend:vha-121
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -c
+            - |
+              # `pipefail` isn't supported by the image's /bin/sh
+              # (BusyBox ash / dash). The script has no pipes anyway,
+              # so plain `-eu` is sufficient: any non-zero exit aborts.
+              set -eu
+              echo "=== Step 1/2: alembic upgrade heads ==="
+              alembic upgrade heads
+              echo
+              echo "=== Step 2/2: backfill analytics_daily_rollup ==="
+              # PYTHONPATH=. is needed because the script imports
+              # `danswer.*` and the image's WORKDIR is the backend/ dir.
+              PYTHONPATH=. python scripts/backfill_analytics_rollup.py
+              echo
+              echo "=== Bootstrap complete ==="
+          # Same Postgres creds as the api-server / background pods.
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  key: postgres_user
+                  name: danswer-secrets
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  key: postgres_password
+                  name: danswer-secrets
+          # Same shared config as the api-server. The backfill reads
+          # POSTGRES_HOST, encryption keys, etc. from here.
+          envFrom:
+            - configMapRef:
+                name: env-configmap
+          # PVCs match the api-server. Strictly speaking the backfill
+          # doesn't write to either, but mirroring the api-server config
+          # avoids surprises if anything in the import chain reads from
+          # /home/storage or /home/file_connector_storage.
+          volumeMounts:
+            - mountPath: /home/storage
+              name: dynamic-storage
+            - mountPath: /home/file_connector_storage
+              name: file-connector-storage
+          # Modest resource ask — backfill is mostly DB I/O.
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "1"
+              memory: "1Gi"
+      volumes:
+        - name: dynamic-storage
+          persistentVolumeClaim:
+            claimName: dynamic-pvc
+        - name: file-connector-storage
+          persistentVolumeClaim:
+            claimName: file-connector-pvc

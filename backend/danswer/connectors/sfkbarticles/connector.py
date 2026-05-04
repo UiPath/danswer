@@ -19,7 +19,7 @@ from danswer.connectors.models import Section
 from danswer.connectors.sfkbarticles.utils import extract_dict_text
 from danswer.utils.logger import setup_logger
 
-ID_PREFIX = "SALESFORCE_"
+ID_PREFIX = "SFKBARTICLES_"
 AUTH_URL = "https://login.salesforce.com/services/oauth2/token"
 
 logger = setup_logger()

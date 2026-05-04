@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "_comment": "Project-shared Claude Code settings. Commit this file. Personal overrides go in .claude/settings.local.json (gitignored). Permissions allow Claude to run validation commands without prompting; the deny list always wins. Hooks auto-run type-checkers after Edit/Write so type regressions surface immediately.",
+
+  "permissions": {
+    "allow": [
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git branch:*)",
+      "Bash(git stash list)",
+      "Bash(git remote -v)",
+
+      "Bash(ls:*)",
+      "Bash(grep:*)",
+      "Bash(find:*)",
+      "Bash(cat:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)",
+      "Bash(wc:*)",
+      "Bash(tree:*)",
+      "Bash(file:*)",
+
+      "Bash(ps aux)",
+      "Bash(ps -ef)",
+      "Bash(docker ps:*)",
+      "Bash(docker logs:*)",
+      "Bash(docker exec * psql:*)",
+      "Bash(docker network inspect:*)",
+      "Bash(redis-cli ping)",
+      "Bash(redis-cli llen:*)",
+      "Bash(redis-cli info:*)",
+
+      "Bash(python -m mypy:*)",
+      "Bash(pytest:*)",
+      "Bash(pre-commit run:*)",
+      "Bash(black --check:*)",
+      "Bash(alembic heads)",
+      "Bash(alembic history:*)",
+      "Bash(alembic current)",
+      "Bash(alembic check)",
+      "Bash(PYTHONPATH=* python -c:*)",
+      "Bash(PYTHONPATH=* python -m:*)",
+
+      "Bash(npx tsc --noEmit:*)",
+      "Bash(npx tsc --noEmit --incremental:*)",
+      "Bash(npm run lint:*)",
+      "Bash(npm run typecheck:*)",
+      "Bash(npx prettier --check:*)",
+      "Bash(npx playwright test --list:*)",
+
+      "Bash(gh api repos/:*)",
+      "Bash(gh pr view:*)",
+      "Bash(gh issue view:*)",
+      "Bash(gh pr list:*)",
+      "Bash(gh issue list:*)",
+      "Bash(gh pr checks:*)",
+      "Bash(gh run view:*)",
+      "Bash(gh run list:*)"
+    ],
+
+    "deny": [
+      "Bash(git push:*)",
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)",
+      "Bash(git reset --hard:*)",
+      "Bash(git checkout --:*)",
+      "Bash(git clean -fd:*)",
+      "Bash(git branch -D:*)",
+      "Bash(rm -rf /:*)",
+      "Bash(rm -rf ~:*)",
+      "Bash(sudo:*)",
+      "Bash(docker compose down -v:*)",
+      "Bash(docker volume rm:*)",
+      "Bash(docker rm -f:*)",
+      "Bash(alembic downgrade:*)",
+      "Bash(npm publish:*)",
+      "Bash(gh pr merge:*)",
+      "Bash(gh pr close:*)"
+    ]
+  },
+
+  "env": {
+    "PYTHONDONTWRITEBYTECODE": "1"
+  },
+
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/check_changed.sh\""
+          }
+        ]
+      }
+    ]
+  }
+}

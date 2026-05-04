@@ -26,6 +26,39 @@ def get_latest_task(
     return latest_task
 
 
+def get_latest_tasks_by_names(
+    task_names: list[str],
+    db_session: Session,
+) -> dict[str, TaskQueueState]:
+    """Bulk equivalent of `get_latest_task` for many task names at once.
+
+    Returns a dict keyed by task_name pointing at the most recent
+    TaskQueueState row for that name. Names with no matching rows are
+    omitted from the result. One round-trip regardless of N.
+    """
+    if not task_names:
+        return {}
+
+    # First find the max id per task_name (small subquery), then join back to
+    # fetch the full row. This is the standard "latest-per-group" pattern in
+    # Postgres, fully covered by an index on (task_name, id DESC).
+    latest_ids_subq = (
+        select(
+            TaskQueueState.task_name,
+            func.max(TaskQueueState.id).label("max_id"),
+        )
+        .where(TaskQueueState.task_name.in_(task_names))
+        .group_by(TaskQueueState.task_name)
+        .subquery()
+    )
+    stmt = select(TaskQueueState).join(
+        latest_ids_subq,
+        TaskQueueState.id == latest_ids_subq.c.max_id,
+    )
+    rows = db_session.execute(stmt).scalars().all()
+    return {row.task_name: row for row in rows}
+
+
 def get_latest_task_by_type(
     task_name: str,
     db_session: Session,

@@ -54,7 +54,7 @@ function UsageTypeSection({
   );
 }
 
-export function _WelcomeModal({ user }: { user: User | null }) {
+export function WelcomeModalContent({ user }: { user: User | null }) {
   const router = useRouter();
   const [selectedFlow, setSelectedFlow] = useState<null | "search" | "chat">(
     null

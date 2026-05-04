@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 from fastapi import Depends
 from fastapi import HTTPException
+from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -70,6 +71,41 @@ def get_cc_pair_full_info(
         index_attempt_models=list(index_attempts),
         latest_deletion_attempt=latest_deletion_attempt,
         num_docs_indexed=documents_indexed,
+    )
+
+
+class CCPairRenameRequest(BaseModel):
+    name: str
+
+
+@router.put("/admin/cc-pair/{cc_pair_id}/name")
+def rename_cc_pair(
+    cc_pair_id: int,
+    request: CCPairRenameRequest,
+    _: User | None = Depends(current_admin_user),
+    db_session: Session = Depends(get_session),
+) -> StatusResponse[int]:
+    new_name = request.name.strip()
+    if not new_name:
+        raise HTTPException(status_code=400, detail="Name cannot be empty")
+
+    cc_pair = get_connector_credential_pair_from_id(
+        cc_pair_id=cc_pair_id,
+        db_session=db_session,
+    )
+    if cc_pair is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Connector with ID {cc_pair_id} not found",
+        )
+
+    cc_pair.name = new_name
+    db_session.commit()
+
+    return StatusResponse(
+        success=True,
+        message="Connector renamed",
+        data=cc_pair_id,
     )
 
 

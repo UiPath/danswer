@@ -29,7 +29,7 @@
     "js-cookie": "^3.0.5",
     "lodash": "^4.17.21",
     "mdast-util-find-and-replace": "^3.0.1",
-    "next": "^14.2.3",
+    "next": "^14.2.35",
     "npm": "^10.8.0",
     "postcss": "^8.4.31",
     "prismjs": "^1.29.0",
@@ -52,7 +52,7 @@
   "devDependencies": {
     "@tailwindcss/typography": "^0.5.10",
     "eslint": "^8.48.0",
-    "eslint-config-next": "^14.1.0",
+    "eslint-config-next": "^14.2.35",
     "prettier": "2.8.8"
   }
 }

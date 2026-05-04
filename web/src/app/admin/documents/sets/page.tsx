@@ -40,7 +40,7 @@ const EditRow = ({ documentSet }: { documentSet: DocumentSet }) => {
 
   const [isSyncingTooltipOpen, setIsSyncingTooltipOpen] = useState(false);
   return (
-    <div className="relative flex">
+    <div className="relative flex min-w-0 max-w-full">
       {isSyncingTooltipOpen && (
         <div className="flex flex-nowrap absolute w-64 top-0 left-0 mt-8 border border-border bg-background px-3 py-2 rounded shadow-lg break-words z-40">
           <InfoIcon className="mt-1 flex flex-shrink-0 mr-2" /> Cannot update
@@ -49,9 +49,10 @@ const EditRow = ({ documentSet }: { documentSet: DocumentSet }) => {
       )}
       <div
         className={
-          "text-emphasis font-medium my-auto p-1 hover:bg-hover-light flex cursor-pointer select-none" +
+          "text-emphasis font-medium my-auto p-1 hover:bg-hover-light flex min-w-0 max-w-full cursor-pointer select-none" +
           (documentSet.is_up_to_date ? " cursor-pointer" : " cursor-default")
         }
+        title={documentSet.name}
         onClick={() => {
           if (documentSet.is_up_to_date) {
             router.push(`/admin/documents/sets/${documentSet.id}`);
@@ -68,8 +69,8 @@ const EditRow = ({ documentSet }: { documentSet: DocumentSet }) => {
           }
         }}
       >
-        <FiEdit2 className="text-emphasis mr-1 my-auto" />
-        {documentSet.name}
+        <FiEdit2 className="text-emphasis mr-1 my-auto flex-shrink-0" />
+        <span className="truncate min-w-0">{documentSet.name}</span>
       </div>
     </div>
   );
@@ -103,13 +104,18 @@ const DocumentSetTable = ({
   return (
     <div>
       <Title>Existing Document Sets</Title>
-      <Table className="overflow-visible mt-2">
+      {/* Tremor's <Table> wraps the actual <table> in a div and forwards
+          className to that wrapper, not the table. Use the [&_table] arbitrary
+          variant to apply table-fixed to the inner table so the column widths
+          below are respected. Without this the table is auto-layout and a
+          single wide Connectors cell pushes Status/Delete off-screen. */}
+      <Table className="overflow-visible mt-2 [&_table]:table-fixed [&_table]:w-full">
         <TableHead>
           <TableRow>
-            <TableHeaderCell>Name</TableHeaderCell>
-            <TableHeaderCell>Connectors</TableHeaderCell>
-            <TableHeaderCell>Status</TableHeaderCell>
-            <TableHeaderCell>Delete</TableHeaderCell>
+            <TableHeaderCell className="w-[28%]">Name</TableHeaderCell>
+            <TableHeaderCell className="w-[52%]">Connectors</TableHeaderCell>
+            <TableHeaderCell className="w-[12%]">Status</TableHeaderCell>
+            <TableHeaderCell className="w-[8%]">Delete</TableHeaderCell>
           </TableRow>
         </TableHead>
         <TableBody>
@@ -118,22 +124,23 @@ const DocumentSetTable = ({
             .map((documentSet) => {
               return (
                 <TableRow key={documentSet.id}>
-                  <TableCell className="whitespace-normal break-all">
-                    <div className="flex gap-x-1 text-emphasis">
+                  <TableCell className="overflow-hidden">
+                    <div className="flex gap-x-1 text-emphasis min-w-0 max-w-full">
                       <EditRow documentSet={documentSet} />
                     </div>
                   </TableCell>
-                  <TableCell>
-                    <div>
+                  <TableCell className="overflow-hidden">
+                    <div className="min-w-0 max-w-full">
                       {documentSet.cc_pair_descriptors.map(
                         (ccPairDescriptor, ind) => {
                           return (
                             <div
                               className={
-                                ind !==
+                                "min-w-0 max-w-full" +
+                                (ind !==
                                 documentSet.cc_pair_descriptors.length - 1
-                                  ? "mb-3"
-                                  : ""
+                                  ? " mb-3"
+                                  : "")
                               }
                               key={ccPairDescriptor.id}
                             >
@@ -142,6 +149,7 @@ const DocumentSetTable = ({
                                 ccPairName={ccPairDescriptor.name}
                                 ccPairId={ccPairDescriptor.id}
                                 showMetadata={false}
+                                truncateName
                               />
                             </div>
                           );
