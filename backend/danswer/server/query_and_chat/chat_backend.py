@@ -234,7 +234,19 @@ def rename_chat_session(
         # clear thing we can do
         return RenameChatSessionResponse(new_name=full_history[0].message)
 
-    new_name = get_renamed_conversation_name(full_history=full_history, llm=llm)
+    # Honor the persona's multilingual flag so the title is named in the
+    # user's language when the persona is configured for multi-language.
+    chat_session = get_chat_session_by_id(
+        chat_session_id=chat_session_id, user_id=user_id, db_session=db_session
+    )
+    use_language_hint = (
+        chat_session.persona.multilingual_query_expansion
+        if chat_session.persona is not None
+        else None
+    )
+    new_name = get_renamed_conversation_name(
+        full_history=full_history, llm=llm, use_language_hint=use_language_hint
+    )
 
     update_chat_session(
         db_session=db_session,

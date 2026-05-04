@@ -38,4 +38,5 @@ export interface Persona {
   default_persona: boolean;
   users: MinimalUserSnapshot[];
   groups: number[];
+  multilingual_query_expansion?: boolean;
 }

@@ -33,13 +33,16 @@ from danswer.search.models import InferenceChunk
 
 def get_prompt_tokens(prompt_config: PromptConfig) -> int:
     # Note: currently custom prompts do not allow datetime aware, only default prompts
+    use_language_hint = prompt_config.multilingual_query_expansion or bool(
+        MULTILINGUAL_QUERY_EXPANSION
+    )
     return (
         check_number_of_tokens(prompt_config.system_prompt)
         + check_number_of_tokens(prompt_config.task_prompt)
         + CHAT_USER_PROMPT_WITH_CONTEXT_OVERHEAD_TOKEN_CNT
         + CITATION_STATEMENT_TOKEN_CNT
         + CITATION_REMINDER_TOKEN_CNT
-        + (LANGUAGE_HINT_TOKEN_CNT if bool(MULTILINGUAL_QUERY_EXPANSION) else 0)
+        + (LANGUAGE_HINT_TOKEN_CNT if use_language_hint else 0)
         + (ADDITIONAL_INFO_TOKEN_CNT if prompt_config.datetime_aware else 0)
     )
 
@@ -135,7 +138,11 @@ def build_citations_user_message(
     all_doc_useful: bool,
     history_message: str = "",
 ) -> HumanMessage:
-    task_prompt_with_reminder = build_task_prompt_reminders(prompt_config)
+    task_prompt_with_reminder = build_task_prompt_reminders(
+        prompt_config,
+        use_language_hint=prompt_config.multilingual_query_expansion
+        or bool(MULTILINGUAL_QUERY_EXPANSION),
+    )
 
     if context_docs:
         context_docs_str = build_complete_context_str(context_docs)

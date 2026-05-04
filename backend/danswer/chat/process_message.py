@@ -92,11 +92,11 @@ def translate_citations(
     for db_doc in db_docs:
         if db_doc.document_id not in doc_id_to_saved_doc_id_map:
             doc_id_to_saved_doc_id_map[db_doc.document_id] = db_doc.id
-            #print(f'found doc id: {db_doc.id}')
+            # print(f'found doc id: {db_doc.id}')
 
     citation_to_saved_doc_id_map: dict[int, int] = {}
     for citation in citations_list:
-        #print(f'citation id {citation.document_id} for doc num {citation.citation_num}')
+        # print(f'citation id {citation.document_id} for doc num {citation.citation_num}')
         if citation.citation_num not in citation_to_saved_doc_id_map:
             citation_to_saved_doc_id_map[
                 citation.citation_num
@@ -404,15 +404,25 @@ def stream_chat_message_objects(
         if not final_msg.prompt:
             raise RuntimeError("No Prompt found")
 
+        # Persona may be None for legacy flows; treat the flag as off in
+        # that case. When persona exists, thread its flag through so the
+        # answer-side prompt builders add the LANGUAGE_HINT.
+        persona_multilingual = (
+            persona.multilingual_query_expansion if persona is not None else False
+        )
         prompt_config = (
             PromptConfig.from_model(
                 final_msg.prompt,
                 prompt_override=(
                     new_msg_req.prompt_override or chat_session.prompt_override
                 ),
+                multilingual_query_expansion=persona_multilingual,
             )
             if not persona
-            else PromptConfig.from_model(persona.prompts[0])
+            else PromptConfig.from_model(
+                persona.prompts[0],
+                multilingual_query_expansion=persona_multilingual,
+            )
         )
 
         # find out what tools to use

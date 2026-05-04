@@ -74,12 +74,18 @@ def _build_strong_llm_quotes_prompt(
     return HumanMessage(content=full_prompt)
 
 
+def _resolve_use_language_hint(prompt: PromptConfig, override: bool | None) -> bool:
+    if override is not None:
+        return override
+    return prompt.multilingual_query_expansion or bool(MULTILINGUAL_QUERY_EXPANSION)
+
+
 def build_quotes_user_message(
     question: str,
     context_docs: list[LlmDoc] | list[InferenceChunk],
     history_str: str,
     prompt: PromptConfig,
-    use_language_hint: bool = bool(MULTILINGUAL_QUERY_EXPANSION),
+    use_language_hint: bool | None = None,
 ) -> HumanMessage:
     prompt_builder = (
         _build_weak_llm_quotes_prompt
@@ -92,7 +98,7 @@ def build_quotes_user_message(
         context_docs=context_docs,
         history_str=history_str,
         prompt=prompt,
-        use_language_hint=use_language_hint,
+        use_language_hint=_resolve_use_language_hint(prompt, use_language_hint),
     )
 
 
@@ -101,7 +107,7 @@ def build_quotes_prompt(
     context_docs: list[LlmDoc] | list[InferenceChunk],
     history_str: str,
     prompt: PromptConfig,
-    use_language_hint: bool = bool(MULTILINGUAL_QUERY_EXPANSION),
+    use_language_hint: bool | None = None,
 ) -> HumanMessage:
     prompt_builder = (
         _build_weak_llm_quotes_prompt
@@ -114,5 +120,5 @@ def build_quotes_prompt(
         context_docs=context_docs,
         history_str=history_str,
         prompt=prompt,
-        use_language_hint=use_language_hint,
+        use_language_hint=_resolve_use_language_hint(prompt, use_language_hint),
     )

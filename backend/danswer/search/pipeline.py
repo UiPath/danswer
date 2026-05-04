@@ -273,12 +273,24 @@ class SearchPipeline:
         if self._retrieved_chunks is not None:
             return self._retrieved_chunks
 
+        # Resolve multilingual expansion: persona flag takes precedence,
+        # then global env var. Persona flag means "translate non-English
+        # queries to English for retrieval"; expressed as the string
+        # "English" so the existing expansion plumbing fans out the
+        # query to that language.
+        persona = self.search_request.persona
+        multilingual_expansion_str: str | None
+        if persona is not None and persona.multilingual_query_expansion:
+            multilingual_expansion_str = "English"
+        else:
+            multilingual_expansion_str = MULTILINGUAL_QUERY_EXPANSION
+
         self._retrieved_chunks = retrieve_chunks(
             query=self.search_query,
             document_index=self.document_index,
             db_session=self.db_session,
             hybrid_alpha=self.search_request.hybrid_alpha,
-            multilingual_expansion_str=MULTILINGUAL_QUERY_EXPANSION,
+            multilingual_expansion_str=multilingual_expansion_str,
             retrieval_metrics_callback=self.retrieval_metrics_callback,
         )
 
