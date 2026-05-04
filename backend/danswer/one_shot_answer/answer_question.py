@@ -7,6 +7,9 @@ from sqlalchemy.orm import Session
 from danswer.chat.chat_utils import reorganize_citations
 from danswer.chat.models import CitationInfo
 from danswer.chat.models import DanswerAnswerPiece
+from danswer.chat.multilingual_translation import detect_query_language
+from danswer.chat.multilingual_translation import language_name
+from danswer.chat.multilingual_translation import translate_answer_to_language
 from danswer.chat.models import DanswerContexts
 from danswer.chat.models import DanswerQuotes
 from danswer.chat.models import LLMRelevanceFilterResponse
@@ -158,7 +161,14 @@ def stream_answer_objects(
     )
 
     llm, fast_llm = get_llms_for_persona(persona=chat_session.persona)
-    prompt_config = PromptConfig.from_model(prompt)
+    persona_multilingual = (
+        chat_session.persona.multilingual_query_expansion
+        if chat_session.persona is not None
+        else False
+    )
+    prompt_config = PromptConfig.from_model(
+        prompt, multilingual_query_expansion=persona_multilingual
+    )
     document_pruning_config = DocumentPruningConfig(
         max_chunks=int(
             chat_session.persona.num_chunks
@@ -188,7 +198,9 @@ def stream_answer_objects(
     answer = Answer(
         question=query_msg.message,
         answer_style_config=answer_config,
-        prompt_config=PromptConfig.from_model(prompt),
+        prompt_config=PromptConfig.from_model(
+            prompt, multilingual_query_expansion=persona_multilingual
+        ),
         llm=get_main_llm_from_tuple(get_llms_for_persona(persona=chat_session.persona)),
         single_message_history=history_str,
         tools=[search_tool],
@@ -203,6 +215,22 @@ def stream_answer_objects(
     )
     # won't be any ImageGenerationDisplay responses since that tool is never passed in
     dropped_inds: list[int] = []
+
+    # Multi-language post-processing pass for the one-shot path
+    # (mirrors process_message.py). When the persona has the flag on
+    # and the user's question is non-English, buffer DanswerAnswerPiece
+    # tokens during the stream and emit a single translated piece at
+    # the end. CitationInfo packets still flow in real time so the
+    # slackbot's citation-required retry loop sees them. The translate
+    # prompt preserves [1]/[2] markers verbatim, so citations remain
+    # accurate after translation.
+    translate_target = None
+    if persona_multilingual:
+        detected = detect_query_language(query_msg.message)
+        if language_name(detected) is not None:
+            translate_target = detected
+    buffered_answer_pieces: list[str] = []
+
     for packet in cast(AnswerObjectIterator, answer.processed_streamed_output):
         # for one-shot flow, don't currently do anything with these
         if isinstance(packet, ToolResponse):
@@ -252,15 +280,46 @@ def stream_answer_objects(
             elif packet.id == SEARCH_DOC_CONTENT_ID:
                 yield packet.response
         else:
+            if (
+                translate_target is not None
+                and isinstance(packet, DanswerAnswerPiece)
+                and packet.answer_piece
+            ):
+                # Hold answer tokens; we'll translate the full answer
+                # at the end of the stream and yield it as one piece.
+                buffered_answer_pieces.append(packet.answer_piece)
+                continue
             yield packet
+
+    # End of stream. If we buffered for translation, do the second LLM
+    # pass now and emit the translated answer as one piece. Use
+    # answer.llm_answer as source-of-truth for the English text — the
+    # processed stream is already cached on the Answer object.
+    translated_answer_text: str | None = None
+    if translate_target is not None:
+        english_answer = answer.llm_answer
+        translated_answer_text = translate_answer_to_language(
+            answer_text=english_answer,
+            target_language_code=translate_target,
+            llm=llm,
+        )
+        yield DanswerAnswerPiece(answer_piece=translated_answer_text)
+        yield DanswerAnswerPiece(answer_piece=None)
+
+    # If we translated, persist the user-facing translated text.
+    final_answer_text = (
+        translated_answer_text
+        if translated_answer_text is not None
+        else answer.llm_answer
+    )
 
     # Saving Gen AI answer and responding with message info
     gen_ai_response_message = create_new_chat_message(
         chat_session_id=chat_session.id,
         parent_message=new_user_message,
         prompt_id=query_req.prompt_id,
-        message=answer.llm_answer,
-        token_count=len(llm_tokenizer(answer.llm_answer)),
+        message=final_answer_text,
+        token_count=len(llm_tokenizer(final_answer_text)),
         message_type=MessageType.ASSISTANT,
         error=None,
         reference_docs=reference_db_search_docs,
