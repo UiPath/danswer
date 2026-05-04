@@ -205,35 +205,17 @@ export default function AnalyticsPage() {
       (s, r) => s + r.total_dislikes,
       0
     );
-    const totalResolved = (queryData ?? []).reduce(
-      (s, r) => s + (r.total_resolved ?? 0),
-      0
-    );
-    const totalNeedsHelp = (queryData ?? []).reduce(
-      (s, r) => s + (r.total_needs_help ?? 0),
-      0
-    );
 
     const positivity =
       totalLikes + totalDislikes > 0
         ? Math.round((totalLikes / (totalLikes + totalDislikes)) * 100)
         : null;
 
-    // Strict NPS — explicit signals only. Promoters = likes + resolved
-    // (the Slackbot's "I'm all set!" / "Mark Resolved" buttons).
-    // Detractors = dislikes + needs_help (the "I need more help" button).
-    // Excludes messages with no feedback row at all (silent users).
-    // Range -100..+100. NPS is well-defined only when at least one
-    // explicit signal exists in the range.
-    const strictPromoters = totalLikes + totalResolved;
-    const strictDetractors = totalDislikes + totalNeedsHelp;
-    const strictDenominator = strictPromoters + strictDetractors;
-    const npsStrict =
-      strictDenominator > 0
-        ? Math.round(
-            ((strictPromoters - strictDetractors) / strictDenominator) * 100
-          )
-        : null;
+    // NOTE: a previous "Strict NPS" tile was removed pending a more
+    // accurate formula. The naive (likes + resolved − dislikes −
+    // needs_help) / total skewed heavily negative because positive
+    // signals require a deliberate click while "I need more help" is
+    // commonly hit as a "not quite enough" reaction. Will be revisited.
 
     // "Peak daily" instead of sum-of-distinct because the per-day
     // distinct counts can't be added across days without double-counting
@@ -261,8 +243,6 @@ export default function AnalyticsPage() {
       peakActiveUsers,
       autoResolvePct,
       positivity,
-      npsStrict,
-      strictDenominator,
     };
   }, [queryData, userData, botData]);
 
@@ -355,7 +335,7 @@ export default function AnalyticsPage() {
           <Grid
             numItems={1}
             numItemsSm={2}
-            numItemsLg={4}
+            numItemsLg={3}
             className="gap-4 mb-4"
           >
             <Card>
@@ -371,18 +351,6 @@ export default function AnalyticsPage() {
               <Metric>
                 {kpis.autoResolvePct !== null ? `${kpis.autoResolvePct}%` : "—"}
               </Metric>
-            </Card>
-            <Card>
-              <Text>NPS — strict</Text>
-              <Metric>
-                {kpis.npsStrict !== null
-                  ? `${kpis.npsStrict > 0 ? "+" : ""}${kpis.npsStrict}`
-                  : "—"}
-              </Metric>
-              <Text className="mt-1 text-xs">
-                (likes + resolved) vs (dislikes + needs-help). N=
-                {kpis.strictDenominator}
-              </Text>
             </Card>
           </Grid>
 
