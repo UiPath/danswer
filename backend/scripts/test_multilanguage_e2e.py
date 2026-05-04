@@ -693,12 +693,12 @@ def phase_english_baseline(persona_ml: Persona) -> bool:
 def phase_non_english(persona_ml: Persona) -> bool:
     """Hard contract for the persona flag: when on, non-English queries
     must (a) translate-for-retrieval so the right English doc is found,
-    and (b) the LLM's answer must contain the factual entity from that
-    doc. We DO NOT hard-fail on whether the answer is in the user's
-    language — that depends on the LLM honoring the LANGUAGE_HINT
-    directive, which varies by model and isn't part of the wiring
-    contract this PR delivers. We log the detected language so a human
-    can spot trends, but it doesn't gate exit code."""
+    (b) the answer must contain the factual entity from that doc
+    (numeric / proper-noun entities survive translation), AND (c) the
+    final answer text is in the user's language. (c) is enforced by the
+    post-translation pass in process_message.py — the answering LLM
+    might still produce English internally, but the second pass
+    translates that to the user's language before we yield it."""
     section("Phase 3 — non-English queries with multilingual flag ON")
     failures = 0
     lang_match = 0
@@ -745,25 +745,26 @@ def phase_non_english(persona_ml: Persona) -> bool:
                 )
                 failures += 1
 
-            # 3c — informational: did the answer come back in the
-            # user's language? The persona flag adds the LANGUAGE_HINT
-            # directive to the prompt, but whether the LLM follows it
-            # is a model-behavior question (gpt-4o-mini in particular
-            # is unreliable when context is English-heavy). Reported,
-            # not asserted.
+            # 3c — answer is in the user's language. Now a hard
+            # assertion because the post-translation pass guarantees
+            # this regardless of the answering LLM's behavior. If the
+            # detected language doesn't match, either the post-pass
+            # was not invoked (wiring bug) or it returned the English
+            # fallback (translate LLM call failed).
             detected = detect_language(result.answer_text)
             lang_total += 1
             if detected == case.code:
                 lang_match += 1
-                info(f"[{case.code}] answer language: {detected} (matches)")
+                ok(f"[{case.code}] answer language: {detected}")
             else:
-                info(
-                    f"[{case.code}] answer language: {detected} "
-                    f"(does not match {case.code}; LLM ignored LANGUAGE_HINT)"
+                fail(
+                    f"[{case.code}] expected {case.code} answer, detected "
+                    f"{detected}. Answer head: {result.answer_text[:200]!r}"
                 )
+                failures += 1
     info(
         f"language-match summary: {lang_match}/{lang_total} non-English "
-        f"answers came back in the user's language (informational only)"
+        f"answers came back in the user's language"
     )
     return failures == 0
 
