@@ -84,6 +84,8 @@ GEN_AI_MAX_OUTPUT_TOKENS = int(os.environ.get("GEN_AI_MAX_OUTPUT_TOKENS") or 102
 GEN_AI_IDENTITY_ENDPOINT = os.environ.get("GEN_AI_IDENTITY_ENDPOINT") or None
 GEN_AI_CLIENT_ID = os.environ.get("GEN_AI_CLIENT_ID") or None
 GEN_AI_CLIENT_SECRET = os.environ.get("GEN_AI_CLIENT_SECRET") or None
+GEN_AI_ACCOUNT_ID = os.environ.get("GEN_AI_ACCOUNT_ID") or None
+GEN_AI_TENANT_ID = os.environ.get("GEN_AI_TENANT_ID") or None
 # Number of tokens from chat history to include at maximum
 # 3000 should be enough context regardless of use, no need to include as much as possible
 # as this drives up the cost unnecessarily
