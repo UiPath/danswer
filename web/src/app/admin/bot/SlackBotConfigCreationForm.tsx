@@ -167,8 +167,21 @@ export const SlackBotCreationForm = ({
             }),
             curated_response_config: Yup.object().shape({
               enable_curated_response_integration: Yup.boolean().required(),
-              response_message: Yup.string().required(
-                "Response message is required when curated response integration is enabled"
+              // Mirror jira_config: only require this when the integration
+              // is enabled. Without the .when() guard the field is required
+              // unconditionally, but the UI hides the input when the toggle
+              // is off — Formik silently rejects submit and no error is
+              // visible since the (errored) field isn't on screen.
+              response_message: Yup.string().when(
+                "enable_curated_response_integration",
+                {
+                  is: true,
+                  then: (schema) =>
+                    schema.required(
+                      "Response message is required when curated response integration is enabled"
+                    ),
+                  otherwise: (schema) => schema.notRequired(),
+                }
               ),
             }),
             jira_title_filter: Yup.array()
