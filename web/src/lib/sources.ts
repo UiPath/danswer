@@ -15,6 +15,7 @@ import {
   GoogleDriveIcon,
   GoogleSitesIcon,
   GuruIcon,
+  HighspotIcon,
   HubSpotIcon,
   JiraIcon,
   LinearIcon,
@@ -149,6 +150,11 @@ const SOURCE_METADATA_MAP: SourceMap = {
   hubspot: {
     icon: HubSpotIcon,
     displayName: "HubSpot",
+    category: SourceCategory.AppConnection,
+  },
+  highspot: {
+    icon: HighspotIcon,
+    displayName: "Highspot",
     category: SourceCategory.AppConnection,
   },
   document360: {

@@ -67,6 +67,7 @@ import dropboxIcon from "../../../public/Dropbox.png";
 import s3Icon from "../../../public/S3.png";
 import r2Icon from "../../../public/r2.webp";
 import salesforceIcon from "../../../public/Salesforce.png";
+import highspotIcon from "../../../public/Highspot.png";
 import sharepointIcon from "../../../public/Sharepoint.png";
 import teamsIcon from "../../../public/Teams.png";
 import mediawikiIcon from "../../../public/MediaWiki.svg";
@@ -652,6 +653,18 @@ export const SalesforceIcon = ({
     className={`w-[${size}px] h-[${size}px] ` + className}
   >
     <Image src={salesforceIcon} alt="Logo" width="96" height="96" />
+  </div>
+);
+
+export const HighspotIcon = ({
+  size = 16,
+  className = defaultTailwindCSS,
+}: IconProps) => (
+  <div
+    style={{ width: `${size}px`, height: `${size}px` }}
+    className={`w-[${size}px] h-[${size}px] ` + className}
+  >
+    <Image src={highspotIcon} alt="Logo" width="96" height="96" />
   </div>
 );
 
