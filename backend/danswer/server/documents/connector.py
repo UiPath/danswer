@@ -342,6 +342,51 @@ def admin_google_drive_auth(
     return AuthUrl(auth_url=get_auth_url(credential_id=int(credential_id)))
 
 
+class HighspotSpotResponse(BaseModel):
+    id: str
+    name: str
+
+
+@router.get("/admin/connector/highspot/spots/{credential_id}")
+def list_highspot_spots(
+    credential_id: int,
+    user: User = Depends(current_admin_user),
+    db_session: Session = Depends(get_session),
+) -> list[HighspotSpotResponse]:
+    """Fetch the list of Spots visible to the given Highspot credential
+    so the admin UI can render a multi-select instead of a free-text
+    array input. Failures bubble up as 4xx/5xx with the upstream error
+    so the form can show a useful message."""
+    from danswer.connectors.highspot.client import HighspotAuthenticationError
+    from danswer.connectors.highspot.client import HighspotClient
+    from danswer.connectors.highspot.client import HighspotClientError
+
+    cred = fetch_credential_by_id(credential_id, user, db_session)
+    if cred is None:
+        raise HTTPException(status_code=404, detail="Credential not found")
+    cj = cred.credential_json or {}
+    if not cj.get("highspot_key") or not cj.get("highspot_secret"):
+        raise HTTPException(
+            status_code=400,
+            detail="Credential does not look like a Highspot credential.",
+        )
+    base_url = cj.get("highspot_url") or HighspotClient.BASE_URL
+    try:
+        client = HighspotClient(
+            key=cj["highspot_key"], secret=cj["highspot_secret"], base_url=base_url
+        )
+        return [
+            HighspotSpotResponse(id=s["id"], name=s.get("title", ""))
+            for s in client.get_spots()
+        ]
+    except HighspotAuthenticationError as e:
+        raise HTTPException(
+            status_code=401, detail=f"Highspot authentication failed: {e}"
+        )
+    except HighspotClientError as e:
+        raise HTTPException(status_code=502, detail=f"Highspot API error: {e}")
+
+
 @router.post("/admin/connector/file/upload")
 def upload_files(
     files: list[UploadFile],

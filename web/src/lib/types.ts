@@ -65,7 +65,8 @@ export type ValidSources =
   | "s3"
   | "r2"
   | "google_cloud_storage"
-  | "oci_storage";
+  | "oci_storage"
+  | "highspot";
 
 export type ValidInputTypes = "load_state" | "poll" | "event";
 export type ValidStatuses =
@@ -161,6 +162,10 @@ export interface SalesforceConfig {
 
 export interface SfKbArticlesConfig {
   requested_objects?: string[];
+}
+
+export interface HighspotConfig {
+  spot_names?: string[];
 }
 
 export interface SharepointConfig {
@@ -364,6 +369,12 @@ export interface JiraServerCredentialJson {
 
 export interface ProductboardCredentialJson {
   productboard_access_token: string;
+}
+
+export interface HighspotCredentialJson {
+  highspot_key: string;
+  highspot_secret: string;
+  highspot_url?: string;
 }
 
 export interface SlackCredentialJson {
