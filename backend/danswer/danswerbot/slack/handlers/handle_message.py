@@ -370,7 +370,7 @@ def handle_message(
                     {
                         "text": {
                             "type": "plain_text",
-                            "text": f"{persona.name} • {persona.description}",
+                            "text": f"{persona.name} • {persona.description}"[:75],
                             "emoji": True,
                         },
                         "value": str(persona.id),
