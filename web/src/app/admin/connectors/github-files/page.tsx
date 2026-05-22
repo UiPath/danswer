@@ -3,7 +3,10 @@
 import * as Yup from "yup";
 import { useState } from "react";
 import { EditIcon, GithubIcon, TrashIcon } from "@/components/icons/icons";
-import { TextFormField } from "@/components/admin/connectors/Field";
+import {
+  BooleanFormField,
+  TextFormField,
+} from "@/components/admin/connectors/Field";
 import { HealthCheckBanner } from "@/components/health/healthcheck";
 import useSWR, { useSWRConfig } from "swr";
 import { errorHandlingFetcher } from "@/lib/fetcher";
@@ -226,7 +229,11 @@ const Main = () => {
                     const c = ccPairStatus.connector.connector_specific_config;
                     const ext = c.file_extension || ".json";
                     const branch = c.branch ? `@${c.branch}` : "";
-                    return `${c.path_prefix}/<dir>/*${ext}${branch}`;
+                    const root = c.path_prefix || "<repo root>";
+                    const pattern = c.recursive
+                      ? `${root}/**/*${ext}`
+                      : `${root}/<dir>/*${ext}`;
+                    return `${pattern}${branch}`;
                   },
                 },
               ]}
@@ -247,6 +254,9 @@ const Main = () => {
             — i.e. exactly one folder under the prefix, file directly inside.
             Defaults target a{" "}
             <code>service-catalog/products/&lt;product&gt;/*.json</code> layout.
+            Enable <em>Recursive</em> to walk every folder under the prefix
+            (or the whole repo if the prefix is blank) and match by extension
+            at any depth — e.g. <code>*.md</code> across the entire repo.
           </Text>
 
           <ConnectorForm<GithubFilesConfig>
@@ -267,20 +277,28 @@ const Main = () => {
                   label="Path Prefix:"
                   subtext={
                     <>
-                      The folder containing per-product subfolders. Files are
-                      indexed at exactly one level deeper.
+                      The folder to scan. In the default mode, files are
+                      indexed exactly one level deeper (e.g.{" "}
+                      <code>&lt;prefix&gt;/&lt;dir&gt;/*&lt;ext&gt;</code>). In
+                      recursive mode this is the root of the walk; leave blank
+                      to scan the whole repository.
                     </>
                   }
                 />
                 <TextFormField
                   name="file_extension"
                   label="File Extension:"
-                  subtext="e.g. .json — only files with this extension at the matching depth are indexed."
+                  subtext="e.g. .md — only files with this extension are indexed."
                 />
                 <TextFormField
                   name="branch"
                   label="Branch (optional):"
                   subtext="Leave blank to use the repository's default branch."
+                />
+                <BooleanFormField
+                  name="recursive"
+                  label="Recursive"
+                  subtext="Walk all subfolders under the path prefix and match files by extension at any depth. Leave off for the fixed depth (<prefix>/<dir>/<file>) layout."
                 />
               </>
             }
@@ -291,13 +309,23 @@ const Main = () => {
               repo_name: Yup.string().required(
                 "Please enter the name of the repository"
               ),
-              path_prefix: Yup.string().required(
-                "Please enter the path prefix to scan"
-              ),
+              path_prefix: Yup.string()
+                .defined()
+                .test(
+                  "required-unless-recursive",
+                  "Please enter the path prefix to scan",
+                  function (value) {
+                    return (
+                      Boolean(this.parent.recursive) ||
+                      (typeof value === "string" && value.length > 0)
+                    );
+                  }
+                ),
               file_extension: Yup.string().required(
                 "Please enter the file extension to filter on"
               ),
               branch: Yup.string(),
+              recursive: Yup.boolean(),
             })}
             initialValues={{
               repo_owner: "",
@@ -305,6 +333,7 @@ const Main = () => {
               path_prefix: "service-catalog/products",
               file_extension: ".json",
               branch: "",
+              recursive: false,
             }}
             refreshFreq={10 * 60}
             credentialId={githubCredential.id}

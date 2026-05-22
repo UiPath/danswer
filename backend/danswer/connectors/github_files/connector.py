@@ -1,18 +1,20 @@
-"""GitHub Files connector — indexes files (default: JSON) sitting at a fixed
-depth under a configurable path prefix.
+"""GitHub Files connector — indexes files matching a given extension under
+a configurable path prefix in a repository.
 
-Matches the layout
+Two modes:
 
-    <path_prefix>/<single_dir>/<file><extension>
+- Fixed-depth (default): matches `<path_prefix>/<single_dir>/<file><extension>`
+  — i.e. exactly one folder under the prefix, file directly inside. Default
+  settings target a service-catalog layout:
+      service-catalog/products/<product>/<file>.json
+  Anything deeper or shallower is skipped.
 
-i.e. exactly one folder under the prefix, file directly inside that folder.
-Default settings target a service-catalog layout:
+- Recursive (`recursive=True`): walks every folder under `path_prefix`
+  (the whole repo if the prefix is empty) and matches by extension at any
+  depth. Useful for "index all .md files in the repo" style configurations.
 
-    service-catalog/products/<product>/<file>.json
-
-Anything deeper or shallower is skipped, as are files at intermediate
-directories. The connector reuses the existing GitHub access token credential
-shape, so users don't need to re-enter their PAT.
+The connector reuses the existing GitHub access token credential shape, so
+users don't need to re-enter their PAT.
 """
 import time
 from datetime import datetime
@@ -76,6 +78,7 @@ class GithubFilesConnector(LoadConnector, PollConnector):
         path_prefix: str = _DEFAULT_PATH_PREFIX,
         file_extension: str = _DEFAULT_FILE_EXTENSION,
         branch: str = "",
+        recursive: bool = False,
         batch_size: int = INDEX_BATCH_SIZE,
     ) -> None:
         self.repo_owner = repo_owner
@@ -86,6 +89,7 @@ class GithubFilesConnector(LoadConnector, PollConnector):
             file_extension if file_extension.startswith(".") else f".{file_extension}"
         ).lower()
         self.branch = branch or ""  # empty -> use repo's default branch
+        self.recursive = recursive
         self.batch_size = batch_size
         self.github_client: Github | None = None
 
@@ -112,7 +116,9 @@ class GithubFilesConnector(LoadConnector, PollConnector):
 
     def _list_matching_paths(self, repo, branch: str) -> list[tuple[str, str]]:
         """Walk the git tree once, returning (path, blob_sha) pairs for files
-        matching `<prefix>/<single_dir>/<file><extension>`."""
+        matching the configured extension. In fixed-depth mode, only files at
+        `<prefix>/<single_dir>/<file><extension>` match; in recursive mode,
+        any file under `<prefix>` (or the repo root) at any depth matches."""
         branch_obj = _retry_on_rate_limit(self.github_client, repo.get_branch, branch)
         head_sha = branch_obj.commit.sha
         tree = _retry_on_rate_limit(
@@ -129,9 +135,10 @@ class GithubFilesConnector(LoadConnector, PollConnector):
             path = element.path
             if prefix and not path.startswith(prefix + "/"):
                 continue
-            parts = path.split("/")
-            if len(parts) != expected_depth:
-                continue
+            if not self.recursive:
+                parts = path.split("/")
+                if len(parts) != expected_depth:
+                    continue
             if not path.lower().endswith(self.file_extension):
                 continue
             results.append((path, element.sha))
@@ -177,13 +184,20 @@ class GithubFilesConnector(LoadConnector, PollConnector):
         # while unchanged files stay deduped across runs.
         doc_id = f"{html_url}@{sha}"
 
+        # In recursive mode files at different depths can share a filename, so
+        # use the full repo-relative path as the semantic identifier.
+        if self.recursive:
+            semantic_identifier = path
+        else:
+            semantic_identifier = (
+                f"{product_dir}/{filename}" if product_dir else filename
+            )
+
         return Document(
             id=doc_id,
             sections=[Section(link=html_url, text=text)],
             source=DocumentSource.GITHUB_FILES,
-            semantic_identifier=f"{product_dir}/{filename}"
-            if product_dir
-            else filename,
+            semantic_identifier=semantic_identifier,
             doc_updated_at=doc_updated_at,
             metadata={
                 "repo": repo.full_name,
@@ -283,6 +297,7 @@ if __name__ == "__main__":
         path_prefix=os.environ.get("PATH_PREFIX", _DEFAULT_PATH_PREFIX),
         file_extension=os.environ.get("FILE_EXTENSION", _DEFAULT_FILE_EXTENSION),
         branch=os.environ.get("BRANCH", ""),
+        recursive=os.environ.get("RECURSIVE", "").lower() in ("1", "true", "yes"),
     )
     connector.load_credentials(
         {"github_access_token": os.environ["GITHUB_ACCESS_TOKEN"]}
