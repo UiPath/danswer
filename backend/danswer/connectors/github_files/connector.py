@@ -225,7 +225,7 @@ class GithubFilesConnector(LoadConnector, PollConnector):
             try:
                 commits_iter = repo.get_commits(
                     sha=branch,
-                    path=self.path_prefix or None,
+                    **({"path": self.path_prefix} if self.path_prefix else {}),
                     **({"since": start} if start else {}),
                     **({"until": end} if end else {}),
                 )
