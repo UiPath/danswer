@@ -125,6 +125,7 @@ export interface GithubFilesConfig {
   path_prefix: string;
   file_extension: string;
   branch?: string;
+  recursive?: boolean;
 }
 
 export interface GitlabConfig {
