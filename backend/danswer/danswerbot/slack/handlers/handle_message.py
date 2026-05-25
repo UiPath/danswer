@@ -59,6 +59,7 @@ from danswer.llm.answering.prompts.citations_prompt import (
     compute_max_document_tokens_for_persona,
 )
 from danswer.llm.factory import get_llms_for_persona
+from danswer.llm.override_models import LLMOverride
 from danswer.llm.utils import check_number_of_tokens
 from danswer.llm.utils import get_max_input_tokens
 from danswer.one_shot_answer.answer_question import get_search_answer
@@ -572,7 +573,15 @@ def handle_message(
                     Persona,
                     fetch_persona_by_id(db_session, new_message_request.persona_id),
                 )
-                llm, _ = get_llms_for_persona(persona)
+                llm_override = None
+                if channel_config and channel_config.channel_config:
+                    ch_vendor = channel_config.channel_config.get("llm_vendor")
+                    ch_model = channel_config.channel_config.get("llm_model_name")
+                    if ch_vendor or ch_model:
+                        llm_override = LLMOverride(
+                            model_provider=ch_vendor, model_version=ch_model
+                        )
+                llm, _ = get_llms_for_persona(persona, llm_override=llm_override)
 
                 # In cases of threads, split the available tokens between docs and thread context
                 input_tokens = get_max_input_tokens(

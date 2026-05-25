@@ -32,6 +32,8 @@ interface SlackBotConfigCreationRequest {
   curated_response_user_title_filter?: string[];
   usePersona: boolean;
   response_type: SlackBotResponseType;
+  llm_vendor?: string;
+  llm_model_name?: string;
 }
 
 const buildFiltersFromCreationRequest = (
@@ -69,6 +71,8 @@ const buildRequestBodyFromCreationRequest = (
       ? { persona_id: creationRequest.persona_id }
       : { document_sets: creationRequest.document_sets }),
     response_type: creationRequest.response_type,
+    llm_vendor: creationRequest.llm_vendor,
+    llm_model_name: creationRequest.llm_model_name,
   });
 };
 

@@ -14,7 +14,9 @@ from danswer.configs.model_configs import GEN_AI_CLIENT_ID
 from danswer.configs.model_configs import GEN_AI_CLIENT_SECRET
 from danswer.configs.model_configs import GEN_AI_IDENTITY_ENDPOINT
 from danswer.configs.model_configs import GEN_AI_MAX_OUTPUT_TOKENS
+from danswer.configs.model_configs import GEN_AI_MODEL_NAME
 from danswer.configs.model_configs import GEN_AI_TENANT_ID
+from danswer.configs.model_configs import GEN_AI_VENDOR
 from danswer.llm.interfaces import LLM
 from danswer.llm.interfaces import LLMConfig
 from danswer.llm.interfaces import ToolChoiceOptions
@@ -67,8 +69,7 @@ class CustomModelServer(LLM):
         # Not used here but you probably want a model server that isn't completely open
         api_key: str | None,
         timeout: int,
-        endpoint: str
-        | None = "https://alpha.uipath.com/{account_id}/{tenant_id}/llmgateway_/api/raw/vendor/openai/model/gpt-4o-2024-11-20/completions",
+        endpoint: str | None = None,
         identity_url: str | None = GEN_AI_IDENTITY_ENDPOINT,
         client_id: str | None = GEN_AI_CLIENT_ID,
         client_secret: str | None = GEN_AI_CLIENT_SECRET,
@@ -76,11 +77,15 @@ class CustomModelServer(LLM):
         tenant_id: str | None = GEN_AI_TENANT_ID,
         max_output_tokens: int = int(GEN_AI_MAX_OUTPUT_TOKENS),
         api_version: str | None = GEN_AI_API_VERSION,
+        llm_vendor: str | None = None,
+        llm_model_name: str | None = None,
     ):
+        vendor = llm_vendor or GEN_AI_VENDOR
+        model = llm_model_name or GEN_AI_MODEL_NAME
         if not endpoint:
-            raise ValueError(
-                "Cannot point Danswer to a custom LLM server without providing the "
-                "endpoint for the model server."
+            endpoint = (
+                "https://alpha.uipath.com/{account_id}/{tenant_id}"
+                f"/llmgateway_/api/raw/vendor/{vendor}/model/{model}/completions"
             )
 
         if not identity_url:
@@ -129,9 +134,8 @@ class CustomModelServer(LLM):
         self._max_output_tokens = max_output_tokens
         self._timeout = timeout
         self.token = self._get_token()
-        # TODO: Remove hard-coding
-        self._model_provider = "custom"
-        self._model_version = "gpt-4"
+        self._model_provider = vendor
+        self._model_version = model
         self._temperature = 0.0
         self._api_key = api_key
 
@@ -139,42 +143,62 @@ class CustomModelServer(LLM):
             self._max_output_tokens = 7000
 
     def _execute(self, input: LanguageModelInput) -> AIMessage:
+        is_bedrock = self._model_provider == "awsbedrock"
+        api_flavor = "converse" if is_bedrock else "chat-completions"
+
         headers = {
             "Content-Type": "application/json",
             "Authorization": "Bearer " + self.token,
             "X-UiPath-LlmGateway-RequestingProduct": "darwin",
             "X-UiPath-LlmGateway-RequestingFeature": "ChatWithAssistant",
-            "X-UiPath-LlmGateway-ApiFlavor": "chat-completions",
+            "X-UiPath-LlmGateway-ApiFlavor": api_flavor,
             "X-UiPath-LlmGateway-ApiVersion": "2024-10-21",
             "X-UiPath-LlmGateway-TimeoutSeconds": "60",
             "X-UIPATH-STREAMING-ENABLED": "false",
         }
 
-        # print(f"Input: {input}")
         chatPrompt = convert_lm_input_to_prompt(input)
-
-        json_array = []
         messages = chatPrompt.to_messages()
-        for msg in messages:
-            mapped_type = self._map_type(msg.type)
-            json_obj = {
-                "role": mapped_type,
-                "content": self._clean_json_string(msg.content),
-            }
-            json_array.append(json_obj)
 
-        data = {"max_tokens": self._max_output_tokens, "messages": json_array}
+        if is_bedrock:
+            # AWS Bedrock Converse API format
+            bedrock_messages = []
+            for msg in messages:
+                mapped_type = self._map_type(msg.type)
+                if mapped_type == "system":
+                    continue  # system handled separately below
+                bedrock_messages.append(
+                    {
+                        "role": mapped_type,
+                        "content": [{"text": self._clean_json_string(msg.content)}],
+                    }
+                )
+            data: dict = {
+                "messages": bedrock_messages,
+                "inferenceConfig": {"maxTokens": self._max_output_tokens},
+            }
+            system_msgs = [
+                {"text": self._clean_json_string(msg.content)}
+                for msg in messages
+                if self._map_type(msg.type) == "system"
+            ]
+            if system_msgs:
+                data["system"] = system_msgs
+        else:
+            # OpenAI chat-completions format
+            json_array = []
+            for msg in messages:
+                mapped_type = self._map_type(msg.type)
+                json_array.append(
+                    {
+                        "role": mapped_type,
+                        "content": self._clean_json_string(msg.content),
+                    }
+                )
+            data = {"max_tokens": self._max_output_tokens, "messages": json_array}
 
         try:
-            print(data)
-            with open("requestdata.json", "w") as fp:
-                json.dump(data, fp)
-
-            # json_str = json.dumps(data, ensure_ascii=False, indent=4)
-            # print(f"Request Data: {json_str}")
-            # json_data = json.loads(json_str)
             response = requests.post(
-                # self._endpoint, headers=headers, data=json_str, timeout=self._timeout
                 self._endpoint,
                 headers=headers,
                 json=data,
@@ -185,16 +209,21 @@ class CustomModelServer(LLM):
 
         response.raise_for_status()
         try:
-            data = json.loads(response.content)
-            print(data)
+            response_data = json.loads(response.content)
         except json.decoder.JSONDecodeError as e:
             print("Failed to parse JSON:", response.content)
             raise e
 
         message_content = "No response from LLM server"
-        if data["choices"]:
-            message_content = data["choices"][0]["message"]["content"]
-        # print(message_content)
+        if is_bedrock:
+            output = (
+                response_data.get("output", {}).get("message", {}).get("content", [])
+            )
+            if output:
+                message_content = output[0].get("text", message_content)
+        else:
+            if response_data.get("choices"):
+                message_content = response_data["choices"][0]["message"]["content"]
         return AIMessage(content=message_content)
 
     def _clean_json_string(self, input_string):
