@@ -244,10 +244,7 @@ export function ChatInputBar({
           )}
 
           <div>
-            <SelectedFilterDisplay
-              filterManager={filterManager}
-              persona={selectedAssistant}
-            />
+            <SelectedFilterDisplay filterManager={filterManager} />
           </div>
 
           <div

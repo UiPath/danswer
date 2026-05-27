@@ -1,9 +1,8 @@
 import { SourceIcon } from "@/components/SourceIcon";
 import React from "react";
-import { FiBookmark, FiLock, FiX } from "react-icons/fi";
+import { FiBookmark, FiX } from "react-icons/fi";
 import { FilterManager } from "@/lib/hooks";
 import { DateRangePickerValue } from "@tremor/react";
-import { Persona } from "@/app/admin/assistants/interfaces";
 
 const displayTimeRange = (timeRange: DateRangePickerValue) => {
   if (timeRange.selectValue) {
@@ -61,10 +60,8 @@ const SelectedFilter = ({
 
 export function SelectedFilterDisplay({
   filterManager,
-  persona,
 }: {
   filterManager: FilterManager;
-  persona?: Persona | null;
 }) {
   const {
     timeRange,
@@ -75,47 +72,18 @@ export function SelectedFilterDisplay({
     setSelectedDocumentSets,
   } = filterManager;
 
-  const personaDocumentSets = persona?.document_sets ?? [];
-  const hasPersonaScope = personaDocumentSets.length > 0;
-
   const anyFilters =
     timeRange !== null ||
     selectedSources.length > 0 ||
     selectedDocumentSets.length > 0;
 
-  if (!anyFilters && !hasPersonaScope) {
+  if (!anyFilters) {
     return null;
   }
 
   return (
     <div className="flex mb-2">
       <div className="flex flex-wrap gap-x-2 gap-y-1">
-        {hasPersonaScope &&
-          personaDocumentSets.map((ds) => (
-            <div
-              key={`persona-scope-${ds.id}`}
-              className="
-                flex
-                text-xs
-                items-center
-                border
-                border-accent
-                py-1
-                rounded-lg
-                px-2
-                w-fit
-                select-none
-                bg-background
-                text-emphasis
-                shadow-md
-              "
-              title={`Scope set by assistant "${persona?.name}" — cannot be removed`}
-            >
-              <FiLock size={12} className="mr-1" />
-              <span className="font-medium mr-1">Scope:</span>
-              <span>{ds.name}</span>
-            </div>
-          ))}
         {timeRange &&
           (timeRange.selectValue || timeRange.from || timeRange.to) && (
             <SelectedFilter onClick={() => setTimeRange(null)}>
