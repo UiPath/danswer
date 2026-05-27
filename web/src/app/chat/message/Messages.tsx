@@ -167,7 +167,7 @@ export const AIMessage = ({
   ) : undefined;
 
   return (
-    <div className={"py-5 px-5 flex -mr-6 w-full"}>
+    <div className={"py-5 px-5 flex -mr-6 w-full bg-background-weak border-y border-border"}>
       <div className="mx-auto w-searchbar-xs 2xl:w-searchbar-sm 3xl:w-searchbar relative">
         <div className="ml-8">
           <div className="flex">

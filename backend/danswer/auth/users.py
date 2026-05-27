@@ -64,10 +64,15 @@ logger = setup_logger()
 
 
 def verify_auth_setting() -> None:
-    if AUTH_TYPE not in [AuthType.DISABLED, AuthType.BASIC, AuthType.GOOGLE_OAUTH]:
+    if AUTH_TYPE not in [
+        AuthType.DISABLED,
+        AuthType.BASIC,
+        AuthType.GOOGLE_OAUTH,
+        AuthType.OIDC,
+    ]:
         raise ValueError(
             "User must choose a valid user authentication method: "
-            "disabled, basic, or google_oauth"
+            "disabled, basic, google_oauth, or oidc"
         )
     logger.info(f"Using Auth Type: {AUTH_TYPE.value}")
 
@@ -173,7 +178,7 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
         verify_email_in_whitelist(account_email)
         verify_email_domain(account_email)
 
-        return await super().oauth_callback(  # type: ignore
+        user = await super().oauth_callback(  # type: ignore
             oauth_name=oauth_name,
             access_token=access_token,
             account_id=account_id,
@@ -184,6 +189,24 @@ class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
             associate_by_email=associate_by_email,
             is_verified_by_default=is_verified_by_default,
         )
+
+        # fastapi-users only sets is_verified for newly-created users; when
+        # associate_by_email matches an existing row, it leaves is_verified
+        # untouched. Since the OAuth provider already vouched for the email,
+        # promote it here so downstream `double_check_user` doesn't 403 the user.
+        logger.info(
+            "oauth_callback complete: oauth_name=%s email=%s "
+            "is_verified_by_default=%s user.is_verified=%s",
+            oauth_name,
+            account_email,
+            is_verified_by_default,
+            user.is_verified,
+        )
+        if is_verified_by_default and not user.is_verified:
+            user = await self.user_db.update(user, {"is_verified": True})
+            logger.info("Promoted %s to is_verified=True", account_email)
+
+        return user
 
     async def on_after_register(
         self, user: User, request: Optional[Request] = None

@@ -72,6 +72,14 @@ VALID_EMAIL_DOMAINS = (
     if _VALID_EMAIL_DOMAINS_STR
     else []
 )
+# Comma-separated emails that are granted ADMIN role on first sign-in.
+# Independent of which auth backend (basic / google_oauth / oidc) created the account.
+_DEFAULT_ADMIN_EMAILS_STR = os.environ.get("DEFAULT_ADMIN_EMAILS", "")
+DEFAULT_ADMIN_EMAILS = (
+    [email.strip() for email in _DEFAULT_ADMIN_EMAILS_STR.split(",") if email.strip()]
+    if _DEFAULT_ADMIN_EMAILS_STR
+    else []
+)
 # OAuth Login Flow
 # Used for both Google OAuth2 and OIDC flows
 OAUTH_CLIENT_ID = (
@@ -81,6 +89,9 @@ OAUTH_CLIENT_SECRET = (
     os.environ.get("OAUTH_CLIENT_SECRET", os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET"))
     or ""
 )
+# OpenID Connect discovery URL (e.g. Entra ID:
+# https://login.microsoftonline.com/<tenant-id>/v2.0/.well-known/openid-configuration)
+OPENID_CONFIG_URL = os.environ.get("OPENID_CONFIG_URL", "")
 
 USER_AUTH_SECRET = os.environ.get("USER_AUTH_SECRET", "")
 # for basic auth

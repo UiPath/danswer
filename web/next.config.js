@@ -22,32 +22,11 @@ const nextConfig = {
     ];
   },
   redirects: async () => {
-    // In production, something else (nginx in the one box setup) should take
-    // care of this redirect. TODO (chris): better support setups where
-    // web_server and api_server are on different machines.
-    const defaultRedirects = [];
-
-    if (process.env.NODE_ENV === "production") return defaultRedirects;
-
-    return defaultRedirects.concat([
-      {
-        source: "/api/chat/send-message:params*",
-        destination: "http://127.0.0.1:8080/chat/send-message:params*", // Proxy to Backend
-        permanent: true,
-      },
-      {
-        source: "/api/query/stream-answer-with-quote:params*",
-        destination:
-          "http://127.0.0.1:8080/query/stream-answer-with-quote:params*", // Proxy to Backend
-        permanent: true,
-      },
-      {
-        source: "/api/query/stream-query-validation:params*",
-        destination:
-          "http://127.0.0.1:8080/query/stream-query-validation:params*", // Proxy to Backend
-        permanent: true,
-      },
-    ]);
+    // Streaming endpoints previously used 308 redirects to bypass the dev
+    // proxy, but that strips same-origin cookies on the cross-origin hop and
+    // breaks cookie-based auth. Rely on the `/api/:path*` rewrite above —
+    // Next.js 14's rewrite proxy handles streaming responses correctly.
+    return [];
   },
   publicRuntimeConfig: {
     version,

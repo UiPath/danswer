@@ -50,6 +50,7 @@ from danswer.llm.answering.models import PromptConfig
 from danswer.llm.exceptions import GenAIDisabledException
 from danswer.llm.factory import get_llms_for_persona
 from danswer.llm.factory import get_main_llm_from_tuple
+from danswer.llm.interfaces import LLM
 from danswer.llm.interfaces import LLMConfig
 from danswer.llm.utils import get_default_llm_tokenizer
 from danswer.search.enums import OptionalSearchSetting
@@ -215,6 +216,7 @@ def stream_chat_message_objects(
     4. [always] Details on the final AI response message that is created
 
     """
+    llm: LLM | None = None
     try:
         user_id = user.id if user is not None else None
 
@@ -601,7 +603,8 @@ def stream_chat_message_objects(
 
         # Don't leak the API key
         error_msg = str(e)
-        if llm.config.api_key and llm.config.api_key.lower() in error_msg.lower():
+        api_key = llm.config.api_key if llm is not None else None
+        if api_key and api_key.lower() in error_msg.lower():
             error_msg = (
                 f"LLM failed to respond. Invalid API "
                 f"key error from '{llm.config.model_provider}'."

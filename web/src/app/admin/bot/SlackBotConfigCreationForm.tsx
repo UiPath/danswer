@@ -31,6 +31,10 @@ import {
 import { useRouter } from "next/navigation";
 import { Persona } from "../assistants/interfaces";
 import { useState } from "react";
+import {
+  LLM_MODELS_BY_VENDOR,
+  LLM_VENDORS,
+} from "@/lib/llm/models";
 import { BookmarkIcon, RobotIcon } from "@/components/icons/icons";
 import { SourceIcon } from "@/components/SourceIcon";
 import { getSourceMetadata } from "@/lib/sources";
@@ -371,52 +375,25 @@ export const SlackBotCreationForm = ({
                   name="llm_vendor"
                   label="LLM Vendor"
                   subtext="The LLM vendor to use for this channel. Select 'AWS Bedrock' for Claude models."
-                  options={[
-                    { name: "OpenAI (GPT)", value: "openai" },
-                    { name: "AWS Bedrock (Claude)", value: "awsbedrock" },
-                  ]}
+                  options={LLM_VENDORS.map((v) => ({
+                    name: v.label,
+                    value: v.key,
+                  }))}
                   includeDefault={true}
                 />
 
-                {values.llm_vendor === "awsbedrock" && (
-                  <SelectorFormField
-                    name="llm_model_name"
-                    label="Claude Model"
-                    subtext="The Claude model to use via AWS Bedrock."
-                    options={[
-                      {
-                        name: "Claude Sonnet 4.5",
-                        value: "anthropic.claude-sonnet-4-5-20250929-v1:0",
-                      },
-                      {
-                        name: "Claude 3.5 Sonnet",
-                        value: "anthropic.claude-3-5-sonnet-20241022-v2:0",
-                      },
-                      {
-                        name: "Claude 3 Opus",
-                        value: "anthropic.claude-3-opus-20240229-v1:0",
-                      },
-                    ]}
-                  />
-                )}
-
-                {values.llm_vendor === "openai" && (
-                  <SelectorFormField
-                    name="llm_model_name"
-                    label="GPT Model"
-                    subtext="The GPT model to use."
-                    options={[
-                      {
-                        name: "GPT-4o (2024-11-20)",
-                        value: "gpt-4o-2024-11-20",
-                      },
-                      {
-                        name: "GPT-4.1 Mini",
-                        value: "gpt-4.1-mini-2025-04-14",
-                      },
-                    ]}
-                  />
-                )}
+                {values.llm_vendor &&
+                  LLM_MODELS_BY_VENDOR[values.llm_vendor] && (
+                    <SelectorFormField
+                      name="llm_model_name"
+                      label="Model"
+                      subtext={`The ${
+                        LLM_VENDORS.find((v) => v.key === values.llm_vendor)
+                          ?.label ?? values.llm_vendor
+                      } model to use.`}
+                      options={LLM_MODELS_BY_VENDOR[values.llm_vendor]}
+                    />
+                  )}
 
                 <Divider />
 

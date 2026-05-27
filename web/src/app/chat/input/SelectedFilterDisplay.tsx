@@ -1,8 +1,9 @@
 import { SourceIcon } from "@/components/SourceIcon";
 import React from "react";
-import { FiBookmark, FiTag, FiX } from "react-icons/fi";
+import { FiBookmark, FiLock, FiX } from "react-icons/fi";
 import { FilterManager } from "@/lib/hooks";
 import { DateRangePickerValue } from "@tremor/react";
+import { Persona } from "@/app/admin/assistants/interfaces";
 
 const displayTimeRange = (timeRange: DateRangePickerValue) => {
   if (timeRange.selectValue) {
@@ -29,32 +30,41 @@ const SelectedFilter = ({
 }) => (
   <div
     className="
-      flex 
-      text-xs 
-      cursor-pointer 
-      items-center 
-      border 
-      border-border 
-      py-1 
-      rounded-lg 
-      px-2 
-      w-fit 
-      select-none 
-      hover:bg-hover 
-      bg-background 
-      shadow-md 
+      group
+      flex
+      text-xs
+      font-medium
+      cursor-pointer
+      items-center
+      border
+      border-accent
+      py-1
+      rounded-full
+      pl-3
+      pr-2
+      w-fit
+      select-none
+      bg-accent/15
+      text-accent
+      hover:bg-accent
+      hover:text-white
+      shadow-sm
+      transition-colors
     "
     onClick={onClick}
+    title="Click to remove filter"
   >
     {children}
-    <FiX className="ml-2" size={14} />
+    <FiX className="ml-2 opacity-70 group-hover:opacity-100" size={14} />
   </div>
 );
 
 export function SelectedFilterDisplay({
   filterManager,
+  persona,
 }: {
   filterManager: FilterManager;
+  persona?: Persona | null;
 }) {
   const {
     timeRange,
@@ -63,23 +73,49 @@ export function SelectedFilterDisplay({
     setSelectedSources,
     selectedDocumentSets,
     setSelectedDocumentSets,
-    selectedTags,
-    setSelectedTags,
   } = filterManager;
+
+  const personaDocumentSets = persona?.document_sets ?? [];
+  const hasPersonaScope = personaDocumentSets.length > 0;
 
   const anyFilters =
     timeRange !== null ||
     selectedSources.length > 0 ||
-    selectedDocumentSets.length > 0 ||
-    selectedTags.length > 0;
+    selectedDocumentSets.length > 0;
 
-  if (!anyFilters) {
+  if (!anyFilters && !hasPersonaScope) {
     return null;
   }
 
   return (
     <div className="flex mb-2">
-      <div className="flex flex-wrap gap-x-2">
+      <div className="flex flex-wrap gap-x-2 gap-y-1">
+        {hasPersonaScope &&
+          personaDocumentSets.map((ds) => (
+            <div
+              key={`persona-scope-${ds.id}`}
+              className="
+                flex
+                text-xs
+                items-center
+                border
+                border-accent
+                py-1
+                rounded-lg
+                px-2
+                w-fit
+                select-none
+                bg-background
+                text-emphasis
+                shadow-md
+              "
+              title={`Scope set by assistant "${persona?.name}" — cannot be removed`}
+            >
+              <FiLock size={12} className="mr-1" />
+              <span className="font-medium mr-1">Scope:</span>
+              <span>{ds.name}</span>
+            </div>
+          ))}
         {timeRange &&
           (timeRange.selectValue || timeRange.from || timeRange.to) && (
             <SelectedFilter onClick={() => setTimeRange(null)}>
@@ -118,31 +154,6 @@ export function SelectedFilterDisplay({
                   <FiBookmark />
                 </div>
                 <span className="ml-2">{documentSetName}</span>
-              </>
-            </SelectedFilter>
-          ))}
-        {selectedTags.length > 0 &&
-          selectedTags.map((tag) => (
-            <SelectedFilter
-              key={tag.tag_key + tag.tag_value}
-              onClick={() =>
-                setSelectedTags((prevTags) =>
-                  prevTags.filter(
-                    (t) =>
-                      t.tag_key !== tag.tag_key || t.tag_value !== tag.tag_value
-                  )
-                )
-              }
-            >
-              <>
-                <div>
-                  <FiTag />
-                </div>
-                <span className="ml-1 max-w-[100px] text-ellipsis line-clamp-1 break-all">
-                  {tag.tag_key}
-                  <b>=</b>
-                  {tag.tag_value}
-                </span>
               </>
             </SelectedFilter>
           ))}

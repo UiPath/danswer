@@ -41,6 +41,9 @@ PUBLIC_ENDPOINT_SPECS = [
     # oauth
     ("/auth/oauth/authorize", {"GET"}),
     ("/auth/oauth/callback", {"GET"}),
+    # oidc
+    ("/auth/oidc/authorize", {"GET"}),
+    ("/auth/oidc/callback", {"GET"}),
 ]
 
 

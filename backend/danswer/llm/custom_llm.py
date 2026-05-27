@@ -60,7 +60,8 @@ class CustomModelServer(LLM):
                 raise ValueError("Failed to get access token from the model server")
         else:
             print(
-                f"Access token request failed with status code: {response.status_code}"
+                f"Access token request failed with status code: {response.status_code} "
+                f"body: {response.text[:500]!r}"
             )
             raise ValueError("Failed to get access token from the model server")
 
@@ -207,6 +208,13 @@ class CustomModelServer(LLM):
         except Timeout as error:
             raise Timeout(f"Model inference to {self._endpoint} timed out") from error
 
+        if not response.ok:
+            logger.error(
+                "LLM gateway returned %s for %s body=%r",
+                response.status_code,
+                self._endpoint,
+                response.text[:1000],
+            )
         response.raise_for_status()
         try:
             response_data = json.loads(response.content)

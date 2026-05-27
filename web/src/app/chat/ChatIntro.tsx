@@ -3,7 +3,17 @@ import { ValidSources } from "@/lib/types";
 import Image from "next/image";
 import { Persona } from "../admin/assistants/interfaces";
 import { Divider } from "@tremor/react";
-import { FiBookmark, FiCpu, FiInfo, FiX, FiZoomIn } from "react-icons/fi";
+import {
+  FiBookmark,
+  FiChevronRight,
+  FiCpu,
+  FiFilter,
+  FiInfo,
+  FiUser,
+  FiX,
+  FiZoomIn,
+} from "react-icons/fi";
+import { IconType } from "react-icons";
 import { HoverPopup } from "@/components/HoverPopup";
 import { Modal } from "@/components/Modal";
 import { useState } from "react";
@@ -26,12 +36,78 @@ function HelperItemDisplay({
   );
 }
 
+function StepCard({
+  icon: Icon,
+  title,
+  subtitle,
+  onClick,
+}: {
+  icon: IconType;
+  title: string;
+  subtitle: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="
+        group
+        text-left
+        rounded-lg
+        border border-border
+        bg-background
+        hover:bg-hover-light
+        hover:border-accent
+        transition-colors
+        px-4 py-3
+        flex flex-col gap-1
+      "
+    >
+      <Icon className="text-accent" size={20} />
+      <div className="font-semibold text-sm text-emphasis">{title}</div>
+      <div className="text-xs text-subtle">{subtitle}</div>
+    </button>
+  );
+}
+
+function OnboardingSteps({
+  setConfigModalActiveTab,
+}: {
+  setConfigModalActiveTab: (tab: string | null) => void;
+}) {
+  return (
+    <div className="mt-6 grid grid-cols-3 gap-3 items-stretch">
+      <StepCard
+        icon={FiUser}
+        title="Assistant"
+        subtitle="grounds context"
+        onClick={() => setConfigModalActiveTab("assistants")}
+      />
+      <StepCard
+        icon={FiFilter}
+        title="Filters"
+        subtitle="narrow sources"
+        onClick={() => setConfigModalActiveTab("filters")}
+      />
+      <StepCard
+        icon={FiCpu}
+        title="Model"
+        subtitle="tune reasoning"
+        onClick={() => setConfigModalActiveTab("llms")}
+      />
+    </div>
+  );
+}
+
 export function ChatIntro({
   availableSources,
   selectedPersona,
+  setConfigModalActiveTab,
 }: {
   availableSources: ValidSources[];
   selectedPersona: Persona;
+  setConfigModalActiveTab?: (tab: string | null) => void;
 }) {
   const availableSourceMetadata = getSourceMetadataForSources(availableSources);
 
@@ -53,6 +129,12 @@ export function ChatIntro({
               )}
             </div>
           </div>
+
+          {setConfigModalActiveTab && (
+            <OnboardingSteps
+              setConfigModalActiveTab={setConfigModalActiveTab}
+            />
+          )}
 
           {selectedPersona && selectedPersona.num_chunks !== 0 && (
             <>

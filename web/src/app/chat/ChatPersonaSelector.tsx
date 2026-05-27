@@ -1,9 +1,22 @@
 import { Persona } from "@/app/admin/assistants/interfaces";
-import { FiCheck, FiChevronDown, FiPlusSquare, FiEdit2 } from "react-icons/fi";
+import { FiCheck, FiChevronDown, FiPlusSquare, FiEdit2, FiSearch } from "react-icons/fi";
 import { CustomDropdown, DefaultDropdownElement } from "@/components/Dropdown";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { checkUserIdOwnsAssistant } from "@/lib/assistants/checkOwnership";
+
+// The default persona (id=0 in personas.yaml) has no document_set scope and
+// behaves like a generic search-everything mode. Surface it as "Search" in
+// the trigger so users don't have to think about it as an "assistant."
+const DEFAULT_PERSONA_ID = 0;
+
+function isSearchModePersona(persona: Persona | undefined): boolean {
+  return (
+    !!persona &&
+    persona.id === DEFAULT_PERSONA_ID &&
+    (persona.document_sets?.length ?? 0) === 0
+  );
+}
 
 function PersonaItem({
   id,
@@ -130,10 +143,15 @@ export function ChatPersonaSelector({
         </div>
       }
     >
-      <div className="select-none text-xl text-strong font-bold flex px-2 rounded cursor-pointer hover:bg-hover-light">
-        <div className="mt-auto">
-          {currentlySelectedPersona?.name || "Default"}
-        </div>
+      <div className="select-none text-xl text-strong font-bold flex items-center px-2 rounded cursor-pointer hover:bg-hover-light">
+        {isSearchModePersona(currentlySelectedPersona) ? (
+          <>
+            <FiSearch className="mr-2" />
+            <span>Search</span>
+          </>
+        ) : (
+          <span>{currentlySelectedPersona?.name || "Default"}</span>
+        )}
         <FiChevronDown className="my-auto ml-1" />
       </div>
     </CustomDropdown>

@@ -161,7 +161,6 @@ export function ConfigurationModal({
               <div>
                 <AssistantsTab
                   availableAssistants={availableAssistants}
-                  llmProviders={llmProviders}
                   selectedAssistant={selectedAssistant}
                   onSelect={(assistant) => {
                     setSelectedAssistant(assistant);

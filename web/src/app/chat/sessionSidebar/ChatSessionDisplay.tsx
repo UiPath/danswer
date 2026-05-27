@@ -19,6 +19,7 @@ import { DefaultDropdownElement } from "@/components/Dropdown";
 import { Popover } from "@/components/popover/Popover";
 import { ShareChatSessionModal } from "../modal/ShareChatSessionModal";
 import { CHAT_SESSION_ID_KEY, FOLDER_ID_KEY } from "@/lib/drag/constants";
+import { timeAgo } from "@/lib/time";
 
 export function ChatSessionDisplay({
   chatSession,
@@ -120,9 +121,16 @@ export function ChatSessionDisplay({
                   className="-my-px px-1 mr-2 w-full rounded"
                 />
               ) : (
-                <p className="break-all overflow-hidden whitespace-nowrap mr-3 text-emphasis">
-                  {chatName || `Chat ${chatSession.id}`}
-                </p>
+                <div className="flex flex-col mr-3 overflow-hidden">
+                  <p className="break-all overflow-hidden whitespace-nowrap text-ellipsis text-emphasis">
+                    {chatName || `Chat ${chatSession.id}`}
+                  </p>
+                  {chatSession.time_created && (
+                    <p className="text-xs text-subtle leading-tight">
+                      {timeAgo(chatSession.time_created)}
+                    </p>
+                  )}
+                </div>
               )}
               {isSelected &&
                 (isRenamingChat ? (

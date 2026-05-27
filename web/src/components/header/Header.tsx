@@ -3,7 +3,7 @@
 import { User } from "@/lib/types";
 import Link from "next/link";
 import React, { useContext } from "react";
-import { FiMessageSquare, FiSearch } from "react-icons/fi";
+import { FiMessageSquare } from "react-icons/fi";
 import { HeaderWrapper } from "./HeaderWrapper";
 import { SettingsContext } from "../settings/SettingsProvider";
 import { UserDropdown } from "../UserDropdown";
@@ -29,12 +29,7 @@ export function Header({ user }: HeaderProps) {
   return (
     <HeaderWrapper>
       <div className="flex h-full">
-        <Link
-          className="py-3 flex flex-col"
-          href={
-            settings && settings.default_page === "chat" ? "/chat" : "/search"
-          }
-        >
+        <Link className="py-3 flex flex-col" href="/chat">
           <div className="flex my-auto">
             <div className="mr-1 my-auto">
               <Logo />
@@ -58,30 +53,14 @@ export function Header({ user }: HeaderProps) {
           </div>
         </Link>
 
-        {(!settings ||
-          (settings.search_page_enabled && settings.chat_page_enabled)) && (
-          <>
-            <Link
-              href="/search"
-              className={"ml-6 h-full flex flex-col hover:bg-hover"}
-            >
-              <div className="w-24 flex my-auto">
-                <div className={"mx-auto flex text-strong px-2"}>
-                  <FiSearch className="my-auto mr-1" />
-                  <h1 className="flex text-sm font-bold my-auto">Search</h1>
-                </div>
-              </div>
-            </Link>
-
-            <Link href="/chat" className="h-full flex flex-col hover:bg-hover">
-              <div className="w-24 flex my-auto">
-                <div className="mx-auto flex text-strong px-2">
-                  <FiMessageSquare className="my-auto mr-1" />
-                  <h1 className="flex text-sm font-bold my-auto">Chat</h1>
-                </div>
-              </div>
-            </Link>
-          </>
+        {(!settings || settings.chat_page_enabled) && (
+          <Link
+            href="/chat"
+            className="ml-6 my-auto flex items-center gap-2 px-3 py-2 rounded-md border border-accent bg-accent/10 text-accent hover:bg-accent hover:text-white transition-colors"
+          >
+            <FiMessageSquare size={18} />
+            <span className="text-sm font-semibold">Chat</span>
+          </Link>
         )}
 
         <div className="ml-auto h-full flex flex-col">
