@@ -984,11 +984,21 @@ export function ChatPage({
 
   const onPersonaChange = (persona: Persona | null) => {
     if (persona && persona.id !== livePersona.id) {
+      const hadFiles = currentMessageFiles.length > 0;
       // remove uploaded files
       setCurrentMessageFiles([]);
       setSelectedPersona(persona);
       textAreaRef.current?.focus();
       router.push(buildChatUrl(searchParams, null, persona.id));
+      // A chat session is bound to a single assistant, so switching starts a fresh
+      // chat. Surface that explicitly — otherwise the user is silently navigated to
+      // a blank session with no explanation of why.
+      setPopup({
+        message:
+          `Started a new chat with "${persona.name}", as each chat is bound to a single assistant.` +
+          (hadFiles ? " Please re-upload any files you'd attached." : ""),
+        type: "success",
+      });
     }
   };
 
