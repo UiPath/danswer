@@ -4,7 +4,11 @@ metadata:
   name: env-configmap
 data:
   # Auth Setting, also check the secrets file
-  AUTH_TYPE: "disabled"  # Change this for production uses unless Danswer is only accessible behind VPN
+  AUTH_TYPE: "oidc"  # Microsoft / Entra ID OIDC (oauth_client_id/secret + user_auth_secret in danswer-secrets)
+  # Entra OIDC discovery doc; tenant id is the path segment.
+  OPENID_CONFIG_URL: "https://login.microsoftonline.com/d8353d2a-b153-4d17-8827-902c51f72357/v2.0/.well-known/openid-configuration"
+  # Comma-separated emails granted ADMIN on first sign-in (replaces the old Istio admin allowlist).
+  DEFAULT_ADMIN_EMAILS: "user1@uipath.com,user2@uipath.com"
   ENCRYPTION_KEY_SECRET: ""  # This should not be specified directly in the yaml, this is just for reference
   SESSION_EXPIRE_TIME_SECONDS: "86400"  # 1 Day Default
   VALID_EMAIL_DOMAINS: ""  # Can be something like danswer.ai, as an extra double-check
@@ -85,6 +89,8 @@ data:
   LOG_VESPA_TIMING_INFORMATION: ""
   # Shared or Non-backend Related
   INTERNAL_URL: "http://api-server-service:80"  # for web server
-  WEB_DOMAIN: "http://localhost:3000"  # for web server and api server
-  DOMAIN: "localhost"  # for nginx
+  # MUST be the externally-reachable https origin — builds the OIDC redirect_uri
+  # and makes the session cookie Secure. Mismatch => AADSTS50011 redirect error.
+  WEB_DOMAIN: "https://darwin.westeurope.cloudapp.azure.com"  # for web server and api server
+  DOMAIN: "darwin.westeurope.cloudapp.azure.com"  # for nginx
   APPLY_MIGRATIONS: "true"
