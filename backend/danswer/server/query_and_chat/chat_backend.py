@@ -65,6 +65,9 @@ from danswer.server.query_and_chat.models import PromptOverride
 from danswer.server.query_and_chat.models import RenameChatSessionResponse
 from danswer.server.query_and_chat.models import SearchFeedbackRequest
 from danswer.server.query_and_chat.models import UpdateChatSessionThreadRequest
+from danswer.server.middleware.request_rate_limit import (
+    check_message_request_rate_limit,
+)
 from danswer.server.query_and_chat.token_limit import check_token_rate_limits
 from danswer.utils.logger import setup_logger
 
@@ -278,6 +281,10 @@ def handle_new_chat_message(
     chat_message_req: CreateChatMessageRequest,
     request: Request,
     user: User | None = Depends(current_user),
+    # Request-rate cap (Redis-backed, default off) runs BEFORE the
+    # token-budget check — cheap fast-path means a 429'd caller never
+    # touches the DB-backed token-usage query.
+    _rate_limit: None = Depends(check_message_request_rate_limit),
     _: None = Depends(check_token_rate_limits),
 ) -> StreamingResponse:
     """This endpoint is both used for all the following purposes:

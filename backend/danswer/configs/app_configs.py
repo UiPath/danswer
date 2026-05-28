@@ -332,6 +332,22 @@ REDIS_KV_CACHE_TTL_SECONDS = int(
     os.environ.get("REDIS_KV_CACHE_TTL_SECONDS") or 86400
 )
 
+# Per-user request-rate limiter (Redis-backed). Default OFF — complements
+# the token-budget limiter in token_limit.py with a request-count cap that
+# is correct across api_server replicas.
+REQUEST_RATE_LIMIT_ENABLED = (
+    os.environ.get("REQUEST_RATE_LIMIT_ENABLED", "").lower() == "true"
+)
+# Per-minute and per-hour message-send caps per (user|ip). 0 disables that
+# window (so you can enforce only one of them if you prefer).
+REQUEST_RATE_LIMIT_PER_MINUTE = int(
+    os.environ.get("REQUEST_RATE_LIMIT_PER_MINUTE") or 0
+)
+REQUEST_RATE_LIMIT_PER_HOUR = int(
+    os.environ.get("REQUEST_RATE_LIMIT_PER_HOUR") or 0
+)
+
+
 #####
 # Enterprise Edition Configs
 #####

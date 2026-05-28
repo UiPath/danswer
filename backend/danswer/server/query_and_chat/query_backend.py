@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 from fastapi import Depends
 from fastapi import HTTPException
+from fastapi import Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -30,6 +31,9 @@ from danswer.server.query_and_chat.models import QueryValidationResponse
 from danswer.server.query_and_chat.models import SimpleQueryRequest
 from danswer.server.query_and_chat.models import SourceTag
 from danswer.server.query_and_chat.models import TagResponse
+from danswer.server.middleware.request_rate_limit import (
+    check_message_request_rate_limit,
+)
 from danswer.server.query_and_chat.token_limit import check_token_rate_limits
 from danswer.utils.logger import setup_logger
 
@@ -150,7 +154,11 @@ def stream_query_validation(
 @basic_router.post("/stream-answer-with-quote")
 def get_answer_with_quote(
     query_request: DirectQARequest,
+    request: Request,
     user: User = Depends(current_user),
+    # Mirrors /chat/send-message: request-rate cap first (cheap when
+    # off), token-budget check second.
+    _rate_limit: None = Depends(check_message_request_rate_limit),
     _: None = Depends(check_token_rate_limits),
 ) -> StreamingResponse:
     query = query_request.messages[0].message
