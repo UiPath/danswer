@@ -69,6 +69,16 @@ spec:
             secretKeyRef:
               name: danswer-secrets
               key: user_auth_secret
+        # --- Redis (cache + rate limiting) ---
+        # Empty string is the no-auth default (matches the in-cluster Redis
+        # StatefulSet, which runs without requirepass). Switch to a populated
+        # secret when moving to a managed Redis that requires auth.
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: danswer-secrets
+              key: redis_password
+              optional: true
         envFrom:
         - configMapRef:
             name: env-configmap

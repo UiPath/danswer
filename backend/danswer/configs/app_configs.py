@@ -308,6 +308,31 @@ CUSTOM_ANSWER_VALIDITY_CONDITIONS = json.loads(
 
 
 #####
+# Redis (cache + rate limiting)
+#####
+# Connection details. All env-driven; safe defaults for local dev.
+REDIS_HOST = os.environ.get("REDIS_HOST") or "localhost"
+REDIS_PORT = int(os.environ.get("REDIS_PORT") or 6379)
+REDIS_PASSWORD = os.environ.get("REDIS_PASSWORD") or ""
+REDIS_DB_NUMBER = int(os.environ.get("REDIS_DB_NUMBER") or 0)
+REDIS_SSL = os.environ.get("REDIS_SSL", "").lower() == "true"
+REDIS_POOL_MAX_CONNECTIONS = int(os.environ.get("REDIS_POOL_MAX_CONNECTIONS") or 50)
+REDIS_HEALTH_CHECK_INTERVAL = int(os.environ.get("REDIS_HEALTH_CHECK_INTERVAL") or 60)
+REDIS_SOCKET_TIMEOUT_SECONDS = int(os.environ.get("REDIS_SOCKET_TIMEOUT_SECONDS") or 3)
+
+# Read-through KV cache layered atop PostgresBackedDynamicConfigStore.
+# When false (default), the store behaves exactly as before; when true,
+# reads check Redis first and writes/deletes invalidate Redis. Fail-open:
+# Redis errors degrade to direct Postgres, never an outage.
+REDIS_KV_CACHE_ENABLED = (
+    os.environ.get("REDIS_KV_CACHE_ENABLED", "").lower() == "true"
+)
+# TTL (seconds) for KV entries cached in Redis (1 day default).
+REDIS_KV_CACHE_TTL_SECONDS = int(
+    os.environ.get("REDIS_KV_CACHE_TTL_SECONDS") or 86400
+)
+
+#####
 # Enterprise Edition Configs
 #####
 # NOTE: this should only be enabled if you have purchased an enterprise license.

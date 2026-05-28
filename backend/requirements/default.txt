@@ -61,6 +61,7 @@ retry==0.9.2  # This pulls in py which is in CVE-2022-42969, must remove py from
 rfc3986==1.5.0
 rt==3.1.2
 simple-salesforce==1.12.6
+redis==5.0.8
 slack-sdk==3.20.2
 SQLAlchemy[mypy]==2.0.15
 starlette==0.36.3

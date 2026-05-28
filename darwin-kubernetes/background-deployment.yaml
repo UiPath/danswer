@@ -41,6 +41,15 @@ spec:
             secretKeyRef:
               key: postgres_password
               name: danswer-secrets
+        # --- Redis (cache + rate limiting) ---
+        # Optional so the background pod still boots when Redis is unauth'd.
+        # See api_server-service-deployment.yaml for the rationale.
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: redis_password
+              name: danswer-secrets
+              optional: true
         envFrom:
         - configMapRef:
             name: env-configmap

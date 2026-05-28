@@ -9,3 +9,9 @@ api_keys.py
 vespa-app.zip
 dynamic_config_storage/
 celerybeat-schedule*
+
+# Pywikibot drops these in cwd when the mediawiki connector test runs.
+# Local debugging artifacts, not source.
+apicache/
+throttle.ctrl
+.pytest_cache/

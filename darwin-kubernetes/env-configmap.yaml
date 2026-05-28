@@ -94,3 +94,20 @@ data:
   WEB_DOMAIN: "https://darwin.westeurope.cloudapp.azure.com"  # for web server and api server
   DOMAIN: "darwin.westeurope.cloudapp.azure.com"  # for nginx
   APPLY_MIGRATIONS: "true"
+  # Redis (cache + rate limiting). Host matches the in-cluster Service name in
+  # redis-statefulset.yaml. Password (if any) comes via secretKeyRef in the
+  # api_server / background deployments — keep it out of the configmap.
+  REDIS_HOST: "redis"
+  REDIS_PORT: "6379"
+  REDIS_DB_NUMBER: "0"
+  REDIS_SSL: ""
+  # Read-through KV cache on the DynamicConfigStore. Default OFF — flip to
+  # "true" once Redis is up and reachable from api_server / background.
+  REDIS_KV_CACHE_ENABLED: ""
+  REDIS_KV_CACHE_TTL_SECONDS: "86400"
+  # Per-user request-rate limiter on /send-message. Default OFF; set windows
+  # to enable. Recommended starting point at "few hundred users" scale:
+  #   REQUEST_RATE_LIMIT_ENABLED=true, PER_MINUTE=20, PER_HOUR=300
+  REQUEST_RATE_LIMIT_ENABLED: ""
+  REQUEST_RATE_LIMIT_PER_MINUTE: ""
+  REQUEST_RATE_LIMIT_PER_HOUR: ""
