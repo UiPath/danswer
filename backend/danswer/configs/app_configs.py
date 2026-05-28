@@ -347,6 +347,18 @@ REQUEST_RATE_LIMIT_PER_HOUR = int(
     os.environ.get("REQUEST_RATE_LIMIT_PER_HOUR") or 0
 )
 
+# Per-user persona ("assistant") list cache. Caches the global persona list
+# + per-user group memberships in Redis; permission filter runs in Python
+# at request time. Explicit write-through invalidation lives in the
+# db/persona.py and ee/.../user_group.py mutation paths — the TTL below is
+# only a long-tail safety net for missed busts. Default OFF.
+PERSONA_CACHE_ENABLED = (
+    os.environ.get("PERSONA_CACHE_ENABLED", "").lower() == "true"
+)
+PERSONA_CACHE_TTL_SECONDS = int(
+    os.environ.get("PERSONA_CACHE_TTL_SECONDS") or 86400  # 24 h backstop
+)
+
 
 #####
 # Enterprise Edition Configs
