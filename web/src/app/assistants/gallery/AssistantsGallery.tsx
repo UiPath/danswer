@@ -44,7 +44,7 @@
  * All mutations are optimistic + undoable, mirroring the Manage page.
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Persona } from "@/app/admin/assistants/interfaces";
 import { User } from "@/lib/types";
 import { AssistantIcon } from "@/components/assistants/AssistantIcon";
@@ -93,6 +93,15 @@ const GRID_CLASSES: Record<number, string> = {
 };
 
 const DEFAULT_COLUMNS = 3;
+
+// Values exposed in the in-page column picker. The control lets users
+// override the prop-derived default at runtime; the persisted choice
+// lives in localStorage so it survives reloads.
+//
+// Below the smallest md breakpoint everything is 1-col regardless of
+// this value (see GRID_CLASSES), so we don't bother exposing 1.
+const COLUMN_PICKER_OPTIONS = [2, 3, 4];
+const COLUMNS_STORAGE_KEY = "danswer:assistants-gallery:columns";
 
 // How many doc-set name chips to render before collapsing the rest into
 // a "+N more" pill. Three keeps each card's scope visible without
@@ -329,23 +338,55 @@ function FilterChip({
 export function AssistantsGallery({
   assistants,
   user,
-  columns = DEFAULT_COLUMNS,
+  columns: initialColumns = DEFAULT_COLUMNS,
 }: {
   assistants: Persona[];
   user: User | null;
   /**
-   * Max columns at the widest breakpoint. Responsive scaling below that
-   * is fixed (see GRID_CLASSES). Supported values: 1–5. Anything outside
-   * falls back to the default — silently, not noisily, because a bad
-   * prop here shouldn't break the page.
+   * Initial max columns at the widest breakpoint. Acts as the default
+   * if the user has no stored preference yet; once the user picks via
+   * the in-page column control that choice (in localStorage) wins.
+   * Responsive scaling below the widest breakpoint is fixed
+   * (see GRID_CLASSES). Supported values: 1–5; out-of-range silently
+   * falls back to DEFAULT_COLUMNS so a bad prop can't break the page.
    */
   columns?: number;
 }) {
-  // Resolve the grid class once; fall back if an unsupported value was
-  // passed so the page still renders.
-  const gridClass =
-    GRID_CLASSES[columns] ?? GRID_CLASSES[DEFAULT_COLUMNS];
   const router = useRouter();
+
+  // User-chosen column count. `null` until the localStorage read in
+  // the effect below; SSR + first paint use the prop value so we
+  // don't get a hydration mismatch. After mount, the stored choice
+  // (if any) overrides the prop.
+  const [userColumns, setUserColumns] = useState<number | null>(null);
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(COLUMNS_STORAGE_KEY);
+      if (raw == null) return;
+      const n = Number.parseInt(raw, 10);
+      if (Number.isFinite(n) && n in GRID_CLASSES) {
+        setUserColumns(n);
+      }
+    } catch {
+      // localStorage can throw in some sandboxed contexts (Safari
+      // private mode in the past, certain iframe configs). Fall
+      // through to the prop default — the picker still works for
+      // the session, just doesn't persist.
+    }
+  }, []);
+
+  const effectiveColumns = userColumns ?? initialColumns;
+  const gridClass =
+    GRID_CLASSES[effectiveColumns] ?? GRID_CLASSES[DEFAULT_COLUMNS];
+
+  const changeColumns = (n: number) => {
+    setUserColumns(n);
+    try {
+      window.localStorage.setItem(COLUMNS_STORAGE_KEY, String(n));
+    } catch {
+      // See above — silently OK to skip persistence.
+    }
+  };
   const { popup, setPopup } = usePopup();
 
   // Mirrors the Manage page: no preference = every accessible assistant
@@ -656,9 +697,45 @@ export function AssistantsGallery({
             Already added
           </FilterChip>
 
-          {/* Sort lives at the right end of the filter row so visually
-              "narrow the list" and "order the list" are co-located. */}
-          <div className="ml-auto flex items-center gap-2 text-xs text-subtle">
+          {/* View controls — columns + sort — live at the right end of
+              the filter row so "narrow the list" (left) and "shape
+              the view" (right) are visually separated. */}
+          <div className="ml-auto flex items-center gap-3 text-xs text-subtle">
+            {/* Column picker. Hidden below md since the layout falls
+                back to a single column there regardless. The choice is
+                persisted in localStorage on click. */}
+            <div className="hidden md:flex items-center gap-1">
+              <span className="mr-1">Columns</span>
+              <div
+                role="group"
+                aria-label="Column count"
+                className="inline-flex rounded-md border border-border overflow-hidden"
+              >
+                {COLUMN_PICKER_OPTIONS.map((n) => {
+                  const active = effectiveColumns === n;
+                  return (
+                    <button
+                      key={n}
+                      type="button"
+                      aria-pressed={active}
+                      onClick={() => changeColumns(n)}
+                      title={`${n} columns`}
+                      className={`
+                        px-2 py-1 text-xs font-medium
+                        focus:outline-none focus:ring-2 focus:ring-accent focus:relative focus:z-10
+                        ${
+                          active
+                            ? "bg-accent text-inverted"
+                            : "bg-background hover:bg-hover text-default"
+                        }
+                      `}
+                    >
+                      {n}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
             <label htmlFor="sort">Sort</label>
             <select
               id="sort"
