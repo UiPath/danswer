@@ -122,33 +122,60 @@ as the `redis` ClusterIP Service on 6379. Pod restart drops the cache
 — that's intentional; the source of truth is Postgres, and counters
 self-heal as windows expire.
 
-### 5b. Dask scaling topology (optional, future)
+### 5b. Dask scaling topology (opt-in, Darwin manifests ready)
 
-The bg-scaling commit adds these in `deployment/kubernetes/` (the
-upstream-style path, **not** the darwin-specific path):
+The bg-scaling commit added 5 upstream-style manifests under
+`deployment/kubernetes/` (legacy / reference tree; **not** what
+Darwin applies from — see AGENTS.md "Critical fact §9"). A later
+commit on this branch ported each one to Darwin conventions under
+`darwin-kubernetes/`, with the right image registry, configmap /
+secrets wiring, REDIS_PASSWORD (optional), indexcpu node affinity,
+darwin/indexing toleration, and PVCs:
 
-- `background-beat-deployment.yaml`
-- `background-celery-deployment.yaml`
-- `background-indexer-scheduler-deployment.yaml`
-- `dask-scheduler-service-deployment.yaml`
-- `dask-worker-deployment.yaml`
-- `docker-compose.dask-distributed.yml` (compose variant)
+- `darwin-kubernetes/background-beat-deployment.yaml`
+- `darwin-kubernetes/background-celery-deployment.yaml`
+- `darwin-kubernetes/background-indexer-scheduler-deployment.yaml`
+- `darwin-kubernetes/dask-scheduler-service-deployment.yaml`
+- `darwin-kubernetes/dask-worker-deployment.yaml`
+
+Plus `deployment/docker_compose/docker-compose.dask-distributed.yml`
+(compose variant, for local reproduction of the remote-scheduler
+topology — not part of the prod deploy).
 
 Darwin currently runs `darwin-kubernetes/background-deployment.yaml`
-(a single combined background pod). **The new manifests are NOT
-applied automatically** and don't conflict with the existing
-`background-deployment.yaml`.
+(a single combined beat+celery+indexer pod via supervisord). **The new
+manifests are NOT applied automatically** by `kubectl apply -f
+darwin-kubernetes/` because the combined deployment is still in place
+— you apply each new file explicitly when you want to switch.
 
-If/when you want to switch Darwin to the new topology:
+To switch Darwin to the split topology:
 
-1. Mirror the Redis env wiring from `darwin-kubernetes/background-deployment.yaml`
-   into each of the new manifests (none of them currently have
-   `REDIS_PASSWORD` wired — see §10).
-2. Apply the new manifests, scale the old background-deployment to 0.
-3. Verify each pod boots and the worker logs show clean startup.
+```bash
+# 1. Apply the new five (order doesn't matter; they self-discover
+#    the scheduler Service once it's up).
+kubectl apply -f darwin-kubernetes/dask-scheduler-service-deployment.yaml
+kubectl apply -f darwin-kubernetes/dask-worker-deployment.yaml
+kubectl apply -f darwin-kubernetes/background-beat-deployment.yaml
+kubectl apply -f darwin-kubernetes/background-celery-deployment.yaml
+kubectl apply -f darwin-kubernetes/background-indexer-scheduler-deployment.yaml
 
-Out of scope for this PR; the relevant files are present so the
-migration is a one-step "apply" later.
+# 2. Wait for all five to be Ready.
+kubectl get pods -l 'app in (background-beat,background-celery,background-indexer-scheduler,dask-scheduler,dask-worker)'
+
+# 3. Once healthy + you've seen an indexing attempt dispatch through
+#    the new dask-scheduler-service (check the indexer-scheduler
+#    pod logs), scale the old combined deployment to 0:
+kubectl scale deploy/background-deployment --replicas=0
+
+# 4. If anything goes wrong, scale back up:
+kubectl scale deploy/background-deployment --replicas=1
+#    The split pods will keep running but no harm — only one set is
+#    actually doing the work (whichever has --replicas > 0).
+```
+
+Both deployments can coexist briefly during cutover, but **do NOT
+run both at non-zero replicas long-term** — two beat schedulers on
+the same Postgres broker fire every crontab task twice.
 
 ---
 
@@ -274,25 +301,21 @@ All features default OFF means even without revert, setting all
 
 ## 10. Known footguns
 
-### 10a. Bg-scaling k8s manifests don't have `REDIS_PASSWORD` wired
+### 10a. ~~Bg-scaling k8s manifests don't have `REDIS_PASSWORD` wired~~ — RESOLVED
 
-The new `deployment/kubernetes/{background-celery,background-beat,
-background-indexer-scheduler,dask-scheduler-service,dask-worker}-deployment.yaml`
-files don't include the `REDIS_PASSWORD` env var pattern that the
-existing `darwin-kubernetes/background-deployment.yaml` has.
+**Closed for the Darwin path.** The 5 ported manifests under
+`darwin-kubernetes/` (added in `19335e31`) all wire `REDIS_PASSWORD`
+via `secretKeyRef` with `optional: true`, matching the existing
+`darwin-kubernetes/background-deployment.yaml` pattern. So persona-
+cache invalidation from any future Celery / indexer-scheduler /
+dask-worker task path will work correctly once you switch to the
+split topology.
 
-- **Today's impact: none.** Darwin runs the darwin-kubernetes/ tree,
-  not the upstream-style deployment/kubernetes/ tree, and none of the
-  bg-scaling processes currently invoke persona-mutating code paths
-  that would need Redis access.
-- **Becomes a real concern if** Darwin adopts the new topology AND
-  `PERSONA_CACHE_ENABLED=true` AND a future Celery task ever mutates a
-  Persona / Persona__User / Persona__UserGroup row. In that scenario
-  the mutation succeeds, the cache bust logs a warning, and `/persona`
-  serves stale data for up to 24h (TTL backstop).
-- **Fix when relevant**: mirror the `REDIS_PASSWORD` `secretKeyRef`
-  block from `darwin-kubernetes/background-deployment.yaml` into each
-  of the new manifests.
+The upstream `deployment/kubernetes/*` files are still missing
+`REDIS_PASSWORD` env wiring, but **Darwin doesn't apply from that
+tree** — it's reference-only (see AGENTS.md "Critical fact §9").
+Leave them alone unless/until you adopt the upstream-style
+deployment shape outside Darwin.
 
 ### 10b. `backend/scripts/seed_assistants.py` bypasses persona-cache invalidation
 
@@ -353,10 +376,13 @@ These need eyes — automated coverage doesn't catch them:
 
 ## 12. Branch contents at-a-glance
 
-14 commits on top of `rajiv/add-claude` (PR #45):
+16 commits on top of `rajiv/add-claude` (PR #45):
 
 ```
+[BG-scale] darwin-kubernetes: port split-background manifests + lock convention in AGENTS.md
 [BG-scale] Scale indexing via remote Dask scheduler topology
+
+[Docs]     docs: add MIGRATION.md covering Redis / bg-scaling / UX
 
 [UX]       Gallery: column picker as dropdown to match Sort
 [UX]       Gallery: user-controllable column count (segmented control, persists)
@@ -374,4 +400,4 @@ These need eyes — automated coverage doesn't catch them:
 [Redis]    docs: add Redis caching & scaling plan
 ```
 
-Total: **45 files changed, +5857 / −499**. 63 unit tests pass.
+Total: **51 files changed, +6372 / −499**. 63 unit tests pass.
