@@ -1,0 +1,73 @@
+# Celery beat — periodic-task scheduler. (Darwin variant.)
+#
+# MUST be a singleton: two beats on the same broker fire every
+# crontab entry twice. `Recreate` strategy guarantees no overlap
+# during rollout (the old pod is terminated before the new one
+# starts), at the cost of a brief beat outage during deploy. That's
+# acceptable because beat-fired tasks are all "check / catch-up"
+# style — missing one cycle is harmless, the next one cleans up.
+#
+# Beat is light (~100MB RSS); doesn't need the indexcpu node pool
+# the indexing-side pods sit on. Stays on the default pool.
+#
+# This deployment is part of the split-background topology
+# (beat / celery / indexer-scheduler / dask-scheduler / dask-worker).
+# Apply alongside the other four to retire `background-deployment.yaml`.
+# Keep the old combined deployment in place during cutover so you can
+# scale it to 0 once the new pods are healthy.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: background-beat-deployment
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: background-beat
+  template:
+    metadata:
+      labels:
+        app: background-beat
+    spec:
+      containers:
+      - name: beat
+        image: sfbrdevhelmweacr.azurecr.io/danswer/danswer-backend:vha-5
+        imagePullPolicy: IfNotPresent
+        command:
+          - celery
+          - -A
+          - danswer.background.celery.celery_run:celery_app
+          - beat
+          - --loglevel=INFO
+        env:
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              key: postgres_user
+              name: danswer-secrets
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: postgres_password
+              name: danswer-secrets
+        # Beat itself doesn't mutate personas, but stays wired for
+        # parity with the other split-background pods. Optional secret
+        # so an unauth'd in-cluster Redis still works.
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: redis_password
+              name: danswer-secrets
+              optional: true
+        envFrom:
+        - configMapRef:
+            name: env-configmap
+        resources:
+          requests:
+            cpu: "50m"
+            memory: "128Mi"
+          limits:
+            cpu: "200m"
+            memory: "256Mi"

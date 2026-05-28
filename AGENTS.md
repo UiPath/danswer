@@ -75,6 +75,7 @@ moved on substantially. This table is the explicit map.
 | Test buckets | `backend/tests/{unit,external_dependency_unit,integration}` + Playwright e2e | No comparable structure here. Most code lacks tests; add tests with the change if practical, otherwise note in PR. |
 | Plan template | The "Creating a Plan" section in their `CLAUDE.md` (Issues / Notes / Strategy / Tests) | Useful template; can be borrowed for non-trivial changes here too. |
 | Frontend stack | Next.js 15+, React 18+ | Next.js 14.2.x (App Router), React 18 |
+| K8s manifest path | `deployment/kubernetes/*` is what upstream documents | **`darwin-kubernetes/*` is the source of truth for the Darwin prod cluster.** `deployment/kubernetes/*` is upstream legacy / scratch — Darwin doesn't apply from there. New manifests for Darwin go in `darwin-kubernetes/`. See critical fact §9. |
 
 **Rule of thumb when reading upstream code or upstream guidance:** assume
 it doesn't apply unless you can verify the same construct exists here.
@@ -339,6 +340,35 @@ JSON files via SharePoint, the right fix is bypassing office365's
 auto-parse entirely with a raw `requests.get` against the
 `/drives/{drive_id}/items/{item_id}/content` endpoint using the bearer
 token. Don't reintroduce the lossy re-serialization.
+
+### 9. `darwin-kubernetes/` is the source of truth for the Darwin cluster
+
+The repo has two parallel k8s manifest trees and they are **not** kept
+in sync:
+
+| Path | What it is | When to touch |
+|---|---|---|
+| `darwin-kubernetes/*.yaml` | **The actual manifests applied to Darwin's AKS cluster (the `darwin` kube context).** Image registry is `sfbrdevhelmweacr.azurecr.io/...`, configmap is `env-configmap`, secrets is `danswer-secrets`, indexing pods have `indexcpu`-pool affinity + `darwin/indexing` toleration, env vars come from the Darwin configmap. | **Edit here for any prod-affecting change**, including new deployments. |
+| `deployment/kubernetes/*.yaml` | Upstream-style manifests inherited from Onyx / authored to match the OSS docker-compose. Generic image (`danswer/danswer-backend:latest`), no Azure-specific affinity / tolerations, no Darwin-specific configmap wiring. | Reference only — not deployed to Darwin. Useful for seeing the "upstream shape" of a new component before adapting it to `darwin-kubernetes/`. |
+
+When upstream (or a branch like `feature/backgroundscaling`) adds a
+new manifest in `deployment/kubernetes/`, the corresponding
+`darwin-kubernetes/` version must be hand-ported with:
+
+- Image: `sfbrdevhelmweacr.azurecr.io/danswer/danswer-backend:<tag>`
+- `envFrom: configMapRef name: env-configmap`
+- POSTGRES_USER / POSTGRES_PASSWORD via `secretKeyRef name: danswer-secrets`
+- REDIS_PASSWORD via `secretKeyRef name: danswer-secrets, optional: true`
+  (so unauth'd in-cluster Redis still works)
+- For indexing-related pods: `nodeAffinity` on `agentpool=indexcpu` +
+  `tolerations` for `darwin/indexing/NoSchedule` + `dynamic-pvc` /
+  `file-connector-pvc` volume mounts.
+
+A drop-in port that misses any of these will boot in Darwin but
+mis-route, miss secrets, or end up on the wrong node pool. The
+existing `darwin-kubernetes/background-deployment.yaml` and
+`api_server-service-deployment.yaml` are the canonical templates for
+the conventions.
 
 ---
 
