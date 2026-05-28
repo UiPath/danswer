@@ -47,7 +47,6 @@ import {
   FiSearch,
   FiShare2,
   FiStar,
-  FiTool,
   FiTrash2,
 } from "react-icons/fi";
 import { MdDragIndicator } from "react-icons/md";
@@ -175,9 +174,8 @@ function RowContent({
   const canEdit = isOwnedByUser;
   const canShare = isOwnedByUser && !assistant.is_public;
 
-  // Tool / doc-set counts — surfaced as small chips. Description should
-  // be the primary affordance; chips give the at-a-glance "scope" signal.
-  const toolCount = assistant.tools?.length ?? 0;
+  // Doc-set count — surfaced as a small chip. Tools count was removed
+  // intentionally; see the JSX block below for the why.
   const docSetCount = assistant.document_sets?.length ?? 0;
 
   // Click-on-hidden-row affordance: a click anywhere on the row body
@@ -288,29 +286,18 @@ function RowContent({
           <AssistantSharedStatusDisplay assistant={assistant} user={user} />
         </div>
 
-        {/* Scope chips — tool/source counts. Compact summary always;
-            full tool list reveals on hover so the row stays scannable. */}
-        {(toolCount > 0 || docSetCount > 0) && (
+        {/* Sources chip — knowledge-scope summary. Tools chip was
+            intentionally removed: tool execution isn't reliable yet
+            and surfacing tool counts misleads users into picking an
+            assistant for a capability that may not work in practice. */}
+        {docSetCount > 0 && (
           <div className="flex flex-wrap gap-2 mt-2 text-xs text-subtle">
-            {docSetCount > 0 && (
-              <Bubble isSelected={false}>
-                <div className="flex items-center gap-1">
-                  <FiBookmark size={12} />
-                  {docSetCount} source{docSetCount === 1 ? "" : "s"}
-                </div>
-              </Bubble>
-            )}
-            {toolCount > 0 && (
-              <Bubble isSelected={false}>
-                <div
-                  className="flex items-center gap-1"
-                  title={assistant.tools.map((t) => t.name).join(", ")}
-                >
-                  <FiTool size={12} />
-                  {toolCount} tool{toolCount === 1 ? "" : "s"}
-                </div>
-              </Bubble>
-            )}
+            <Bubble isSelected={false}>
+              <div className="flex items-center gap-1">
+                <FiBookmark size={12} />
+                {docSetCount} source{docSetCount === 1 ? "" : "s"}
+              </div>
+            </Bubble>
           </div>
         )}
         </div>
