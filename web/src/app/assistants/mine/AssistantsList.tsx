@@ -34,7 +34,7 @@
  * callers but no longer used here.
  */
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { MinimalUserSnapshot, User } from "@/lib/types";
 import { Persona } from "@/app/admin/assistants/interfaces";
 import { Text } from "@tremor/react";
@@ -94,10 +94,15 @@ function Toggle({
   checked,
   onChange,
   ariaLabel,
+  highlight = false,
 }: {
   checked: boolean;
   onChange: (next: boolean) => void;
   ariaLabel: string;
+  // When true, draw a transient ring around the switch to direct the
+  // eye. Used by hidden rows so clicking the (faded) row body points
+  // the user at the action that brings the assistant back.
+  highlight?: boolean;
 }) {
   return (
     <button
@@ -111,9 +116,14 @@ function Toggle({
       }}
       className={`
         relative inline-flex h-5 w-9 items-center rounded-full
-        transition-colors flex-shrink-0
+        transition-all flex-shrink-0
         focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-1
         ${checked ? "bg-accent" : "bg-border"}
+        ${
+          highlight
+            ? "ring-2 ring-accent ring-offset-2 ring-offset-background-emphasis scale-110"
+            : ""
+        }
       `}
     >
       <span
@@ -170,15 +180,36 @@ function RowContent({
   const toolCount = assistant.tools?.length ?? 0;
   const docSetCount = assistant.document_sets?.length ?? 0;
 
+  // Click-on-hidden-row affordance: a click anywhere on the row body
+  // (not on an interactive control) draws a transient ring around the
+  // visibility toggle to point at the action. Doesn't auto-enable —
+  // surprising a user reading the description into enabling it would
+  // be worse than the discoverability gap we're fixing.
+  const [highlightToggle, setHighlightToggle] = useState(false);
+  const highlightTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  );
+  const flashToggle = () => {
+    if (highlightTimeoutRef.current) {
+      clearTimeout(highlightTimeoutRef.current);
+    }
+    setHighlightToggle(true);
+    highlightTimeoutRef.current = setTimeout(
+      () => setHighlightToggle(false),
+      1200
+    );
+  };
+
   return (
     <div
+      onClick={isVisible ? undefined : flashToggle}
       className={`
         group bg-background-emphasis rounded-lg p-4 mb-3
         flex items-center gap-3
         border transition
         ${isDefault ? "border-accent shadow-md" : "border-transparent shadow-sm"}
-        ${isVisible ? "" : "opacity-50"}
         ${isSelected ? "ring-2 ring-accent" : ""}
+        ${!isVisible ? "cursor-pointer" : ""}
       `}
     >
       {/* Bulk-select checkbox. Hidden until hover or when something is
@@ -219,11 +250,19 @@ function RowContent({
         <div className="w-[22px] flex-shrink-0" />
       )}
 
-      <AssistantIcon assistant={assistant} />
+      {/* CONTENT ZONE — fades on hidden rows. Action controls below
+          stay at full opacity so they remain the bright, clickable
+          targets on a dimmed row. */}
+      <div
+        className={`flex flex-1 items-center gap-3 min-w-0 ${
+          isVisible ? "" : "opacity-50"
+        }`}
+      >
+        <AssistantIcon assistant={assistant} />
 
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 mb-1">
-          <h2 className="text-base font-semibold truncate">{assistant.name}</h2>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-1">
+            <h2 className="text-base font-semibold truncate">{assistant.name}</h2>
           {isDefault && (
             <span
               className="
@@ -274,12 +313,22 @@ function RowContent({
             )}
           </div>
         )}
+        </div>
       </div>
+      {/* End CONTENT ZONE. Actions below sit OUTSIDE the opacity
+          wrapper so they remain at full opacity on hidden rows — the
+          toggle must be the bright, clickable focus when the rest of
+          the row is dimmed. */}
 
       {/* Right-side actions. Order matters for scannability: default
           pin first (most-used), visibility toggle, then ownership
-          actions (edit/share). */}
-      <div className="flex items-center gap-2 flex-shrink-0">
+          actions (edit/share). stopPropagation prevents the row-body
+          flash-toggle handler from firing when the user clicks an
+          action directly. */}
+      <div
+        className="flex items-center gap-2 flex-shrink-0"
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* Pin / default. Only meaningful for visible rows — pinning a
             hidden one would have to unhide it too; we surface that via
             the visibility toggle instead. */}
@@ -311,10 +360,14 @@ function RowContent({
           </button>
         )}
 
-        {/* Visibility — switch instead of a buried popover item. */}
+        {/* Visibility — switch instead of a buried popover item.
+            `highlight` is set by the row-body click handler on hidden
+            rows so a click anywhere on the (faded) row body draws the
+            eye to the action that brings the assistant back. */}
         <Toggle
           checked={isVisible}
           onChange={(next) => onToggleVisibility(assistant.id, next)}
+          highlight={highlightToggle}
           ariaLabel={
             isVisible
               ? `Hide ${assistant.name} from the picker`

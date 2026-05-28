@@ -59,15 +59,7 @@ import { checkUserOwnsAssistant } from "@/lib/assistants/checkOwnership";
 import { AssistantsPageTitle } from "../AssistantsPageTitle";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import {
-  FiBookmark,
-  FiCheck,
-  FiImage,
-  FiPlus,
-  FiSearch,
-  FiTool,
-  FiX,
-} from "react-icons/fi";
+import { FiBookmark, FiPlus, FiSearch, FiX } from "react-icons/fi";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -85,22 +77,6 @@ interface SectionDef {
 // ---------------------------------------------------------------------------
 // Small helpers
 // ---------------------------------------------------------------------------
-
-/** Friendly tool name. "SearchTool" → "Search", "ImageGenerationTool" →
- * "Image Generation", else fall back to the raw name. Mirrors the
- * mapping in ToolsDisplay; kept inline here so this page is self-
- * contained. */
-function toolDisplayName(rawName: string): string {
-  if (rawName === "SearchTool") return "Search";
-  if (rawName === "ImageGenerationTool") return "Image Generation";
-  return rawName;
-}
-
-function toolIcon(rawName: string) {
-  if (rawName === "SearchTool") return <FiSearch size={12} />;
-  if (rawName === "ImageGenerationTool") return <FiImage size={12} />;
-  return <FiTool size={12} />;
-}
 
 /** Best-effort author display name. Names aren't on MinimalUserSnapshot;
  * we have email only. Split on '@' so "foo.bar@example.com" → "foo.bar"
@@ -134,7 +110,11 @@ function GalleryCard({
   onAdd,
   onRemove,
 }: CardProps) {
-  const toolCount = assistant.tools?.length ?? 0;
+  // Note: tool-related UI was intentionally removed from this page —
+  // the gallery is for browsing assistants, and tool filter chips +
+  // per-card "{n} tools" pulled focus away from the assistant itself.
+  // The {n} sources chip stays — sources are about the assistant's
+  // knowledge scope, not a "tool" in the user's mental model.
   const docSetCount = assistant.document_sets?.length ?? 0;
   const author = ownerDisplayName(assistant);
   const isBuiltIn = assistant.default_persona;
@@ -142,7 +122,7 @@ function GalleryCard({
   return (
     <div
       className={`
-        relative bg-background-emphasis rounded-lg p-4
+        bg-background-emphasis rounded-lg p-5
         border transition
         flex flex-col
         ${
@@ -152,24 +132,12 @@ function GalleryCard({
         }
       `}
     >
-      {/* Status badge (top-right). Only appears when already added — the
-          absence of a badge is the signal for "available to add". */}
-      {isAdded && (
-        <div
-          className="
-            absolute top-3 right-3
-            text-xs px-2 py-0.5 rounded-full
-            bg-accent/15 text-accent font-medium
-            flex items-center gap-1
-          "
-          title="This assistant is in your picker."
-        >
-          <FiCheck size={11} /> In your picker
-        </div>
-      )}
-
-      {/* Header: icon + name (+ built-in badge if applicable) */}
-      <div className="flex items-start gap-2 mb-2 pr-24">
+      {/* Header: icon + name (+ built-in badge if applicable). The
+          prior absolute top-right "In your picker" badge was dropped —
+          the muted card style + the Remove button in the footer
+          already signal "added"; the badge ate horizontal space and
+          crowded the title at narrower widths. */}
+      <div className="flex items-start gap-3 mb-2">
         <AssistantIcon assistant={assistant} />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
@@ -194,35 +162,23 @@ function GalleryCard({
 
       {/* Description — primary signal of "should I pick this?". */}
       {assistant.description && (
-        <p className="text-sm text-default leading-snug mb-3 line-clamp-3">
+        <p className="text-sm text-default leading-relaxed mb-3 line-clamp-3">
           {assistant.description}
         </p>
       )}
 
-      {/* Compact scope chips: {n} tools (hover reveals names) + {n} sources */}
-      {(toolCount > 0 || docSetCount > 0) && (
+      {/* Sources chip — knowledge-scope summary. Tools were
+          intentionally removed from this page (this is for browsing
+          assistants, not exploring tools); sources stay because
+          they're about the assistant's knowledge, not a "tool". */}
+      {docSetCount > 0 && (
         <div className="flex flex-wrap gap-1.5 mb-3 text-xs">
-          {docSetCount > 0 && (
-            <Bubble isSelected={false} notSelectable>
-              <div className="flex items-center gap-1">
-                <FiBookmark size={12} />
-                {docSetCount} source{docSetCount === 1 ? "" : "s"}
-              </div>
-            </Bubble>
-          )}
-          {toolCount > 0 && (
-            <Bubble isSelected={false} notSelectable>
-              <div
-                className="flex items-center gap-1"
-                title={assistant.tools
-                  .map((t) => toolDisplayName(t.name))
-                  .join(", ")}
-              >
-                <FiTool size={12} />
-                {toolCount} tool{toolCount === 1 ? "" : "s"}
-              </div>
-            </Bubble>
-          )}
+          <Bubble isSelected={false} notSelectable>
+            <div className="flex items-center gap-1">
+              <FiBookmark size={12} />
+              {docSetCount} source{docSetCount === 1 ? "" : "s"}
+            </div>
+          </Bubble>
         </div>
       )}
 
@@ -354,41 +310,20 @@ export function AssistantsGallery({
 
   const [search, setSearch] = useState("");
   const [availability, setAvailability] = useState<Availability>("all");
-  const [toolFilters, setToolFilters] = useState<Set<string>>(new Set());
   const [sortMode, setSortMode] = useState<SortMode>("featured");
 
-  // ---- derived: which tool chips to surface --------------------------------
-  // Only show chips for tools that appear in ≥2 assistants. Keeps the chip
-  // row short as the dataset grows and avoids one-off tools cluttering it.
-  const commonTools: string[] = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const a of assistants) {
-      const seen = new Set<string>();
-      for (const t of a.tools ?? []) {
-        // dedupe within one assistant (in case the same tool appears twice)
-        if (seen.has(t.name)) continue;
-        seen.add(t.name);
-        counts.set(t.name, (counts.get(t.name) ?? 0) + 1);
-      }
-    }
-    return Array.from(counts.entries())
-      .filter(([, c]) => c >= 2)
-      .sort((a, b) => b[1] - a[1])
-      .map(([name]) => name);
-  }, [assistants]);
-
   // ---- derived: filtered + sorted list -------------------------------------
+  // Tool-related filtering was removed from this page — the gallery is
+  // about assistants, not their internals. Search now only matches
+  // name + description + document-set names.
 
   const filtered: Persona[] = useMemo(() => {
     const q = search.trim().toLowerCase();
     const out = assistants.filter((a) => {
-      // search across name + description + tool names + doc-set names
       if (q) {
         const hay = [
           a.name,
           a.description ?? "",
-          ...(a.tools ?? []).map((t) => toolDisplayName(t.name)),
-          ...(a.tools ?? []).map((t) => t.name),
           ...(a.document_sets ?? []).map((d) => d.name),
         ]
           .join(" ")
@@ -397,14 +332,6 @@ export function AssistantsGallery({
       }
       if (availability === "added" && !chosenSet.has(a.id)) return false;
       if (availability === "available" && chosenSet.has(a.id)) return false;
-      if (toolFilters.size > 0) {
-        // OR semantics — "show me ones with Search OR Image Gen". Narrower
-        // intersection ("AND") via multiple tool chips is rarely what users
-        // mean when ticking pills.
-        const names = new Set((a.tools ?? []).map((t) => t.name));
-        const any = Array.from(toolFilters).some((tf) => names.has(tf));
-        if (!any) return false;
-      }
       return true;
     });
 
@@ -417,7 +344,7 @@ export function AssistantsGallery({
     }
     // "featured" = preserve API order (admins curate via display_priority).
     return out;
-  }, [assistants, search, availability, toolFilters, sortMode, chosenSet]);
+  }, [assistants, search, availability, sortMode, chosenSet]);
 
   // ---- derived: sections ---------------------------------------------------
 
@@ -471,24 +398,18 @@ export function AssistantsGallery({
         const hay = [
           a.name,
           a.description ?? "",
-          ...(a.tools ?? []).map((t) => toolDisplayName(t.name)),
-          ...(a.tools ?? []).map((t) => t.name),
           ...(a.document_sets ?? []).map((d) => d.name),
         ]
           .join(" ")
           .toLowerCase();
         if (!hay.includes(q)) continue;
       }
-      if (toolFilters.size > 0) {
-        const names = new Set((a.tools ?? []).map((t) => t.name));
-        if (!Array.from(toolFilters).some((tf) => names.has(tf))) continue;
-      }
       all++;
       if (chosenSet.has(a.id)) added++;
       else available++;
     }
     return { all, added, available };
-  }, [assistants, search, toolFilters, chosenSet]);
+  }, [assistants, search, chosenSet]);
 
   // ---- optimistic add/remove (mirrors Manage page persistOrder) -----------
 
@@ -597,20 +518,9 @@ export function AssistantsGallery({
   const clearAllFilters = () => {
     setSearch("");
     setAvailability("all");
-    setToolFilters(new Set());
   };
 
-  const toggleToolFilter = (toolName: string) => {
-    setToolFilters((curr) => {
-      const next = new Set(curr);
-      if (next.has(toolName)) next.delete(toolName);
-      else next.add(toolName);
-      return next;
-    });
-  };
-
-  const hasAnyFilter =
-    search.trim() !== "" || availability !== "all" || toolFilters.size > 0;
+  const hasAnyFilter = search.trim() !== "" || availability !== "all";
 
   // ---- render -------------------------------------------------------------
 
@@ -714,32 +624,6 @@ export function AssistantsGallery({
           </div>
         </div>
 
-        {commonTools.length > 0 && (
-          <div className="flex flex-wrap gap-2 mb-4">
-            <span className="text-xs text-subtle self-center mr-1">Tools:</span>
-            {commonTools.map((tn) => (
-              <FilterChip
-                key={tn}
-                active={toolFilters.has(tn)}
-                onClick={() => toggleToolFilter(tn)}
-              >
-                <span className="flex items-center gap-1">
-                  {toolIcon(tn)} {toolDisplayName(tn)}
-                </span>
-              </FilterChip>
-            ))}
-            {toolFilters.size > 0 && (
-              <button
-                type="button"
-                onClick={() => setToolFilters(new Set())}
-                className="text-xs text-subtle hover:text-default underline self-center"
-              >
-                Clear tools
-              </button>
-            )}
-          </div>
-        )}
-
         {/* Empty state when filters exclude everything */}
         {sections.length === 0 && (
           <div className="text-center py-12 text-subtle">
@@ -781,8 +665,7 @@ export function AssistantsGallery({
                 grid gap-3
                 grid-cols-1
                 md:grid-cols-2
-                lg:grid-cols-3
-                xl:grid-cols-4
+                2xl:grid-cols-3
               "
             >
               {section.assistants.map((assistant) => (
