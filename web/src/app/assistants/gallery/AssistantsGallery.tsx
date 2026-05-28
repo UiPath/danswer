@@ -75,6 +75,26 @@ interface SectionDef {
 }
 
 // ---------------------------------------------------------------------------
+// Column-count parameterisation
+// ---------------------------------------------------------------------------
+//
+// Each row in this table is a complete, static Tailwind class string so the
+// purge step actually emits the classes. You CAN'T compute these at runtime
+// (`md:grid-cols-${n}` won't survive purge). Add a row here to support a new
+// column count. Each row scales 1-col on mobile up to N at the widest
+// breakpoint, with one breakpoint per added column so cards stay roomy on
+// medium screens.
+const GRID_CLASSES: Record<number, string> = {
+  1: "grid-cols-1",
+  2: "grid-cols-1 sm:grid-cols-2",
+  3: "grid-cols-1 md:grid-cols-2 2xl:grid-cols-3",
+  4: "grid-cols-1 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4",
+  5: "grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5",
+};
+
+const DEFAULT_COLUMNS = 3;
+
+// ---------------------------------------------------------------------------
 // Small helpers
 // ---------------------------------------------------------------------------
 
@@ -288,10 +308,22 @@ function FilterChip({
 export function AssistantsGallery({
   assistants,
   user,
+  columns = DEFAULT_COLUMNS,
 }: {
   assistants: Persona[];
   user: User | null;
+  /**
+   * Max columns at the widest breakpoint. Responsive scaling below that
+   * is fixed (see GRID_CLASSES). Supported values: 1–5. Anything outside
+   * falls back to the default — silently, not noisily, because a bad
+   * prop here shouldn't break the page.
+   */
+  columns?: number;
 }) {
+  // Resolve the grid class once; fall back if an unsupported value was
+  // passed so the page still renders.
+  const gridClass =
+    GRID_CLASSES[columns] ?? GRID_CLASSES[DEFAULT_COLUMNS];
   const router = useRouter();
   const { popup, setPopup } = usePopup();
 
@@ -660,14 +692,7 @@ export function AssistantsGallery({
                 ({section.assistants.length})
               </span>
             </div>
-            <div
-              className="
-                grid gap-3
-                grid-cols-1
-                md:grid-cols-2
-                2xl:grid-cols-3
-              "
-            >
+            <div className={`grid gap-3 ${gridClass}`}>
               {section.assistants.map((assistant) => (
                 <GalleryCard
                   key={assistant.id}
