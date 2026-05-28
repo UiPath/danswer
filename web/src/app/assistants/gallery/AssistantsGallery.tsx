@@ -702,39 +702,27 @@ export function AssistantsGallery({
               the view" (right) are visually separated. */}
           <div className="ml-auto flex items-center gap-3 text-xs text-subtle">
             {/* Column picker. Hidden below md since the layout falls
-                back to a single column there regardless. The choice is
-                persisted in localStorage on click. */}
-            <div className="hidden md:flex items-center gap-1">
-              <span className="mr-1">Columns</span>
-              <div
-                role="group"
-                aria-label="Column count"
-                className="inline-flex rounded-md border border-border overflow-hidden"
+                back to a single column there regardless. Pure
+                client-side state + localStorage — no fetch, no
+                router.refresh(), no DB hit. */}
+            <div className="hidden md:flex items-center gap-2">
+              <label htmlFor="columns">Columns</label>
+              <select
+                id="columns"
+                value={effectiveColumns}
+                onChange={(e) => changeColumns(Number(e.target.value))}
+                className="
+                  text-xs px-2 py-1.5 rounded
+                  border border-border bg-background
+                  focus:outline-none focus:ring-2 focus:ring-accent
+                "
               >
-                {COLUMN_PICKER_OPTIONS.map((n) => {
-                  const active = effectiveColumns === n;
-                  return (
-                    <button
-                      key={n}
-                      type="button"
-                      aria-pressed={active}
-                      onClick={() => changeColumns(n)}
-                      title={`${n} columns`}
-                      className={`
-                        px-2 py-1 text-xs font-medium
-                        focus:outline-none focus:ring-2 focus:ring-accent focus:relative focus:z-10
-                        ${
-                          active
-                            ? "bg-accent text-inverted"
-                            : "bg-background hover:bg-hover text-default"
-                        }
-                      `}
-                    >
-                      {n}
-                    </button>
-                  );
-                })}
-              </div>
+                {COLUMN_PICKER_OPTIONS.map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </select>
             </div>
             <label htmlFor="sort">Sort</label>
             <select
