@@ -1104,6 +1104,9 @@ class ChannelConfig(TypedDict):
     jira_config: NotRequired[dict[str, Any]]  # Contains all JIRA related settings
     # Curated response config if user asks for more help
     curated_response_config: NotRequired[dict[str, Any]]
+    # LLM configuration for this channel
+    llm_vendor: NotRequired[str]
+    llm_model_name: NotRequired[str]
 
 
 class SlackBotResponseType(str, PyEnum):

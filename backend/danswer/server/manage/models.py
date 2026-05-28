@@ -116,6 +116,8 @@ class SlackBotConfigCreationRequest(BaseModel):
     jira_title_filter: list[str] | None = None
     curated_response_user_title_filter: list[str] | None = None
     response_type: SlackBotResponseType
+    llm_vendor: str | None = None
+    llm_model_name: str | None = None
 
     @validator("answer_filters", pre=True)
     def validate_filters(cls, value: list[str]) -> list[str]:

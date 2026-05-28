@@ -21,6 +21,7 @@ import { FilterManager, LlmOverrideManager } from "@/lib/hooks";
 import { SelectedFilterDisplay } from "./SelectedFilterDisplay";
 import { useChatContext } from "@/components/context/ChatContext";
 import { getFinalLLM } from "@/lib/llm/utils";
+import { getModelDisplayName } from "@/lib/llm/models";
 import { FileDescriptor } from "../interfaces";
 import { InputBarPreview } from "../files/InputBarPreview";
 import { RobotIcon } from "@/components/icons/icons";
@@ -342,8 +343,9 @@ export function ChatInputBar({
                 resize-none
                 pl-4
                 pr-12
-                py-4
-                h-14
+                py-5
+                text-base
+                min-h-[88px]
               `}
               autoFocus
               style={{ scrollbarWidth: "thin" }}
@@ -375,7 +377,10 @@ export function ChatInputBar({
               <ChatInputOption
                 flexPriority="second"
                 name={
-                  llmOverrideManager.llmOverride.modelName ||
+                  getModelDisplayName(
+                    llmOverrideManager.llmOverride.provider,
+                    llmOverrideManager.llmOverride.modelName
+                  ) ||
                   (selectedAssistant
                     ? selectedAssistant.llm_model_version_override || llmName
                     : llmName)

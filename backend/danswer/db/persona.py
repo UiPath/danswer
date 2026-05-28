@@ -202,6 +202,20 @@ def mark_persona_as_deleted(
     db_session: Session,
 ) -> None:
     persona = get_persona_by_id(persona_id=persona_id, user=user, db_session=db_session)
+    # `get_persona_by_id` grants non-admins access to ownerless personas
+    # (user_id IS NULL), which includes the shared default/system assistants. Block
+    # non-admins from deleting those here, mirroring the frontend's `!default_persona`
+    # rule — otherwise a basic user could soft-delete a default assistant (removing it
+    # for everyone) via a direct API call. Non-admins may only delete personas they own.
+    if (
+        user is not None
+        and user.role != UserRole.ADMIN
+        and (persona.default_persona or persona.user_id is None)
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="Only admins can delete default or shared assistants.",
+        )
     persona.deleted = True
     db_session.commit()
 

@@ -590,6 +590,8 @@ export interface ChannelConfig {
     enable_curated_response_integration?: boolean;
     response_message?: string;
   };
+  llm_vendor?: string;
+  llm_model_name?: string;
 }
 
 export type SlackBotResponseType = "quotes" | "citations";

@@ -261,7 +261,14 @@ Process restart matrix after enum additions:
 | API server | `uvicorn danswer.main:app …` | Deserializes Vespa results. |
 | Slack listener | `python danswer/danswerbot/slack/listener.py` | Same as API. |
 | Celery worker / beat | spawned by the dev script | Imports `connectors/factory.py`. |
-| Frontend (`npm run dev`) | Hot-reloads modules but `.next/cache` can lag — `rm -rf web/.next` if a tile/source rename doesn't show. |
+| Frontend (`npm run dev`) | Hot-reloads modules but `.next/cache` can lag — `rm -rf web/.next` if a tile/source rename doesn't show. Also: `next.config.js` is only re-read on full restart. |
+
+Auth-specific bounces (orthogonal to enum changes):
+
+| Edit | Bounce |
+|---|---|
+| `AUTH_TYPE`, `OPENID_CONFIG_URL`, `OAUTH_CLIENT_*`, `USER_AUTH_SECRET`, `DEFAULT_ADMIN_EMAILS` | API server (`dapi` / `dapi_oidc`). Env is captured at fork time; `--reload` doesn't refresh it. Also: `--reload` only re-imports module code, not the module-level constants like `AUTH_TYPE = AuthType(os.environ.get(...))` that already evaluated. Hard restart. |
+| `web/next.config.js` (rewrites / redirects) | Frontend (`dfe`). Next.js reads this file once at boot. |
 
 ### 4. The list endpoint serves both pages
 
@@ -445,6 +452,41 @@ See `db/tasks.py::get_latest_tasks_by_names` and the corresponding
 refactor in `server/documents/connector.py::get_connector_indexing_status`
 for the pattern.
 
+### Enable Microsoft / Entra ID OIDC (local dev)
+
+This fork hosts the OIDC plumbing in OSS — no `ee/` import required.
+
+1. **Env vars** (see CONTRIBUTING.md → "Microsoft / Entra ID OIDC" block):
+   `AUTH_TYPE=oidc`, `OAUTH_CLIENT_ID`, `OAUTH_CLIENT_SECRET`,
+   `OPENID_CONFIG_URL`, `USER_AUTH_SECRET`, `WEB_DOMAIN`, and optionally
+   `DEFAULT_ADMIN_EMAILS`.
+2. **Run `dapi_oidc`** in the API terminal (not `dapi` — that alias hard-codes
+   `AUTH_TYPE=disabled` inline, overriding any export).
+3. **Entra Redirect URI**: the app registration must list
+   `http://localhost:3000/auth/oidc/callback`. The Dex callback (if your tenant
+   still has one registered) can stay alongside.
+
+Files involved (don't duplicate this logic into `ee/`):
+
+| File | What it does |
+|---|---|
+| `backend/danswer/main.py` (OIDC `elif` block) | Mounts `/auth/oidc/{authorize,callback}` via `httpx_oauth.clients.openid.OpenID`. |
+| `backend/danswer/auth/users.py::verify_auth_setting` | Allowlist includes `AuthType.OIDC` (fork divergence vs upstream-here-only). |
+| `backend/danswer/auth/users.py::oauth_callback` | After `super().oauth_callback(...)`, auto-promotes `is_verified=True` when the provider vouches for the email — works around fastapi-users not flipping the flag during the `associate_by_email` path. |
+| `backend/danswer/server/auth_check.py::PUBLIC_ENDPOINT_SPECS` | `/auth/oidc/authorize` and `/auth/oidc/callback` are listed as public — `check_router_auth` raises on missing-auth routes at startup. |
+| `backend/danswer/db/auth.py::SQLAlchemyUserAdminDB.create` | Role logic: if `DEFAULT_ADMIN_EMAILS` is set, only those emails become ADMIN; otherwise first-user fallback fires for bootstrap. |
+| `backend/danswer/configs/app_configs.py` | `OPENID_CONFIG_URL` and `DEFAULT_ADMIN_EMAILS` parsed from env. |
+| `web/src/app/auth/oidc/callback/route.ts` | Already wired; mirrors `/auth/oauth/callback/route.ts`. |
+| `web/src/lib/userSS.ts` | `getAuthUrlSS` already handles `case "oidc"`. |
+
+Trigger a fresh login flow:
+
+```bash
+# Browser is sticky on Microsoft session — incognito or sign out of Microsoft
+# in another tab to force the login prompt. Otherwise Entra silent-SSO bounces
+# you straight through without showing its UI.
+```
+
 ### Edit credentials without re-creating the connector
 
 Backend `PATCH /api/manage/credential/{id}` already exists. Frontend
@@ -531,6 +573,19 @@ with `disabled: bool` flipped — no special bulk endpoint needed.
   `dask.distributed.Client` honors it. The current code in
   `update.py::kickoff_indexing_jobs` checks `isinstance(client, Client)`
   before adding the kwarg; preserve that guard.
+- **Don't reintroduce the 308 redirects in `web/next.config.js`** for
+  `/api/chat/send-message`, `/api/query/stream-answer-with-quote`, or
+  `/api/query/stream-query-validation`. They used to live there for stream
+  proxying in older Next.js. The browser's 308 hop strips the localhost-
+  scoped session cookie on the cross-origin jump to `127.0.0.1:8080`, and
+  cookie-based auth (OIDC, basic, anything) breaks. Use the generic
+  `/api/:path*` rewrite — Next.js 14's rewrite proxy handles streaming.
+- **Don't unpin `bcrypt==4.0.1` in `backend/requirements/default.txt`**
+  without also bumping `passlib`. passlib 1.7.4 reads `bcrypt.__about__`
+  for version detection, which was removed in bcrypt 4.1+. Without the
+  pin, every OAuth user creation explodes with
+  `ValueError: password cannot be longer than 72 bytes` from passlib's
+  `detect_wrap_bug` probe during bcrypt backend init.
 
 ---
 
@@ -558,6 +613,21 @@ historical fixes — useful so you don't accidentally undo them:
 - **`get_connector_indexing_status` is now O(1) queries** regardless of
   cc-pair count — per-row deletion-status lookups were bulk-fetched. Don't
   re-introduce per-row lookups in this endpoint.
+- **OIDC sign-in stalled on 403 "User is not authenticated"** when chat
+  was sent. Root cause was a 308 redirect in `web/next.config.js` that
+  bounced `/api/chat/send-message` to `127.0.0.1:8080`, stripping the
+  localhost-scoped session cookie. The streaming endpoints now flow
+  through the generic `/api/:path*` rewrite — don't add per-endpoint
+  redirects back. See Footguns.
+- **`is_verified=False` after OIDC sign-in 403'd chat send** until
+  `UserManager.oauth_callback` was patched to flip `is_verified=True`
+  after `super().oauth_callback(...)` returns. fastapi-users 12.x only
+  sets the flag for *newly-created* users, not for accounts associated
+  via `associate_by_email`. Keep the post-super promotion in place.
+- **First-user bootstrap admin** in `SQLAlchemyUserAdminDB.create` only
+  fires when `DEFAULT_ADMIN_EMAILS` is empty. If the env var is set, the
+  allowlist is strict — no fallback. Don't restore the unconditional
+  `user_count == 0` path without the env-gate.
 
 ---
 

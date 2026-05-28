@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useContext } from "react";
-import { FiSearch, FiMessageSquare, FiTool, FiLogOut } from "react-icons/fi";
+import { FiMessageSquare, FiTool, FiLogOut } from "react-icons/fi";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { User } from "@/lib/types";
@@ -81,15 +81,6 @@ export function UserDropdown({
           >
             {!hideChatAndSearch && (
               <>
-                {settings.search_page_enabled && (
-                  <Link
-                    href="/search"
-                    className="flex py-3 px-4 rounded cursor-pointer hover:bg-hover-light"
-                  >
-                    <FiSearch className="my-auto mr-2 text-lg" />
-                    Darwin Search
-                  </Link>
-                )}
                 {settings.chat_page_enabled && (
                   <>
                     <Link

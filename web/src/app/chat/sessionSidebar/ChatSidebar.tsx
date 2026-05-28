@@ -72,12 +72,7 @@ export const ChatSidebar = ({
         id="chat-sidebar"
       >
         <div className="pt-6 flex">
-          <Link
-            className="ml-4 w-full"
-            href={
-              settings && settings.default_page === "chat" ? "/chat" : "/search"
-            }
-          >
+          <Link className="ml-4 w-full" href="/chat">
             <div className="flex w-full">
               <Logo height={32} width={30} className="mr-1 my-auto" />
 

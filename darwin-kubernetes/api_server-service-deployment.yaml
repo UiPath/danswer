@@ -53,6 +53,22 @@ spec:
             secretKeyRef:
               name: danswer-secrets
               key: postgres_password
+        # --- Microsoft / Entra ID OIDC ---
+        - name: OAUTH_CLIENT_ID
+          valueFrom:
+            secretKeyRef:
+              name: danswer-secrets
+              key: oauth_client_id
+        - name: OAUTH_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: danswer-secrets
+              key: oauth_client_secret
+        - name: USER_AUTH_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: danswer-secrets
+              key: user_auth_secret
         envFrom:
         - configMapRef:
             name: env-configmap

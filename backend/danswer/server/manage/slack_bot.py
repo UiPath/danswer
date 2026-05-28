@@ -105,6 +105,12 @@ def _form_channel_config(
         ] = curated_response_user_title_filter
     if curated_response_config:
         channel_config["curated_response_config"] = curated_response_config
+    if slack_bot_config_creation_request.llm_vendor:
+        channel_config["llm_vendor"] = slack_bot_config_creation_request.llm_vendor
+    if slack_bot_config_creation_request.llm_model_name:
+        channel_config[
+            "llm_model_name"
+        ] = slack_bot_config_creation_request.llm_model_name
 
     channel_config[
         "respond_to_bots"

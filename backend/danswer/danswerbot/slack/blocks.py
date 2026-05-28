@@ -78,6 +78,18 @@ def _process_citations_for_slack(text: str) -> str:
     return re.sub(pattern, slack_link_format, text)
 
 
+# Slack mrkdwn fenced code blocks (```) have no concept of a language/"info
+# string": ```bash renders the literal word "bash" as the first line of the block
+# (and Slack never syntax-highlights regardless). Strip the language token off
+# opening fences so the block starts on the actual code. A bare closing ``` has no
+# token after it and is left untouched.
+_CODE_FENCE_LANGUAGE_RE = re.compile(r"```[ \t]*[A-Za-z][\w+#.\-]*[ \t]*(\r?\n)")
+
+
+def strip_code_fence_languages(text: str) -> str:
+    return _CODE_FENCE_LANGUAGE_RE.sub(r"```\1", text)
+
+
 def _split_text(text: str, limit: int = 3000) -> list[str]:
     if len(text) <= limit:
         return [text]
@@ -398,7 +410,9 @@ def build_qa_response_blocks(
             )
         ]
     else:
-        answer_processed = decode_escapes(remove_slack_text_interactions(answer))
+        answer_processed = strip_code_fence_languages(
+            decode_escapes(remove_slack_text_interactions(answer))
+        )
         if process_message_for_citations:
             answer_processed = _process_citations_for_slack(answer_processed)
         answer_blocks = [

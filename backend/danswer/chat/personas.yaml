@@ -37,6 +37,21 @@ personas:
     #   - "Engineer Onboarding"
     #   - "Benefits"
     document_sets: []
+    # Clickable cards shown on a fresh chat. Each card prefills the message
+    # input with `message` on click. Tuned for the default "Search mode."
+    starter_messages:
+      - name: "Recent changes"
+        description: "Catch up on what shipped this week."
+        message: "What has my team shipped in the last 7 days?"
+      - name: "Find a spec"
+        description: "Look up a design or technical doc."
+        message: "Find the latest design doc related to "
+      - name: "Summarize a topic"
+        description: "Pull together everything we know about something."
+        message: "Summarize what we know about "
+      - name: "Who owns this?"
+        description: "Find the right person to ask."
+        message: "Who is the owner / point of contact for "
 
 
   - id: 1

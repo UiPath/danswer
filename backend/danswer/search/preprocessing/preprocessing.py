@@ -53,10 +53,21 @@ def retrieval_preprocessing(
     persona = search_request.persona
 
     preset_filters = search_request.human_selected_filters or BaseFilters()
-    if persona and persona.document_sets and preset_filters.document_set is None:
-        preset_filters.document_set = [
-            document_set.name for document_set in persona.document_sets
-        ]
+    # Persona's document_sets act as an outer fence: they bound the maximum
+    # set the search can ever return. User-selected document_set filters
+    # refine *within* that fence (intersection), they don't replace it.
+    if persona and persona.document_sets:
+        persona_doc_set_names = [ds.name for ds in persona.document_sets]
+        if preset_filters.document_set:
+            # Intersect: only keep user picks that are also in the persona's fence.
+            preset_filters.document_set = [
+                name
+                for name in preset_filters.document_set
+                if name in persona_doc_set_names
+            ]
+        else:
+            # No user pick → use the persona's fence as-is.
+            preset_filters.document_set = persona_doc_set_names
 
     time_filter = preset_filters.time_cutoff
     source_filter = preset_filters.source_type

@@ -55,6 +55,15 @@ export const buildDocumentSummaryDisplay = (
     }
   });
 
+  // Every highlight may have been empty/whitespace (e.g. match_highlights ==
+  // [""]), leaving `sections` empty. The length===0 guard above only catches
+  // an empty array, not an array of falsy strings — so guard again here and
+  // fall back to the blurb, matching how Slack's
+  // translate_vespa_highlight_to_slack handles the same case.
+  if (sections.length === 0) {
+    return blurb;
+  }
+
   let previousIsContinuation = sections[0][2];
   let previousIsBold = sections[0][1];
   let currentText = "";

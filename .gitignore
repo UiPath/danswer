@@ -24,3 +24,8 @@ venv/
 # These contain prompt content (chat history, internal references, names).
 backend/requestdata.json
 requestdata.json
+
+# Playwright MCP session artifacts (console logs, page snapshots, ad-hoc
+# screenshots) written during local UI debugging. Not source.
+.playwright-mcp/
+model-picker-open.png

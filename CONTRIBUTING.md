@@ -261,6 +261,16 @@ dapi() {
   cd backend && AUTH_TYPE=disabled uvicorn danswer.main:app --reload --port 8080
 }
 
+# API server with Microsoft / Entra ID OIDC auth (port 8080). Needs the
+# OAUTH_CLIENT_ID / OAUTH_CLIENT_SECRET / OPENID_CONFIG_URL / USER_AUTH_SECRET
+# vars from the "Microsoft / Entra ID OIDC" block below. Uses your shell's
+# AUTH_TYPE rather than hard-coding `disabled`.
+dapi_oidc() {
+  printf "\033]0;Danswer-APIServer-OIDC\007"
+  _danswer_activate || return 1
+  cd backend && AUTH_TYPE=oidc uvicorn danswer.main:app --reload --port 8080
+}
+
 # Background jobs (indexing loop + Celery worker + Celery beat)
 dbe() {
   printf "\033]0;Danswer-Backend\007"
@@ -398,6 +408,31 @@ export RETENTION_MAX_BATCHES=200                 # safety ceiling per policy per
 # so the daily task starts from the right place.
 # ---------------------------------------------------------------------------
 export ANALYTICS_LATE_FEEDBACK_BUFFER_DAYS=2     # late-feedback grace period
+
+# ---------------------------------------------------------------------------
+# Microsoft / Entra ID OIDC (optional — only when running `dapi_oidc` instead
+# of `dapi`). Skip this whole block for the default `AUTH_TYPE=disabled` flow.
+#
+# 1. In Entra portal → App registrations, register an app (or reuse the
+#    existing tenant one) and add `http://localhost:3000/auth/oidc/callback`
+#    to its Redirect URIs. Note the Application (client) ID, generate a
+#    client secret, and grab the Directory (tenant) ID.
+# 2. Fill the values below and re-source.
+# 3. `dapi_oidc` (instead of `dapi`) in the API terminal. `dfe` stays the
+#    same — the frontend reads AUTH_TYPE dynamically from /auth/type.
+# 4. Hit http://localhost:3000/auth/login → bounces through Microsoft and
+#    issues a session cookie scoped to localhost:3000.
+#
+# DEFAULT_ADMIN_EMAILS: comma-separated emails that land as ADMIN on first
+# sign-in. Leave empty to fall back to the "first user wins" bootstrap.
+# Set in any environment where you don't want the first signer to be admin.
+# ---------------------------------------------------------------------------
+export OAUTH_CLIENT_ID='<entra-application-client-id>'
+export OAUTH_CLIENT_SECRET='<entra-client-secret>'
+export OPENID_CONFIG_URL='https://login.microsoftonline.com/<entra-tenant-id>/v2.0/.well-known/openid-configuration'
+export USER_AUTH_SECRET="$(openssl rand -hex 32)"   # any long random string; must stay stable across restarts
+export WEB_DOMAIN='http://localhost:3000'
+export DEFAULT_ADMIN_EMAILS='user1@uipath.com,user2@uipath.com'
 
 # ---------------------------------------------------------------------------
 # GitHub PAT — used by the `gh` CLI and the GitHub / GitHub-Files connectors

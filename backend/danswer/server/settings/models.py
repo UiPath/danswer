@@ -13,7 +13,10 @@ class Settings(BaseModel):
 
     chat_page_enabled: bool = True
     search_page_enabled: bool = True
-    default_page: PageType = PageType.SEARCH
+    # Fresh installs land on the chat page by default. NOTE: this only seeds
+    # deployments with no stored settings yet — once settings are persisted, the
+    # stored value wins, so flip it in Admin → Settings on existing deployments.
+    default_page: PageType = PageType.CHAT
     maximum_chat_retention_days: int | None = None
 
     def check_validity(self) -> None:

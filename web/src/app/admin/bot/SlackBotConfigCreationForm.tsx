@@ -31,6 +31,10 @@ import {
 import { useRouter } from "next/navigation";
 import { Persona } from "../assistants/interfaces";
 import { useState } from "react";
+import {
+  LLM_MODELS_BY_VENDOR,
+  LLM_VENDORS,
+} from "@/lib/llm/models";
 import { BookmarkIcon, RobotIcon } from "@/components/icons/icons";
 import { SourceIcon } from "@/components/SourceIcon";
 import { getSourceMetadata } from "@/lib/sources";
@@ -109,6 +113,10 @@ export const SlackBotCreationForm = ({
                 ? existingSlackBotConfig.persona.id
                 : null,
             response_type: existingSlackBotConfig?.response_type || "citations",
+            llm_vendor:
+              existingSlackBotConfig?.channel_config?.llm_vendor || "",
+            llm_model_name:
+              existingSlackBotConfig?.channel_config?.llm_model_name || "",
             prioritized_sources:
               existingSlackBotConfig?.channel_config?.prioritized_sources || [],
             jira_config: existingSlackBotConfig?.channel_config
@@ -144,6 +152,8 @@ export const SlackBotCreationForm = ({
             opsgenie_schedule: Yup.string(),
             document_sets: Yup.array().of(Yup.number()),
             persona_id: Yup.number().nullable(),
+            llm_vendor: Yup.string(),
+            llm_model_name: Yup.string(),
             prioritized_sources: Yup.array().of(Yup.string()),
             jira_config: Yup.object().shape({
               enable_jira_integration: Yup.boolean().required(),
@@ -360,6 +370,30 @@ export const SlackBotCreationForm = ({
                     { name: "Quotes", value: "quotes" },
                   ]}
                 />
+
+                <SelectorFormField
+                  name="llm_vendor"
+                  label="LLM Vendor"
+                  subtext="The LLM vendor to use for this channel. Select 'AWS Bedrock' for Claude models."
+                  options={LLM_VENDORS.map((v) => ({
+                    name: v.label,
+                    value: v.key,
+                  }))}
+                  includeDefault={true}
+                />
+
+                {values.llm_vendor &&
+                  LLM_MODELS_BY_VENDOR[values.llm_vendor] && (
+                    <SelectorFormField
+                      name="llm_model_name"
+                      label="Model"
+                      subtext={`The ${
+                        LLM_VENDORS.find((v) => v.key === values.llm_vendor)
+                          ?.label ?? values.llm_vendor
+                      } model to use.`}
+                      options={LLM_MODELS_BY_VENDOR[values.llm_vendor]}
+                    />
+                  )}
 
                 <Divider />
 

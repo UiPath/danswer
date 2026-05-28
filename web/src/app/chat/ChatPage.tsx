@@ -49,7 +49,6 @@ import { DocumentSidebar } from "./documentSidebar/DocumentSidebar";
 import { DanswerInitializingLoader } from "@/components/DanswerInitializingLoader";
 import { FeedbackModal } from "./modal/FeedbackModal";
 import { ShareChatSessionModal } from "./modal/ShareChatSessionModal";
-import { ChatPersonaSelector } from "./ChatPersonaSelector";
 import { FiArrowDown, FiShare2 } from "react-icons/fi";
 import { ChatIntro } from "./ChatIntro";
 import { AIMessage, HumanMessage } from "./message/Messages";
@@ -546,6 +545,18 @@ export function ChatPage({
     updateScrollTracking();
   }, [messageHistory]);
 
+  // Cmd/Ctrl+K — start a new chat (matches Linear / Slack / ChatGPT convention).
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        router.push("/chat");
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [router]);
+
   // used for resizing of the document sidebar
   const masterFlexboxRef = useRef<HTMLDivElement>(null);
   const [maxDocumentSidebarWidth, setMaxDocumentSidebarWidth] = useState<
@@ -775,7 +786,7 @@ export function ChatPage({
         queryOverride,
         forceSearch,
 
-        modelProvider: llmOverrideManager.llmOverride.name || undefined,
+        modelProvider: llmOverrideManager.llmOverride.provider || undefined,
         modelVersion:
           llmOverrideManager.llmOverride.modelName ||
           searchParams.get(SEARCH_PARAM_NAMES.MODEL_VERSION) ||
@@ -973,11 +984,21 @@ export function ChatPage({
 
   const onPersonaChange = (persona: Persona | null) => {
     if (persona && persona.id !== livePersona.id) {
+      const hadFiles = currentMessageFiles.length > 0;
       // remove uploaded files
       setCurrentMessageFiles([]);
       setSelectedPersona(persona);
       textAreaRef.current?.focus();
       router.push(buildChatUrl(searchParams, null, persona.id));
+      // A chat session is bound to a single assistant, so switching starts a fresh
+      // chat. Surface that explicitly — otherwise the user is silently navigated to
+      // a blank session with no explanation of why.
+      setPopup({
+        message:
+          `Started a new chat with "${persona.name}", as each chat is bound to a single assistant.` +
+          (hadFiles ? " Please re-upload any files you'd attached." : ""),
+        type: "success",
+      });
     }
   };
 
@@ -1173,15 +1194,6 @@ export function ChatPage({
                       {livePersona && (
                         <div className="sticky top-0 left-80 z-10 w-full bg-background flex">
                           <div className="mt-2 flex w-full">
-                            <div className="ml-2 p-1 rounded w-fit">
-                              <ChatPersonaSelector
-                                personas={filteredAssistants}
-                                selectedPersonaId={livePersona.id}
-                                onPersonaChange={onPersonaChange}
-                                userId={user?.id}
-                              />
-                            </div>
-
                             <div className="ml-auto mr-6 flex">
                               {chatSessionIdRef.current !== null && (
                                 <div
@@ -1220,6 +1232,7 @@ export function ChatPage({
                           <ChatIntro
                             availableSources={finalAvailableSources}
                             selectedPersona={livePersona}
+                            setConfigModalActiveTab={setConfigModalActiveTab}
                           />
                         )}
 

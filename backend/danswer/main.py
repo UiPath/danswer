@@ -13,6 +13,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from httpx_oauth.clients.google import GoogleOAuth2
+from httpx_oauth.clients.openid import OpenID
 from sqlalchemy.orm import Session
 
 from danswer import __version__
@@ -31,6 +32,7 @@ from danswer.configs.app_configs import DISABLE_INDEX_UPDATE_ON_SWAP
 from danswer.configs.app_configs import LOG_ENDPOINT_LATENCY
 from danswer.configs.app_configs import OAUTH_CLIENT_ID
 from danswer.configs.app_configs import OAUTH_CLIENT_SECRET
+from danswer.configs.app_configs import OPENID_CONFIG_URL
 from danswer.configs.app_configs import USER_AUTH_SECRET
 from danswer.configs.app_configs import WEB_DOMAIN
 from danswer.configs.chat_configs import MULTILINGUAL_QUERY_EXPANSION
@@ -343,6 +345,34 @@ def get_application() -> FastAPI:
                 redirect_url=f"{WEB_DOMAIN}/auth/oauth/callback",
             ),
             prefix="/auth/oauth",
+            tags=["auth"],
+        )
+        # Need basic auth router for `logout` endpoint
+        include_router_with_global_prefix_prepended(
+            application,
+            fastapi_users.get_logout_router(auth_backend),
+            prefix="/auth",
+            tags=["auth"],
+        )
+
+    elif AUTH_TYPE == AuthType.OIDC:
+        if not OPENID_CONFIG_URL:
+            raise ValueError(
+                "OPENID_CONFIG_URL must be set when AUTH_TYPE=oidc "
+                "(e.g. https://login.microsoftonline.com/<tenant>/v2.0/"
+                ".well-known/openid-configuration)"
+            )
+        include_router_with_global_prefix_prepended(
+            application,
+            fastapi_users.get_oauth_router(
+                OpenID(OAUTH_CLIENT_ID, OAUTH_CLIENT_SECRET, OPENID_CONFIG_URL),
+                auth_backend,
+                USER_AUTH_SECRET,
+                associate_by_email=True,
+                is_verified_by_default=True,
+                redirect_url=f"{WEB_DOMAIN}/auth/oidc/callback",
+            ),
+            prefix="/auth/oidc",
             tags=["auth"],
         )
         # Need basic auth router for `logout` endpoint
