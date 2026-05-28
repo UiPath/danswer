@@ -94,6 +94,11 @@ const GRID_CLASSES: Record<number, string> = {
 
 const DEFAULT_COLUMNS = 3;
 
+// How many doc-set name chips to render before collapsing the rest into
+// a "+N more" pill. Three keeps each card's scope visible without
+// blowing the card width at narrower column counts.
+const MAX_VISIBLE_DOC_SETS = 3;
+
 // ---------------------------------------------------------------------------
 // Small helpers
 // ---------------------------------------------------------------------------
@@ -130,12 +135,9 @@ function GalleryCard({
   onAdd,
   onRemove,
 }: CardProps) {
-  // Note: tool-related UI was intentionally removed from this page —
-  // the gallery is for browsing assistants, and tool filter chips +
-  // per-card "{n} tools" pulled focus away from the assistant itself.
-  // The {n} sources chip stays — sources are about the assistant's
-  // knowledge scope, not a "tool" in the user's mental model.
-  const docSetCount = assistant.document_sets?.length ?? 0;
+  // Tool-related UI was intentionally removed from this page (filter
+  // chips + per-card counts) — the gallery is for browsing assistants,
+  // and tool execution isn't reliable enough to advertise.
   const author = ownerDisplayName(assistant);
   const isBuiltIn = assistant.default_persona;
 
@@ -187,18 +189,37 @@ function GalleryCard({
         </p>
       )}
 
-      {/* Sources chip — knowledge-scope summary. Tools were
-          intentionally removed from this page (this is for browsing
-          assistants, not exploring tools); sources stay because
-          they're about the assistant's knowledge, not a "tool". */}
-      {docSetCount > 0 && (
+      {/* Knowledge-scope chips — name the document sets the
+          assistant points at (counts alone don't help a chooser
+          decide). Cap at MAX_VISIBLE_DOC_SETS with a "+N more"
+          tooltip so a long list doesn't blow the card width. Tools
+          were removed entirely (see card-level comment). */}
+      {assistant.document_sets && assistant.document_sets.length > 0 && (
         <div className="flex flex-wrap gap-1.5 mb-3 text-xs">
-          <Bubble isSelected={false} notSelectable>
-            <div className="flex items-center gap-1">
-              <FiBookmark size={12} />
-              {docSetCount} source{docSetCount === 1 ? "" : "s"}
-            </div>
-          </Bubble>
+          {assistant.document_sets
+            .slice(0, MAX_VISIBLE_DOC_SETS)
+            .map((ds) => (
+              <Bubble key={ds.id} isSelected={false} notSelectable>
+                <div className="flex items-center gap-1 max-w-[180px]">
+                  <FiBookmark size={12} className="flex-shrink-0" />
+                  <span className="truncate" title={ds.name}>
+                    {ds.name}
+                  </span>
+                </div>
+              </Bubble>
+            ))}
+          {assistant.document_sets.length > MAX_VISIBLE_DOC_SETS && (
+            <Bubble isSelected={false} notSelectable>
+              <span
+                title={assistant.document_sets
+                  .slice(MAX_VISIBLE_DOC_SETS)
+                  .map((d) => d.name)
+                  .join(", ")}
+              >
+                +{assistant.document_sets.length - MAX_VISIBLE_DOC_SETS} more
+              </span>
+            </Bubble>
+          )}
         </div>
       )}
 

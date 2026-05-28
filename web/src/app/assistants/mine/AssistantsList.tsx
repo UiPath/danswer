@@ -84,6 +84,11 @@ import { AssistantSharingModal } from "./AssistantSharingModal";
 import { AssistantSharedStatusDisplay } from "../AssistantSharedStatus";
 import { AssistantsPageTitle } from "../AssistantsPageTitle";
 
+// How many doc-set name chips to render before collapsing the rest
+// into a "+N more" pill. Three keeps the row scannable on most widths
+// without losing the most-relevant scope at a glance.
+const MAX_VISIBLE_DOC_SETS = 3;
+
 // ---------------------------------------------------------------------------
 // Small inline switch — avoids pulling in a new component library for one
 // toggle. role="switch" gives screen readers the right semantics.
@@ -174,9 +179,8 @@ function RowContent({
   const canEdit = isOwnedByUser;
   const canShare = isOwnedByUser && !assistant.is_public;
 
-  // Doc-set count — surfaced as a small chip. Tools count was removed
-  // intentionally; see the JSX block below for the why.
-  const docSetCount = assistant.document_sets?.length ?? 0;
+  // Doc-set names are surfaced as small chips; tools count was removed
+  // intentionally — see the chip JSX below for the why.
 
   // Click-on-hidden-row affordance: a click anywhere on the row body
   // (not on an interactive control) draws a transient ring around the
@@ -286,18 +290,37 @@ function RowContent({
           <AssistantSharedStatusDisplay assistant={assistant} user={user} />
         </div>
 
-        {/* Sources chip — knowledge-scope summary. Tools chip was
+        {/* Knowledge-scope chips — show which document sets the
+            assistant points at, not just the count. With many sets,
+            show the first few and a "+N more" with the rest in a
+            tooltip so the row stays scannable. Tools chip was
             intentionally removed: tool execution isn't reliable yet
             and surfacing tool counts misleads users into picking an
             assistant for a capability that may not work in practice. */}
-        {docSetCount > 0 && (
+        {assistant.document_sets && assistant.document_sets.length > 0 && (
           <div className="flex flex-wrap gap-2 mt-2 text-xs text-subtle">
-            <Bubble isSelected={false}>
-              <div className="flex items-center gap-1">
-                <FiBookmark size={12} />
-                {docSetCount} source{docSetCount === 1 ? "" : "s"}
-              </div>
-            </Bubble>
+            {assistant.document_sets.slice(0, MAX_VISIBLE_DOC_SETS).map((ds) => (
+              <Bubble key={ds.id} isSelected={false}>
+                <div className="flex items-center gap-1 max-w-[220px]">
+                  <FiBookmark size={12} className="flex-shrink-0" />
+                  <span className="truncate" title={ds.name}>
+                    {ds.name}
+                  </span>
+                </div>
+              </Bubble>
+            ))}
+            {assistant.document_sets.length > MAX_VISIBLE_DOC_SETS && (
+              <Bubble isSelected={false}>
+                <span
+                  title={assistant.document_sets
+                    .slice(MAX_VISIBLE_DOC_SETS)
+                    .map((d) => d.name)
+                    .join(", ")}
+                >
+                  +{assistant.document_sets.length - MAX_VISIBLE_DOC_SETS} more
+                </span>
+              </Bubble>
+            )}
           </div>
         )}
         </div>
