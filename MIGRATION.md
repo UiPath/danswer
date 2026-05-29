@@ -376,7 +376,8 @@ These need eyes — automated coverage doesn't catch them:
 
 ## 12. Branch contents at-a-glance
 
-16 commits on top of `rajiv/add-claude` (PR #45):
+17 commits on top of `feature/darwin` (which now includes the merged
+`rajiv/add-claude` work — PR #45):
 
 ```
 [BG-scale] darwin-kubernetes: port split-background manifests + lock convention in AGENTS.md
