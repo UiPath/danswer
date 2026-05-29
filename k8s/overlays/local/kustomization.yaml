@@ -8,6 +8,13 @@ kind: Kustomization
 resources:
   - ../../base
 
+# Opt-in components — comment out a line to skip the feature.
+# Local-only: deploy an in-cluster Redis StatefulSet so the cache + rate
+# limiter have a backend without needing managed Redis. Prod does NOT
+# include this — it points REDIS_HOST at its managed Redis FQDN instead.
+components:
+  - ../../optional/redis
+
 namespace: default
 
 # Local-dev image refs. `latest` is fine here — for prod we pin (see prod

@@ -67,16 +67,35 @@ machine (e.g. via docker-compose) are reachable.
 
 ### `optional/`
 
-Manifests for features that aren't applied by default — opt in by running
-`kubectl apply -f k8s/optional/<file>.yaml`:
+Features that aren't part of base — opt in **per overlay** via the
+`components:` field, OR apply them plainly with `kubectl apply -f` when
+not using kustomize.
 
-| File | What it ships | When to apply |
+| Path | What it ships | When to use |
 |---|---|---|
-| `redis.yaml` | Redis 7.2 StatefulSet + Service | Before enabling `REDIS_KV_CACHE_ENABLED=true` or `REQUEST_RATE_LIMIT_ENABLED=true` |
+| `redis/` (kustomize component) | Redis 7.2 StatefulSet + Service | Local dev (deploys an in-cluster Redis). Prod typically uses managed Redis instead — don't opt in here, just point `REDIS_HOST` at the managed FQDN in `env.properties`. |
 | `background-beat.yaml`, `background-celery.yaml`, `background-indexer-scheduler.yaml` | Split background topology (replaces the combined `background` deployment in base) | When you want horizontal scaling of background tasks |
 | `dask-scheduler.yaml`, `dask-worker.yaml` | Remote Dask scheduler topology (paired with `background-indexer-scheduler`) | When you switch from the in-process `LocalCluster` indexing to remote Dask |
 
-See `MIGRATION.md` (repo root) for the full rollout plan and cutover steps.
+**The "flag" for opting into an optional feature** is a single line in
+the overlay's `kustomization.yaml`:
+
+```yaml
+# k8s/overlays/local/kustomization.yaml
+components:
+  - ../../optional/redis      # comment out this line to skip
+```
+
+Prod's `kustomization.yaml` doesn't have that `components:` block at
+all → no Redis deployed in prod. Local does → in-cluster Redis comes
+along.
+
+To add more opt-in features the same way (e.g. wrap the split-background
+deployments as a component): create a directory under `optional/` with
+its own `kustomization.yaml` of `kind: Component`, then reference it
+from the overlay's `components:` block.
+
+See `MIGRATION.md` (repo root) for the broader rollout plan.
 
 ## First-time setup
 
