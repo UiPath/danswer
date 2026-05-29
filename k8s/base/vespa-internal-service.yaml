@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    name: vespa-internal
+  name: vespa-internal
+spec:
+  clusterIP: None
+  clusterIPs:
+  - None
+  selector:
+    name: vespa-internal
+  type: ClusterIP

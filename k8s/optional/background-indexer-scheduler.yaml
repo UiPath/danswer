@@ -1,0 +1,80 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: background-indexer-scheduler-deployment
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: background-indexer-scheduler
+  template:
+    metadata:
+      labels:
+        app: background-indexer-scheduler
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: agentpool
+                operator: In
+                values:
+                - indexcpu
+      containers:
+      - name: indexer-scheduler
+        image: sfbrdevhelmweacr.azurecr.io/danswer/danswer-backend:vha-138
+        imagePullPolicy: IfNotPresent
+        command:
+        - python
+        - danswer/background/update.py
+        env:
+        - name: DASK_SCHEDULER_ADDRESS
+          value: tcp://dask-scheduler-service:8786
+        - name: CURRENT_PROCESS_IS_AN_INDEXING_JOB
+          value: 'true'
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              key: postgres_user
+              name: danswer-secrets
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: postgres_password
+              name: danswer-secrets
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: redis_password
+              name: danswer-secrets
+              optional: true
+        envFrom:
+        - configMapRef:
+            name: env-configmap
+        volumeMounts:
+        - name: dynamic-storage
+          mountPath: /home/storage
+        - name: file-connector-storage
+          mountPath: /home/file_connector_storage
+        resources:
+          requests:
+            cpu: 200m
+            memory: 512Mi
+          limits:
+            cpu: 500m
+            memory: 1Gi
+      tolerations:
+      - effect: NoSchedule
+        key: darwin
+        operator: Equal
+        value: indexing
+      volumes:
+      - name: dynamic-storage
+        persistentVolumeClaim:
+          claimName: dynamic-pvc
+      - name: file-connector-storage
+        persistentVolumeClaim:
+          claimName: file-connector-pvc

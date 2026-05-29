@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: vespa-query-container
+spec:
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Retain
+    whenScaled: Retain
+  podManagementPolicy: OrderedReady
+  replicas: 2
+  selector:
+    matchLabels:
+      app: vespa-query-container
+      name: vespa-internal
+  serviceName: vespa-internal
+  template:
+    metadata:
+      labels:
+        app: vespa-query-container
+        name: vespa-internal
+    spec:
+      containers:
+      - args:
+        - services
+        envFrom:
+        - configMapRef:
+            name: vespa-config
+        image: vespa
+        imagePullPolicy: Always
+        name: vespa-query-container
+        resources:
+          limits:
+            memory: 4G
+          requests:
+            memory: 1500M
+        securityContext:
+          runAsUser: 1000
+  updateStrategy:
+    rollingUpdate:
+      partition: 0
+    type: RollingUpdate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: vespa
+  name: vespa-query
+spec:
+  ports:
+  - name: api
+    port: 8080
+    protocol: TCP
+    targetPort: 8080
+  selector:
+    app: vespa-query-container
+  type: ClusterIP

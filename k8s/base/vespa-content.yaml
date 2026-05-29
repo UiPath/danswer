@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: vespa-content
+spec:
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Retain
+    whenScaled: Retain
+  podManagementPolicy: OrderedReady
+  replicas: 3
+  selector:
+    matchLabels:
+      app: vespa-content
+      name: vespa-internal
+  serviceName: vespa-internal
+  template:
+    metadata:
+      labels:
+        app: vespa-content
+        name: vespa-internal
+    spec:
+      containers:
+      - args:
+        - services
+        envFrom:
+        - configMapRef:
+            name: vespa-config
+        image: vespa
+        imagePullPolicy: Always
+        name: vespa-content
+        resources:
+          limits:
+            memory: 12G
+          requests:
+            memory: 6G
+        securityContext:
+          runAsUser: 1000
+        volumeMounts:
+        - mountPath: /opt/vespa/var
+          name: vespa-var
+      initContainers:
+      - command:
+        - sh
+        - -c
+        - chown -R 1000 /opt/vespa/var
+        image: busybox
+        imagePullPolicy: Always
+        name: chown-var
+        resources: {}
+        securityContext:
+          runAsUser: 0
+        volumeMounts:
+        - mountPath: /opt/vespa/var
+          name: vespa-var
+  updateStrategy:
+    rollingUpdate:
+      partition: 0
+    type: RollingUpdate
+  volumeClaimTemplates:
+  - apiVersion: v1
+    kind: PersistentVolumeClaim
+    metadata:
+      creationTimestamp: null
+      name: vespa-var
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      resources:
+        requests:
+          storage: 100Gi
+      volumeMode: Filesystem
+    status:
+      phase: Pending

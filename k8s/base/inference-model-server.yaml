@@ -1,0 +1,58 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inference-model-server-deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: inference-model-server
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: inference-model-server
+    spec:
+      containers:
+      - command:
+        - uvicorn
+        - model_server.main:app
+        - --host
+        - 0.0.0.0
+        - --port
+        - '9000'
+        envFrom:
+        - configMapRef:
+            name: env-configmap
+        image: danswer-model-server
+        imagePullPolicy: IfNotPresent
+        name: inference-model-server
+        ports:
+        - containerPort: 9000
+          protocol: TCP
+        resources: {}
+        volumeMounts:
+        - mountPath: /root/.cache
+          name: inference-model-storage
+      volumes:
+      - name: inference-model-storage
+        persistentVolumeClaim:
+          claimName: inference-model-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: inference-model-server-service
+spec:
+  ports:
+  - name: inference-model-server-port
+    port: 9000
+    protocol: TCP
+    targetPort: 9000
+  selector:
+    app: inference-model-server
+  type: ClusterIP

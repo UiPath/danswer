@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: background-deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: background
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: background
+    spec:
+      containers:
+      - command:
+        - /usr/bin/supervisord
+        env:
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              key: postgres_user
+              name: danswer-secrets
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: postgres_password
+              name: danswer-secrets
+        envFrom:
+        - configMapRef:
+            name: env-configmap
+        - secretRef:
+            name: danswer-secrets
+        image: danswer-backend
+        imagePullPolicy: IfNotPresent
+        name: background
+        resources:
+          requests:
+            cpu: '2'
+            memory: 10Gi
+        volumeMounts:
+        - mountPath: /home/storage
+          name: dynamic-storage
+        - mountPath: /home/file_connector_storage
+          name: file-connector-storage
+      volumes:
+      - name: dynamic-storage
+        persistentVolumeClaim:
+          claimName: dynamic-pvc
+      - name: file-connector-storage
+        persistentVolumeClaim:
+          claimName: file-connector-pvc

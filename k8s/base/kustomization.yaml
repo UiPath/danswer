@@ -1,0 +1,31 @@
+# Base manifests — environment-neutral. Overlays under k8s/overlays/{prod,local}
+# layer on:
+#   - Image registry + tag (via `images:` in the overlay kustomization)
+#   - Replica counts (via `replicas:` in the overlay kustomization)
+#   - The env-configmap ConfigMap (via configMapGenerator from env.properties)
+#   - The danswer-secrets Secret (via secretGenerator from secrets.env — gitignored)
+#
+# Image refs in base use logical names (e.g. `danswer-backend` not
+# `sfbrdevhelmweacr.azurecr.io/danswer/danswer-backend:vha-138`). Kustomize
+# rewrites them via the overlay's `images:` block.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  # Core danswer app
+  - api-server.yaml
+  - background.yaml
+  - web-server.yaml
+  - nginx.yaml
+  - inference-model-server.yaml
+  - indexing-model-server.yaml
+  - persistent-volumes.yaml
+
+  # Vespa cluster (search index backend)
+  - vespa-config.yaml
+  - vespa-admin.yaml
+  - vespa-configserver.yaml
+  - vespa-content.yaml
+  - vespa-feed.yaml
+  - vespa-query.yaml
+  - vespa-internal-service.yaml

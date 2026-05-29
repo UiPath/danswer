@@ -1,0 +1,79 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: background-celery-deployment
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: background-celery
+  template:
+    metadata:
+      labels:
+        app: background-celery
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: agentpool
+                operator: In
+                values:
+                - indexcpu
+      containers:
+      - name: celery
+        image: sfbrdevhelmweacr.azurecr.io/danswer/danswer-backend:vha-138
+        imagePullPolicy: IfNotPresent
+        command:
+        - celery
+        - -A
+        - danswer.background.celery.celery_run:celery_app
+        - worker
+        - --pool=threads
+        - --autoscale=3,10
+        - --loglevel=INFO
+        env:
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              key: postgres_user
+              name: danswer-secrets
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: postgres_password
+              name: danswer-secrets
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: redis_password
+              name: danswer-secrets
+              optional: true
+        envFrom:
+        - configMapRef:
+            name: env-configmap
+        volumeMounts:
+        - name: dynamic-storage
+          mountPath: /home/storage
+        - name: file-connector-storage
+          mountPath: /home/file_connector_storage
+        resources:
+          requests:
+            cpu: 200m
+            memory: 512Mi
+          limits:
+            cpu: '1'
+            memory: 2Gi
+      tolerations:
+      - effect: NoSchedule
+        key: darwin
+        operator: Equal
+        value: indexing
+      volumes:
+      - name: dynamic-storage
+        persistentVolumeClaim:
+          claimName: dynamic-pvc
+      - name: file-connector-storage
+        persistentVolumeClaim:
+          claimName: file-connector-pvc

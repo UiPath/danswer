@@ -1,0 +1,64 @@
+# Local-dev overlay → Rancher Desktop / Docker Desktop / kind / any local cluster.
+#
+# Apply:    kubectl apply -k k8s/overlays/local
+# Preview:  kubectl kustomize k8s/overlays/local
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+namespace: default
+
+# Local-dev image refs. `latest` is fine here — for prod we pin (see prod
+# overlay).
+images:
+  - name: danswer-backend
+    newName: danswer/danswer-backend
+    newTag: latest
+  - name: danswer-web-server
+    newName: danswer/danswer-web-server
+    newTag: latest
+  - name: danswer-model-server
+    newName: danswer/danswer-model-server
+    newTag: v0.3.94
+  - name: nginx
+    newName: nginx
+    newTag: 1.23.4-alpine
+  - name: vespa
+    newName: vespaengine/vespa
+    newTag: latest
+  - name: busybox
+    newName: busybox
+    newTag: latest
+
+replicas:
+  - name: api-server-deployment
+    count: 1
+  - name: background-deployment
+    count: 1
+  - name: web-server-deployment
+    count: 1
+  - name: nginx-deployment
+    count: 1
+  - name: inference-model-server-deployment
+    count: 1
+
+configMapGenerator:
+  - name: env-configmap
+    behavior: create
+    envs:
+      - env.properties
+
+secretGenerator:
+  - name: danswer-secrets
+    envs:
+      - secrets.env
+
+generatorOptions:
+  disableNameSuffixHash: true
+
+# No affinity/toleration patches needed — the live-cluster dump that
+# seeded base/ doesn't use indexcpu-pool affinity. If you re-introduce
+# Darwin-specific scheduling in base/ later, add JSON patches here to
+# strip them for local.
