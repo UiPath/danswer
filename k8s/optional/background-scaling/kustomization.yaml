@@ -42,12 +42,12 @@ resources:
 
 replicas:
   - name: background-beat-deployment
-    count: 1
+    count: 1                          # singleton — MUST stay 1 (dup beats double-fire tasks)
   - name: background-celery-deployment
-    count: 2
+    count: 1                          # maintenance only; each pod autoscales 3-10 threads
   - name: background-indexer-scheduler-deployment
-    count: 1
+    count: 1                          # singleton — the update.py polling loop
   - name: dask-scheduler-deployment
-    count: 1
+    count: 1                          # singleton bookkeeping process
   - name: dask-worker-deployment
-    count: 3
+    count: 2                          # max concurrent indexing jobs (1 connector per pod); raise if attempts backlog
