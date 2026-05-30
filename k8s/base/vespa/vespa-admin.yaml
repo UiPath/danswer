@@ -25,9 +25,21 @@ spec:
         envFrom:
         - configMapRef:
             name: vespa-config
-        image: vespa
+        # Per-role logical image name — see vespa-configserver.yaml.
+        image: vespa-admin
         imagePullPolicy: Always
         name: vespa-admin
+        # Readiness on the metrics proxy's /state/v1/health (port 19092 —
+        # node-agnostic, same as content). Gates rollout; readiness-only (no
+        # liveness). See the content-node note re: publishNotReadyAddresses.
+        readinessProbe:
+          httpGet:
+            path: /state/v1/health
+            port: 19092
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 6
         resources:
           limits:
             memory: 2G

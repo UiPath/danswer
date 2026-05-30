@@ -25,8 +25,21 @@ images:
   - name: nginx
     newName: nginx
     newTag: 1.23.4-alpine
-  - name: vespa
-    # Pinned, same as prod — never :latest for Vespa (see prod overlay note).
+  # Vespa — one entry per role (base uses per-role logical names). Pinned,
+  # same as prod — never :latest for Vespa (see prod overlay note).
+  - name: vespa-configserver
+    newName: vespaengine/vespa
+    newTag: "8.600.35"
+  - name: vespa-admin
+    newName: vespaengine/vespa
+    newTag: "8.600.35"
+  - name: vespa-content
+    newName: vespaengine/vespa
+    newTag: "8.600.35"
+  - name: vespa-feed
+    newName: vespaengine/vespa
+    newTag: "8.600.35"
+  - name: vespa-query
     newName: vespaengine/vespa
     newTag: "8.600.35"
   - name: busybox

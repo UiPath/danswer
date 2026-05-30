@@ -22,11 +22,7 @@ resources:
   - persistent-volumes.yaml
   - redis.yaml  # cache + rate limiting; both prod and local deploy it
 
-  # Vespa cluster (search index backend)
-  - vespa-config.yaml
-  - vespa-admin.yaml
-  - vespa-configserver.yaml
-  - vespa-content.yaml
-  - vespa-feed.yaml
-  - vespa-query.yaml
-  - vespa-internal-service.yaml
+  # Vespa cluster (search index backend) — grouped in its own folder with a
+  # dedicated kustomization; see vespa/kustomization.yaml for the rationale
+  # and k8s/scripts/vespa-upgrade.sh for the ordered upgrade procedure.
+  - vespa/

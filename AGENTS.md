@@ -396,12 +396,25 @@ Rules:
   hop, applied as an ordered operation, never a bare tag bump. Do NOT
   set `VESPA_SKIP_UPGRADE_CHECK=true` to force a big jump on prod; it
   risks the index format.
-- **Apply via `k8s/scripts/guarded-apply.sh <overlay>`, not raw
-  `kubectl apply -k`.** The guard reads the live running Vespa version,
-  compares it to what the overlay would deploy, and refuses a >30-minor
-  upgrade / major change / floating tag (and warns on big downgrades)
-  before it can reach the cluster. It checks against *live* (not the
-  repo's previous pin) because config drifts out of git.
+- **Upgrade with `k8s/scripts/vespa-upgrade.sh <target> [ns]`, NOT a
+  kustomize apply.** Ordering across the 5 StatefulSets (configserver →
+  admin → content one-ordinal-at-a-time → feed → query, health-gated
+  between each) is impossible to express declaratively — a `kubectl
+  apply` rolls them all at once. The manifests support the script via
+  **per-role logical image names** (`vespa-configserver`, `vespa-admin`,
+  `vespa-content`, `vespa-feed`, `vespa-query` in `k8s/base/vespa/`) so
+  versions move independently, plus readiness probes on content/admin
+  with `publishNotReadyAddresses: true` on `vespa-internal` (peer
+  discovery must not be readiness-gated). Run `DRY_RUN=1` first. After a
+  successful upgrade, sync the per-role `newTag`s in the overlays.
+- **`k8s/scripts/guarded-apply.sh <overlay>` is the everyday-apply safety
+  net, not the upgrade tool.** The guard reads the live running Vespa
+  version, compares it to what the overlay would deploy, and refuses a
+  >30-minor upgrade / major change / floating tag (and warns on big
+  downgrades) before it can reach the cluster. It checks against *live*
+  (not the repo's previous pin) because config drifts out of git. But it
+  still rolls all roles at once — for an actual version change use
+  `vespa-upgrade.sh`.
 - This applies to any version-stateful StatefulSet, but Vespa is the
   one that bites.
 

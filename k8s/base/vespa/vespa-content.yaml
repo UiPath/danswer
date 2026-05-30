@@ -25,9 +25,28 @@ spec:
         envFrom:
         - configMapRef:
             name: vespa-config
-        image: vespa
+        # Per-role logical image name — see vespa-configserver.yaml.
+        image: vespa-content
         imagePullPolicy: Always
         name: vespa-content
+        # Readiness on the metrics proxy's /state/v1/health (port 19092 —
+        # verified serving 200 on the live content nodes; this port exists on
+        # every Vespa node type, unlike the containers' 8080). Gates rollout
+        # so an upgrade won't move to the next content pod until this one is
+        # back up. Readiness-only — NO liveness (a slow content node loading
+        # its index must not be killed). Crucially, vespa-internal sets
+        # publishNotReadyAddresses: true, so a not-ready content pod is still
+        # resolvable for peer discovery — this probe gates rollout WITHOUT
+        # dropping the node from the cluster. initialDelay is generous because
+        # content nodes load buckets on boot.
+        readinessProbe:
+          httpGet:
+            path: /state/v1/health
+            port: 19092
+          initialDelaySeconds: 45
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 6
         resources:
           limits:
             memory: 12G

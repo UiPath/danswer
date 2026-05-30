@@ -32,13 +32,31 @@ images:
   - name: nginx
     newName: nginx
     newTag: 1.23.4-alpine
-  - name: vespa
-    # PINNED to the version the cluster actually runs. NEVER use :latest —
-    # it pulled 8.696.20, a >30-release jump from 8.600.35, which Vespa's
-    # config server refuses (incompatible-upgrade guard) → cluster-wide
-    # outage. 8.600.35 is the deployed on-disk version (the content nodes'
-    # index is in this format). Upgrading is a deliberate, STEPWISE
-    # operation (≤30 releases per hop) — never a bare tag bump here.
+  # Vespa — one entry PER ROLE (the base manifests use per-role logical
+  # names). All pinned to the SAME version the cluster actually runs.
+  # NEVER use :latest — it pulled 8.696.20, a >30-release jump from
+  # 8.600.35, which Vespa's config server refuses (incompatible-upgrade
+  # guard) → cluster-wide outage. 8.600.35 is the deployed on-disk version
+  # (the content nodes' index is in this format).
+  #
+  # Do NOT hand-edit these tags to a higher version and `kubectl apply` —
+  # that bumps all roles at once with no ordering or version-stepping.
+  # Upgrades go through k8s/scripts/vespa-upgrade.sh (ordered, health-gated,
+  # ≤30 releases per hop); afterwards, sync these tags to match live so git
+  # ≈ cluster.
+  - name: vespa-configserver
+    newName: vespaengine/vespa
+    newTag: "8.600.35"
+  - name: vespa-admin
+    newName: vespaengine/vespa
+    newTag: "8.600.35"
+  - name: vespa-content
+    newName: vespaengine/vespa
+    newTag: "8.600.35"
+  - name: vespa-feed
+    newName: vespaengine/vespa
+    newTag: "8.600.35"
+  - name: vespa-query
     newName: vespaengine/vespa
     newTag: "8.600.35"
   - name: busybox

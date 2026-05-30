@@ -25,7 +25,10 @@ spec:
         envFrom:
         - configMapRef:
             name: vespa-config
-        image: vespa
+        # Per-role logical image name (overlay images: resolves it to
+        # vespaengine/vespa:<tag>). Split per role so the upgrade script can
+        # move one StatefulSet's version at a time — see vespa-upgrade.sh.
+        image: vespa-configserver
         imagePullPolicy: Always
         name: vespa-configserver
         # Gates the vespa-configserver Service so consumers (api-server's
