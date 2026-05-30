@@ -46,6 +46,15 @@ export const ChatSidebar = ({
     router.refresh();
   }, [currentChatId]);
 
+  // Local mirror of the server-provided folders so we can show a newly
+  // created folder instantly, without a full `router.refresh()` (which
+  // re-runs the entire heavy fetchChatData bundle just to add one empty
+  // folder). Re-synced whenever the server prop changes.
+  const [localFolders, setLocalFolders] = useState<Folder[]>(folders);
+  useEffect(() => {
+    setLocalFolders(folders);
+  }, [folders]);
+
   const combinedSettings = useContext(SettingsContext);
   if (!combinedSettings) {
     return null;
@@ -118,8 +127,22 @@ export const ChatSidebar = ({
               onClick={() =>
                 createFolder("New Folder")
                   .then((folderId) => {
-                    console.log(`Folder created with ID: ${folderId}`);
-                    router.refresh();
+                    // Append the new (empty) folder to local state instead
+                    // of router.refresh() — instant, no full refetch. The
+                    // create POST itself is a single fast INSERT.
+                    setLocalFolders((prev) => [
+                      ...prev,
+                      {
+                        folder_id: folderId,
+                        folder_name: "New Folder",
+                        display_priority:
+                          prev.reduce(
+                            (max, f) => Math.max(max, f.display_priority),
+                            -1
+                          ) + 1,
+                        chat_sessions: [],
+                      },
+                    ]);
                   })
                   .catch((error) => {
                     console.error("Failed to create folder:", error);
@@ -150,7 +173,7 @@ export const ChatSidebar = ({
         <ChatTab
           existingChats={existingChats}
           currentChatId={currentChatId}
-          folders={folders}
+          folders={localFolders}
           openedFolders={openedFolders}
         />
       </div>
