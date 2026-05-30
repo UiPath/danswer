@@ -5,6 +5,7 @@ from sqlalchemy import delete
 from sqlalchemy import desc
 from sqlalchemy import select
 from sqlalchemy import text
+from sqlalchemy.orm import joinedload
 from sqlalchemy.orm import Session
 
 from danswer.db.connector import fetch_connector_by_id
@@ -77,11 +78,20 @@ def release_deletion_lock(
 
 
 def get_connector_credential_pairs(
-    db_session: Session, include_disabled: bool = True
+    db_session: Session,
+    include_disabled: bool = True,
+    eager_load_connector: bool = False,
 ) -> list[ConnectorCredentialPair]:
     stmt = select(ConnectorCredentialPair)
     if not include_disabled:
         stmt = stmt.where(ConnectorCredentialPair.connector.disabled == False)  # noqa
+    # Callers that read `cc_pair.connector.*` for every row (e.g. the
+    # basic indexing-status endpoint on the chat page, which derives
+    # available source types) MUST set this — otherwise the lazy
+    # relationship fires one query per cc-pair (an N+1 that, at a few
+    # hundred cc-pairs against a remote Postgres, dominates page load).
+    if eager_load_connector:
+        stmt = stmt.options(joinedload(ConnectorCredentialPair.connector))
     results = db_session.scalars(stmt)
     return list(results.all())
 

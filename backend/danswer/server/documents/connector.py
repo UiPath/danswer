@@ -874,7 +874,13 @@ def get_basic_connector_indexing_status(
     _: User = Depends(current_user),
     db_session: Session = Depends(get_session),
 ) -> list[BasicCCPairInfo]:
-    cc_pairs = get_connector_credential_pairs(db_session)
+    # eager_load_connector: the return comprehension reads
+    # `cc_pair.connector.source` for every cc-pair. Without eager loading
+    # that's an N+1 (one query per cc-pair) — the dominant cost of the
+    # chat page load, which calls this endpoint to derive available
+    # source types. At ~hundreds of cc-pairs against a remote Postgres
+    # that was seconds; eager loading collapses it to a couple of queries.
+    cc_pairs = get_connector_credential_pairs(db_session, eager_load_connector=True)
     cc_pair_identifiers = [
         ConnectorCredentialPairIdentifier(
             connector_id=cc_pair.connector_id, credential_id=cc_pair.credential_id
