@@ -39,6 +39,7 @@ resources:
   - background-indexer-scheduler.yaml
   - dask-scheduler.yaml
   - dask-worker.yaml
+  - slack-listener.yaml
 
 replicas:
   - name: background-beat-deployment
@@ -51,3 +52,5 @@ replicas:
     count: 1                          # singleton bookkeeping process
   - name: dask-worker-deployment
     count: 2                          # max concurrent indexing jobs (1 connector per pod); raise if attempts backlog
+  - name: slack-listener-deployment
+    count: 1                          # singleton — Slack Socket Mode websocket; dup would double-process events

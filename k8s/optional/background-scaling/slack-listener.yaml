@@ -1,0 +1,56 @@
+# Slack bot listener (Darwin Slack bot). Split out of the combined
+# `background` supervisord pod, which ran it as the `slack_bot_listener`
+# program alongside indexing + celery + beat.
+#
+# SINGLETON (replicas managed in kustomization.yaml, count: 1). The
+# listener holds a Slack Socket Mode websocket; two instances would each
+# receive and double-process every event. Do not scale >1.
+#
+# Env-neutral like the rest of the component — image is the logical
+# `danswer-backend` (overlay's images: rewrites it), config/secrets via
+# env-configmap + danswer-secrets, matching base. The Slack tokens it
+# needs (DANSWER_BOT_SLACK_APP_TOKEN / DANSWER_BOT_SLACK_BOT_TOKEN) arrive
+# through the envFrom secretRef like every other secrets.env key.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: slack-listener-deployment
+spec:
+  selector:
+    matchLabels:
+      app: slack-listener
+  template:
+    metadata:
+      labels:
+        app: slack-listener
+    spec:
+      containers:
+      - name: slack-listener
+        image: danswer-backend
+        imagePullPolicy: IfNotPresent
+        command:
+        - python
+        - danswer/danswerbot/slack/listener.py
+        env:
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              key: postgres_user
+              name: danswer-secrets
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: postgres_password
+              name: danswer-secrets
+        envFrom:
+        - configMapRef:
+            name: env-configmap
+        - secretRef:
+            name: danswer-secrets
+        resources:
+          requests:
+            cpu: 100m
+            memory: 512Mi
+          limits:
+            cpu: 500m
+            memory: 1Gi

@@ -74,7 +74,7 @@ logical image name only resolves through an overlay.)
 
 | Component | What it ships | When to use |
 |---|---|---|
-| `background-scaling/` | Split-background topology (`background-beat`, `background-celery`, `background-indexer-scheduler`) + remote Dask (`dask-scheduler`, `dask-worker`), replacing the combined `background` deployment in base | When you want horizontal scaling of background/indexing tasks |
+| `background-scaling/` | Split-background topology (`background-beat`, `background-celery`, `background-indexer-scheduler`, `slack-listener`) + remote Dask (`dask-scheduler`, `dask-worker`), replacing the combined `background` deployment in base | When you want horizontal scaling of background/indexing tasks |
 
 **The "flag" for opting in** is a single line in the overlay's
 `kustomization.yaml` `components:` block (see "Apply an optional
@@ -165,7 +165,7 @@ replicas:
 patches:
   - target:
       kind: Deployment
-      labelSelector: "app in (background-celery,background-indexer-scheduler,dask-scheduler,dask-worker)"
+      labelSelector: "app in (background-celery,background-indexer-scheduler,dask-scheduler,dask-worker,slack-listener)"
     patch: |-
       - op: add
         path: /spec/template/spec/affinity
