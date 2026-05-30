@@ -166,7 +166,12 @@ apply time.
 1. Append a `KEY=value` line in `k8s/overlays/prod/env.properties`.
 2. (Same for `overlays/local/env.properties` with the local value.)
 3. `kubectl apply -k k8s/overlays/prod` — kustomize regenerates the
-   ConfigMap with the new value, the rollout picks it up.
+   `env-configmap` with the new value.
+4. **Restart the consumers — the apply does NOT do this for you.** We set
+   `disableNameSuffixHash: true`, so the ConfigMap keeps a stable name
+   and its content change does NOT trigger a pod rollout. `envFrom` reads
+   env only at pod start, so running pods keep the old values until
+   restarted. See "Which workloads to restart after a config change" below.
 
 ### Add a new secret
 
@@ -182,13 +187,50 @@ Redis ships in `base/` (deployed in every environment). To turn the
 features on, flip the flags in `k8s/overlays/prod/env.properties`:
 
 ```
-REDIS_KV_CACHE_ENABLED=true
-REQUEST_RATE_LIMIT_ENABLED=true
-REQUEST_RATE_LIMIT_PER_MINUTE=20
+REDIS_KV_CACHE_ENABLED=true        # read-through cache on settings/tokens/invited-users
+REQUEST_RATE_LIMIT_ENABLED=true    # per-USER request cap (20/min, 300/hr below)
+REQUEST_RATE_LIMIT_PER_MINUTE=20   # per authenticated user (per-IP for anon), not global
 REQUEST_RATE_LIMIT_PER_HOUR=300
+PERSONA_CACHE_ENABLED=true         # global persona-list cache + per-user group cache
 ```
 
-Then `kubectl apply -k k8s/overlays/prod`.
+Then apply **and restart the consumers** (the apply alone won't — see the
+note below on `disableNameSuffixHash`):
+
+```bash
+k8s/scripts/guarded-apply.sh prod          # or: kubectl apply -k k8s/overlays/prod
+kubectl rollout restart deploy/api-server-deployment deploy/background-deployment -n darwin
+kubectl rollout status  deploy/api-server-deployment -n darwin
+```
+
+Redis (`base/redis.yaml`) is already running, so the pods connect on
+restart. If Redis were down, the code is fail-open — it degrades to
+direct Postgres / permissive, never an outage.
+
+### Which workloads to restart after a config change
+
+Because of `disableNameSuffixHash: true`, an `env-configmap` change does
+**not** auto-roll pods (see Footguns). After any `env.properties` edit,
+restart the pods that actually consume the changed vars:
+
+| Changed vars | Restart | Why |
+|---|---|---|
+| Redis flags (`REDIS_*`, `REQUEST_RATE_LIMIT_*`, `PERSONA_CACHE_*`) | `api-server` + `background` | api-server runs the rate limiter + reads the caches; background reads config (Slack/OAuth tokens) and busts the persona cache on group mutations |
+| LLM / search / connector vars (`GEN_AI_*`, `QA_TIMEOUT`, `MULTILINGUAL_*`, etc.) | `api-server` + `background` | both run the chat/search/index paths |
+| Model-server vars (`DOCUMENT_ENCODER_MODEL`, `NORMALIZE_EMBEDDINGS`, …) | `inference-model-server` + `indexing-model-server` | only the model servers read these |
+| `WEB_DOMAIN` / `INTERNAL_URL` / frontend | `web-server` (+ `api-server` for `WEB_DOMAIN` / OIDC redirect) | |
+
+```bash
+# The common case (Redis features, or any backend env change):
+kubectl rollout restart deploy/api-server-deployment deploy/background-deployment -n darwin
+```
+
+> **Split-background topology** (the `background-scaling` component): there
+> is no `background-deployment` — restart the split pods that run danswer
+> backend code instead:
+> `kubectl rollout restart deploy/background-lite-deployment deploy/background-indexer-scheduler-deployment deploy/dask-worker-deployment -n darwin`.
+> The model servers, `nginx`, and `web-server` do **not** use the Redis
+> features — no need to restart them for a Redis flag flip.
 
 ### Apply an optional component (split-background + Dask)
 
@@ -352,6 +394,13 @@ is retried by the indexing pipeline (no data loss, just rework).
   kustomize appends a content hash to generated ConfigMap/Secret names
   (`env-configmap-abc123`), which would break deployments referencing
   `env-configmap`/`danswer-secrets` by their plain names. Don't remove.
+  **Consequence:** because the name is stable, a ConfigMap/Secret content
+  change does NOT trigger an automatic pod rollout (the hash-suffix
+  behavior is exactly what would). After any `env.properties` /
+  `secrets.env` change you must **manually `kubectl rollout restart`** the
+  consuming workloads — see "Which workloads to restart after a config
+  change". (The trade-off is deliberate: stable names so the optional
+  components + secretKeyRefs resolve, at the cost of manual restarts.)
 - **`behavior: create`** on the configMapGenerator means "create new", not
   "merge with an existing one in base". Base intentionally ships no
   ConfigMap with this name; the overlay owns it. If you ever add one to
