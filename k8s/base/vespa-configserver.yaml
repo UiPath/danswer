@@ -28,6 +28,22 @@ spec:
         image: vespa
         imagePullPolicy: Always
         name: vespa-configserver
+        # Gates the vespa-configserver Service so consumers (api-server's
+        # ensure_indices_exist, other Vespa nodes) only route here once the
+        # config server actually serves — not the instant the container
+        # starts. Readiness-only: a slow/booting config server is pulled
+        # from rotation but never restarted (an aggressive liveness probe
+        # could kill a healthy-but-slow node and cause a restart loop).
+        # initialDelay is generous because config-server bootstrap (ZK +
+        # app load) takes 1-2 min.
+        readinessProbe:
+          httpGet:
+            path: /state/v1/health
+            port: 19071
+          initialDelaySeconds: 45
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 6
         resources:
           limits:
             memory: 4096M

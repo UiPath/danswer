@@ -28,6 +28,17 @@ spec:
         image: vespa
         imagePullPolicy: Always
         name: vespa-feed-container
+        # Gates the vespa-feed Service so indexing/feed only routes here
+        # once the feed container serves. Readiness-only (see configserver
+        # note).
+        readinessProbe:
+          httpGet:
+            path: /state/v1/health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 6
         resources:
           limits:
             memory: 4G

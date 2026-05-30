@@ -28,6 +28,19 @@ spec:
         image: vespa
         imagePullPolicy: Always
         name: vespa-query-container
+        # Gates the vespa-query Service — the path the app hits for search.
+        # This is the probe that directly prevents the "503 / connection
+        # refused" window: the Service won't route a query here until
+        # /state/v1/health is up. Readiness-only (no liveness — see the
+        # configserver note).
+        readinessProbe:
+          httpGet:
+            path: /state/v1/health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 6
         resources:
           limits:
             memory: 4G
