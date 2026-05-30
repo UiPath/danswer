@@ -207,6 +207,68 @@ Redis (`base/redis.yaml`) is already running, so the pods connect on
 restart. If Redis were down, the code is fail-open — it degrades to
 direct Postgres / permissive, never an outage.
 
+### Verify Redis caching is actually working
+
+After enabling + restarting, confirm the cache is being populated and hit.
+All commands run against the in-cluster Redis (`redis-0`, no auth). The
+cache uses these key namespaces:
+
+| Key | Feature |
+|---|---|
+| `danswer:kv:<name>` | KV cache (settings, tokens, invited users) — `REDIS_KV_CACHE_ENABLED` |
+| `danswer:personas:all:not_deleted` | Assistants list (global) — `PERSONA_CACHE_ENABLED` |
+| `danswer:personas:groups:<user_id>` | Per-user group cache — `PERSONA_CACHE_ENABLED` |
+| `danswer:ratelimit:msg:<actor>:<min\|hour>:<bucket>` | Per-user request counters — `REQUEST_RATE_LIMIT_ENABLED` |
+
+**1. Are the cache keys present?** (fastest "is it on" check — use `--scan`, never `KEYS`, on a live Redis)
+```bash
+kubectl exec -n darwin redis-0 -c redis -- redis-cli --scan --pattern 'danswer:*'
+```
+Seeing `danswer:personas:all:not_deleted` means the assistants API
+(`GET /persona`) has cached. No `danswer:*` keys at all = the flags
+didn't take effect (pods not restarted? flag not `true`?).
+
+**2. Is it being hit?** (hit/miss ratio — cluster-wide, but proves reads hit cache)
+```bash
+kubectl exec -n darwin redis-0 -c redis -- redis-cli INFO stats | grep keyspace
+# keyspace_hits should climb far faster than keyspace_misses
+```
+
+**3. Inspect a specific entry** (TTL counting down + real payload):
+```bash
+kubectl exec -n darwin redis-0 -c redis -- redis-cli TTL    danswer:personas:all:not_deleted   # ~86400, decreasing
+kubectl exec -n darwin redis-0 -c redis -- redis-cli STRLEN danswer:personas:all:not_deleted   # bytes of cached JSON
+```
+
+**4. Watch a live request hit the cache** (definitive — run, then load Manage Assistants in the UI):
+```bash
+kubectl exec -it -n darwin redis-0 -c redis -- redis-cli MONITOR
+#  hit:  "GET" "danswer:personas:all:not_deleted"
+#  miss: "GET" ... (nil) then "SET" "danswer:personas:all:not_deleted" "[...]" "EX" "86400"
+```
+⚠️ Stop `MONITOR` quickly (Ctrl-C) — it echoes every command and is heavy on a busy Redis.
+
+**5. Force a miss→refill** (proves the read-through path; safe — just one extra Postgres read):
+```bash
+kubectl exec -n darwin redis-0 -c redis -- redis-cli DEL danswer:personas:all:not_deleted
+# load the assistants page once, then:
+kubectl exec -n darwin redis-0 -c redis -- redis-cli EXISTS danswer:personas:all:not_deleted   # 1 = repopulated
+```
+
+**6. Verify write-through invalidation** (no stale assistant lists):
+```bash
+kubectl exec -n darwin redis-0 -c redis -- redis-cli TTL danswer:personas:all:not_deleted   # note it exists
+# rename an assistant in the admin UI, then re-check:
+kubectl exec -n darwin redis-0 -c redis -- redis-cli TTL danswer:personas:all:not_deleted   # -2 = busted by the mutation
+# next page load refills it with the new name.
+```
+
+**Note:** the cache code is **silent on success** and only logs on Redis
+errors (fail-open). So there's nothing in the api-server logs confirming
+a hit — Redis-side inspection above is the only way to observe it. A
+`Redis GET/SET/DEL failed` warning in api-server/background logs means
+Redis is unreachable and the app is silently falling back to Postgres.
+
 ### Which workloads to restart after a config change
 
 Because of `disableNameSuffixHash: true`, an `env-configmap` change does
