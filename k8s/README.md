@@ -192,6 +192,7 @@ REQUEST_RATE_LIMIT_ENABLED=true    # per-USER request cap (20/min, 300/hr below)
 REQUEST_RATE_LIMIT_PER_MINUTE=20   # per authenticated user (per-IP for anon), not global
 REQUEST_RATE_LIMIT_PER_HOUR=300
 PERSONA_CACHE_ENABLED=true         # global persona-list cache + per-user group cache
+CC_PAIR_INFO_CACHE_ENABLED=true    # chat-page connector indexing-status (~300ms read), 60s global TTL
 ```
 
 Then apply **and restart the consumers** (the apply alone won't — see the
@@ -219,6 +220,7 @@ cache uses these key namespaces:
 | `danswer:personas:all:not_deleted` | Assistants list (global) — `PERSONA_CACHE_ENABLED` |
 | `danswer:personas:groups:<user_id>` | Per-user group cache — `PERSONA_CACHE_ENABLED` |
 | `danswer:ratelimit:msg:<actor>:<min\|hour>:<bucket>` | Per-user request counters — `REQUEST_RATE_LIMIT_ENABLED` |
+| `danswer:cc_pair_basic_info` | Chat-page connector indexing-status — `CC_PAIR_INFO_CACHE_ENABLED` |
 
 **1. Are the cache keys present?** (fastest "is it on" check — use `--scan`, never `KEYS`, on a live Redis)
 ```bash

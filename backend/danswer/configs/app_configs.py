@@ -359,6 +359,22 @@ PERSONA_CACHE_TTL_SECONDS = int(
     os.environ.get("PERSONA_CACHE_TTL_SECONDS") or 86400  # 24 h backstop
 )
 
+# Basic connector/cc-pair info cache (the /manage/indexing-status read the
+# chat page uses to derive available source types). That read does a
+# per-cc-pair document-count aggregation that measured ~300ms on the live
+# DB and runs on every chat page load — the page's slowest fan-out call.
+# Pure TTL cache, global (same for all users), fail-open. No explicit
+# invalidation: the data (which connectors exist + have indexed docs)
+# changes slowly and brief staleness is harmless (it only feeds the source-
+# filter list + the "sources incomplete" setup modal), so a short TTL is
+# the whole strategy. Default OFF.
+CC_PAIR_INFO_CACHE_ENABLED = (
+    os.environ.get("CC_PAIR_INFO_CACHE_ENABLED", "").lower() == "true"
+)
+CC_PAIR_INFO_CACHE_TTL_SECONDS = int(
+    os.environ.get("CC_PAIR_INFO_CACHE_TTL_SECONDS") or 60
+)
+
 
 #####
 # Enterprise Edition Configs
