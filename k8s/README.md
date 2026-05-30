@@ -1,14 +1,12 @@
 # `k8s/` — Kustomize-based Kubernetes manifests
 
-Replaces the older `darwin-kubernetes/` tree. Structure:
-
 ```
 k8s/
-├── base/              Environment-neutral manifests (cleaned from the live cluster)
+├── base/              Environment-neutral manifests
 ├── overlays/
 │   ├── prod/          Darwin AKS production
 │   └── local/         Local dev (Rancher Desktop, Docker Desktop, kind)
-└── optional/          Opt-in deployments (Redis, split-background, Dask)
+└── optional/          Opt-in deployments (split-background, Dask)
 ```
 
 ## Quick start
@@ -76,17 +74,11 @@ not using kustomize.
 | `background-beat.yaml`, `background-celery.yaml`, `background-indexer-scheduler.yaml` | Split background topology (replaces the combined `background` deployment in base) | When you want horizontal scaling of background tasks |
 | `dask-scheduler.yaml`, `dask-worker.yaml` | Remote Dask scheduler topology (paired with `background-indexer-scheduler`) | When you switch from the in-process `LocalCluster` indexing to remote Dask |
 
-> **Redis used to live here** as an opt-in component. Both prod and local
-> now deploy the in-cluster Redis StatefulSet, so it moved to
-> `base/redis.yaml` — no per-overlay opt-in needed.
-
 **The "flag" for opting into an optional feature** is a single line in
 the overlay's `kustomization.yaml` `components:` block. To wrap the
 split-background deployments as an opt-in component: create a directory
 under `optional/` with its own `kustomization.yaml` of `kind: Component`,
 then reference it from the overlay's `components:` block.
-
-See `MIGRATION.md` (repo root) for the broader rollout plan.
 
 ## First-time setup
 
@@ -129,40 +121,26 @@ kubectl kustomize k8s/overlays/prod | less
    - Add an `env` entry with `secretKeyRef` to the relevant deployment in `base/`, or
    - Rely on the `envFrom: secretRef: danswer-secrets` wiring already in `api-server.yaml` and `background.yaml` — every key in `secrets.env` is automatically exposed as an env var matching the key name.
 
-### Roll out the Redis cache + per-user rate limiter
+### Enable the Redis cache + per-user rate limiter
 
-1. Apply Redis:
-   ```bash
-   kubectl apply -f k8s/optional/redis.yaml
-   kubectl rollout status statefulset/redis
-   ```
-2. Flip the env flags in `k8s/overlays/prod/env.properties`:
-   ```
-   REDIS_KV_CACHE_ENABLED=true
-   REQUEST_RATE_LIMIT_ENABLED=true
-   REQUEST_RATE_LIMIT_PER_MINUTE=20
-   REQUEST_RATE_LIMIT_PER_HOUR=300
-   ```
-3. `kubectl apply -k k8s/overlays/prod`
+Redis ships in `base/` (deployed in every environment). To turn the
+features on, flip the flags in `k8s/overlays/prod/env.properties`:
 
-## Important conventions
+```
+REDIS_KV_CACHE_ENABLED=true
+REQUEST_RATE_LIMIT_ENABLED=true
+REQUEST_RATE_LIMIT_PER_MINUTE=20
+REQUEST_RATE_LIMIT_PER_HOUR=300
+```
 
-- **`darwin-kubernetes/` is being retired.** Everything from it has been
-  ported here. Delete `darwin-kubernetes/` once you've confirmed
-  `kubectl diff -k k8s/overlays/prod` shows no surprising drift from the
-  live cluster.
-- **`darwin-kubernetes/temp/` and `k8s/overlays/*/secrets.env` are
-  gitignored.** Never commit either — both contain real secrets.
-- **The legacy `deployment/kubernetes/*` tree is upstream Onyx reference
-  only.** Not applied to Darwin. See AGENTS.md "Critical fact §9".
+Then `kubectl apply -k k8s/overlays/prod`.
 
-## Migration plan (deleting `darwin-kubernetes/`)
+## Conventions
 
-1. `cp k8s/overlays/prod/secrets.env.example k8s/overlays/prod/secrets.env` and fill in.
-2. `kubectl diff -k k8s/overlays/prod` against the live cluster — review and reconcile any unexpected drift.
-3. `kubectl apply -k k8s/overlays/prod` once.
-4. Verify everything is healthy.
-5. `git rm -r darwin-kubernetes/` in a follow-up PR.
+- **`k8s/overlays/*/secrets.env` is gitignored.** Never commit it — it
+  holds real secret values. Commit `secrets.env.example` instead.
+- **The `deployment/kubernetes/*` tree is upstream Onyx reference only.**
+  Not applied to Darwin. See AGENTS.md "Critical fact §9".
 
 ## Footguns
 
