@@ -141,8 +141,12 @@ Then `kubectl apply -k k8s/overlays/prod`.
 ### Apply an optional component (split-background + Dask)
 
 Optional features are kustomize components, opted into from the overlay
-so they inherit its image tags / namespace / generated config. Two
-edits to the overlay's `kustomization.yaml`:
+so they inherit its image tags / namespace / generated config. The
+component carries its own replica counts (in
+`optional/background-scaling/kustomization.yaml`) and env-neutral
+manifests; the overlay adds image tags and any env-specific scheduling.
+
+Edit the overlay's `kustomization.yaml`:
 
 ```yaml
 # 1. Pull the component in:
@@ -154,6 +158,27 @@ components:
 replicas:
   - name: background-deployment
     count: 0
+
+# 3. (prod only) The component manifests are env-neutral — no node
+#    affinity. To pin the indexing-side pods to the Darwin indexcpu pool,
+#    add a patch. Skip this on local (no such node pool):
+patches:
+  - target:
+      kind: Deployment
+      labelSelector: "app in (background-celery,background-indexer-scheduler,dask-scheduler,dask-worker)"
+    patch: |-
+      - op: add
+        path: /spec/template/spec/affinity
+        value:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+                - matchExpressions:
+                    - {key: agentpool, operator: In, values: [indexcpu]}
+      - op: add
+        path: /spec/template/spec/tolerations
+        value:
+          - {effect: NoSchedule, key: darwin, operator: Equal, value: indexing}
 ```
 
 Then apply the overlay as usual:
@@ -167,12 +192,16 @@ kustomize applies everything together; the new pods reference the same
 overlay-generated `env-configmap` / `danswer-secrets`, and their
 `danswer-backend` image is rewritten to the overlay's pinned tag.
 
-Rollback: remove the `components:` line, set `background-deployment`
-back to `count: 1`, re-apply. (The split pods are pruned on the next
-apply if you use `kubectl apply -k --prune`, or delete them by label.)
-Do NOT run the combined `background` deployment and `background-beat` at
-non-zero replicas simultaneously — two beat schedulers on one broker
-fire every periodic task twice.
+To change replica counts, edit the `replicas:` block in
+`optional/background-scaling/kustomization.yaml` (dask-worker is the
+indexing-throughput knob).
+
+Rollback: remove the `components:` line (and the patch), set
+`background-deployment` back to `count: 1`, re-apply. (The split pods are
+pruned on the next apply if you use `kubectl apply -k --prune`, or delete
+them by label.) Do NOT run the combined `background` deployment and
+`background-beat` at non-zero replicas simultaneously — two beat
+schedulers on one broker fire every periodic task twice.
 
 ## Conventions
 

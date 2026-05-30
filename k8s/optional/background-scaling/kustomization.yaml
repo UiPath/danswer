@@ -7,18 +7,29 @@
 #   - dask-scheduler             Dask scheduler Service + Deployment
 #   - dask-worker                Dask worker pods (scale these for indexing throughput)
 #
-# Image refs use the logical name `danswer-backend` — same as base — so
-# the including overlay's `images:` block parameterizes them. There is NO
-# images: block here; this component is only meaningful when pulled into an
-# overlay via its `components:` field:
+# Parameterization mirrors base:
+#   - Image refs use the logical name `danswer-backend`; the including
+#     overlay's `images:` block rewrites them (no images: needed here).
+#   - Secrets/config load identically to base: explicit POSTGRES_USER /
+#     POSTGRES_PASSWORD via secretKeyRef, plus
+#     `envFrom: [configMapRef env-configmap, secretRef danswer-secrets]`.
+#   - Replica counts live in the `replicas:` block below (one place),
+#     not hardcoded in the manifests. dask-worker is the knob you turn
+#     for more indexing throughput.
+#   - Manifests are environment-neutral (NO node affinity / tolerations).
+#     Darwin's indexcpu-pool scheduling is added by the prod overlay when
+#     it opts in (see k8s/README.md → "Apply an optional component").
+#
+# This component is only meaningful when pulled into an overlay via its
+# `components:` field:
 #
 #   # k8s/overlays/prod/kustomization.yaml
 #   components:
 #     - ../../optional/background-scaling
 #
-# When you opt in, also scale the base `background` deployment to 0 (set
-# its replica count to 0 in the overlay's `replicas:` block) so you don't
-# run two Celery beat schedulers on the same broker.
+# When you opt in, also set base `background-deployment` to count: 0 in the
+# overlay's replicas: block so you don't run two Celery beat schedulers on
+# the same broker.
 apiVersion: kustomize.config.k8s.io/v1alpha1
 kind: Component
 
@@ -28,3 +39,15 @@ resources:
   - background-indexer-scheduler.yaml
   - dask-scheduler.yaml
   - dask-worker.yaml
+
+replicas:
+  - name: background-beat-deployment
+    count: 1
+  - name: background-celery-deployment
+    count: 2
+  - name: background-indexer-scheduler-deployment
+    count: 1
+  - name: dask-scheduler-deployment
+    count: 1
+  - name: dask-worker-deployment
+    count: 3

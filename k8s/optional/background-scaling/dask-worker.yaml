@@ -3,7 +3,6 @@ kind: Deployment
 metadata:
   name: dask-worker-deployment
 spec:
-  replicas: 3
   selector:
     matchLabels:
       app: dask-worker
@@ -12,15 +11,6 @@ spec:
       labels:
         app: dask-worker
     spec:
-      affinity:
-        nodeAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            nodeSelectorTerms:
-            - matchExpressions:
-              - key: agentpool
-                operator: In
-                values:
-                - indexcpu
       containers:
       - name: worker
         image: danswer-backend
@@ -47,15 +37,11 @@ spec:
             secretKeyRef:
               key: postgres_password
               name: danswer-secrets
-        - name: REDIS_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              key: redis_password
-              name: danswer-secrets
-              optional: true
         envFrom:
         - configMapRef:
             name: env-configmap
+        - secretRef:
+            name: danswer-secrets
         volumeMounts:
         - name: dynamic-storage
           mountPath: /home/storage
@@ -68,11 +54,6 @@ spec:
           limits:
             cpu: '2'
             memory: 4Gi
-      tolerations:
-      - effect: NoSchedule
-        key: darwin
-        operator: Equal
-        value: indexing
       volumes:
       - name: dynamic-storage
         persistentVolumeClaim:

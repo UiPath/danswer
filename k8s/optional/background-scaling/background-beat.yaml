@@ -3,7 +3,6 @@ kind: Deployment
 metadata:
   name: background-beat-deployment
 spec:
-  replicas: 1
   strategy:
     type: Recreate
   selector:
@@ -35,15 +34,11 @@ spec:
             secretKeyRef:
               key: postgres_password
               name: danswer-secrets
-        - name: REDIS_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              key: redis_password
-              name: danswer-secrets
-              optional: true
         envFrom:
         - configMapRef:
             name: env-configmap
+        - secretRef:
+            name: danswer-secrets
         resources:
           requests:
             cpu: 50m

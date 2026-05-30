@@ -3,7 +3,6 @@ kind: Deployment
 metadata:
   name: background-indexer-scheduler-deployment
 spec:
-  replicas: 1
   strategy:
     type: Recreate
   selector:
@@ -14,15 +13,6 @@ spec:
       labels:
         app: background-indexer-scheduler
     spec:
-      affinity:
-        nodeAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            nodeSelectorTerms:
-            - matchExpressions:
-              - key: agentpool
-                operator: In
-                values:
-                - indexcpu
       containers:
       - name: indexer-scheduler
         image: danswer-backend
@@ -45,15 +35,11 @@ spec:
             secretKeyRef:
               key: postgres_password
               name: danswer-secrets
-        - name: REDIS_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              key: redis_password
-              name: danswer-secrets
-              optional: true
         envFrom:
         - configMapRef:
             name: env-configmap
+        - secretRef:
+            name: danswer-secrets
         volumeMounts:
         - name: dynamic-storage
           mountPath: /home/storage
@@ -66,11 +52,6 @@ spec:
           limits:
             cpu: 500m
             memory: 1Gi
-      tolerations:
-      - effect: NoSchedule
-        key: darwin
-        operator: Equal
-        value: indexing
       volumes:
       - name: dynamic-storage
         persistentVolumeClaim:

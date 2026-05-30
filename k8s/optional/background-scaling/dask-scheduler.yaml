@@ -21,7 +21,6 @@ kind: Deployment
 metadata:
   name: dask-scheduler-deployment
 spec:
-  replicas: 1
   strategy:
     type: Recreate
   selector:
@@ -32,15 +31,6 @@ spec:
       labels:
         app: dask-scheduler
     spec:
-      affinity:
-        nodeAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            nodeSelectorTerms:
-            - matchExpressions:
-              - key: agentpool
-                operator: In
-                values:
-                - indexcpu
       containers:
       - name: scheduler
         image: danswer-backend
@@ -59,6 +49,8 @@ spec:
         envFrom:
         - configMapRef:
             name: env-configmap
+        - secretRef:
+            name: danswer-secrets
         resources:
           requests:
             cpu: 100m
@@ -76,8 +68,3 @@ spec:
             port: 8786
           initialDelaySeconds: 15
           periodSeconds: 20
-      tolerations:
-      - effect: NoSchedule
-        key: darwin
-        operator: Equal
-        value: indexing
