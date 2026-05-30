@@ -26,11 +26,12 @@ images:
     newName: nginx
     newTag: 1.23.4-alpine
   - name: vespa
+    # Pinned, same as prod — never :latest for Vespa (see prod overlay note).
     newName: vespaengine/vespa
-    newTag: latest
+    newTag: "8.600.35"
   - name: busybox
     newName: busybox
-    newTag: latest
+    newTag: "1.36.1"
 
 replicas:
   - name: api-server-deployment

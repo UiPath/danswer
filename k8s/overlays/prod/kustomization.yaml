@@ -33,13 +33,18 @@ images:
     newName: nginx
     newTag: 1.23.4-alpine
   - name: vespa
-    # NOT pinned in live cluster either — pin to a specific tag when
-    # convenient (currently floats on `latest`, which is risky).
+    # PINNED to the version the cluster actually runs. NEVER use :latest —
+    # it pulled 8.696.20, a >30-release jump from 8.600.35, which Vespa's
+    # config server refuses (incompatible-upgrade guard) → cluster-wide
+    # outage. 8.600.35 is the deployed on-disk version (the content nodes'
+    # index is in this format). Upgrading is a deliberate, STEPWISE
+    # operation (≤30 releases per hop) — never a bare tag bump here.
     newName: vespaengine/vespa
-    newTag: latest
+    newTag: "8.600.35"
   - name: busybox
+    # Pinned (was :latest). Only an init chown helper, but same drift hygiene.
     newName: busybox
-    newTag: latest
+    newTag: "1.36.1"
 
 replicas:
   - name: api-server-deployment
