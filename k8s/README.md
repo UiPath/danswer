@@ -258,6 +258,70 @@ them by label.) Do NOT run the combined `background` deployment and
 `background-lite` at non-zero replicas simultaneously — both run a celery
 beat, and two beats on one broker fire every periodic task twice.
 
+### KEDA indexing autoscale (autoscale dask-worker on backlog)
+
+`optional/keda-indexing-autoscale/` autoscales `dask-worker-deployment`
+based on real indexing demand read from Postgres, instead of a fixed
+replica count. Use it when indexing load is bursty and you'd rather not
+pay for idle workers.
+
+**How the metric works.** A KEDA PostgreSQL scaler runs this every 30s:
+
+```sql
+SELECT COALESCE(SUM(LEAST(1, cnt)), 0) FROM (
+  SELECT con.source, COUNT(*) cnt
+  FROM index_attempt ia JOIN connector con ON ia.connector_id = con.id
+  WHERE ia.status IN ('NOT_STARTED','IN_PROGRESS')
+  GROUP BY con.source) s
+```
+
+It returns the number of attempts that can run **concurrently** right now
+— respecting `INDEXING_PER_SOURCE_CAP` (default 1, one per source). It is
+deliberately **not** a raw pending count: 10 queued attempts of the same
+source still only run one at a time, so spinning up 10 workers would waste
+9. `targetQueryValue: 1` → desired replicas = the metric.
+
+**Why it's safe to scale down:** the metric counts `IN_PROGRESS` too, so
+replicas never drop below the number of running jobs — KEDA won't scale a
+busy worker away. Scale-to-0 happens only when nothing is queued or
+running. (`status` is stored UPPERCASE — `native_enum=False` — verified
+against the live DB.)
+
+**Prerequisites + how to enable:**
+1. Install the KEDA operator cluster-wide (the `keda.sh` CRDs):
+   ```bash
+   kubectl apply --server-side -f https://github.com/kedacore/keda/releases/download/v2.14.0/keda-2.14.0.yaml
+   ```
+2. Opt in **after** background-scaling, and **remove** `dask-worker-deployment`
+   from the background-scaling `replicas:` block (KEDA owns that count now —
+   leaving a static replicas entry fights the autoscaler):
+   ```yaml
+   # k8s/overlays/prod/kustomization.yaml
+   components:
+     - ../../optional/background-scaling
+     - ../../optional/keda-indexing-autoscale
+   ```
+3. The scaler's `host`/`userName`/`dbName` in `scaledobject.yaml` are the
+   Darwin prod Postgres coords — make sure they match the overlay's
+   `POSTGRES_*`. The password comes from `danswer-secrets` via a
+   `TriggerAuthentication` (no duplication).
+4. `k8s/scripts/guarded-apply.sh prod`, then watch:
+   ```bash
+   kubectl get scaledobject,hpa -n darwin
+   kubectl get pods -n darwin -l app=dask-worker -w
+   ```
+
+**Tuning:** `maxReplicaCount` (default 4) should be ≈ your number of
+distinct active source types (more is wasted under `PER_SOURCE_CAP=1`).
+`minReplicaCount: 0` saves idle cost but adds ~30s-2min cold start on the
+first index after idle — set to 1 to keep a worker warm.
+
+**Recommended companion change** (in `background-scaling/dask-worker.yaml`):
+give the worker a `terminationGracePeriodSeconds` and a preStop that
+retires the Dask worker, so a scale-down lets the current index attempt
+finish instead of being killed mid-run. Even without it, a killed attempt
+is retried by the indexing pipeline (no data loss, just rework).
+
 ## Conventions
 
 - **`k8s/overlays/*/secrets.env` is gitignored.** Never commit it — it
