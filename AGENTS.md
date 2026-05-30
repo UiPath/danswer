@@ -396,6 +396,12 @@ Rules:
   hop, applied as an ordered operation, never a bare tag bump. Do NOT
   set `VESPA_SKIP_UPGRADE_CHECK=true` to force a big jump on prod; it
   risks the index format.
+- **Apply via `k8s/scripts/guarded-apply.sh <overlay>`, not raw
+  `kubectl apply -k`.** The guard reads the live running Vespa version,
+  compares it to what the overlay would deploy, and refuses a >30-minor
+  upgrade / major change / floating tag (and warns on big downgrades)
+  before it can reach the cluster. It checks against *live* (not the
+  repo's previous pin) because config drifts out of git.
 - This applies to any version-stateful StatefulSet, but Vespa is the
   one that bites.
 

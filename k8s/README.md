@@ -15,14 +15,21 @@ k8s/
 # Preview what would be applied:
 kubectl kustomize k8s/overlays/prod
 
-# Apply to your current kube context (verify it first!):
+# Apply via the guarded wrapper (verify context first!). It diffs vs live
+# and REFUSES a Vespa version jump >30 minor releases (which would crash
+# the cluster — see "Vespa version guard" below and AGENTS.md §10):
 kubectl config current-context        # → 'darwin' for prod
-kubectl apply -k k8s/overlays/prod
+k8s/scripts/guarded-apply.sh prod
 
 # Local:
 kubectl config use-context rancher-desktop   # or docker-desktop / kind / etc.
-kubectl apply -k k8s/overlays/local
+k8s/scripts/guarded-apply.sh local
 ```
+
+> Raw `kubectl apply -k k8s/overlays/prod` still works, but prefer
+> `guarded-apply.sh` — it runs the Vespa version check + `kubectl diff`
+> before applying. Raw apply has no guard; that's how the Vespa outage
+> happened.
 
 ## What lives where
 
@@ -108,6 +115,39 @@ kubectl kustomize k8s/overlays/prod | less
    ```bash
    kubectl apply -k k8s/overlays/prod
    ```
+
+### Bump the Vespa version (DANGER — read this)
+
+Vespa is version-stateful: the config server refuses an auto-upgrade
+spanning **>30 minor releases**, and forcing it past that risks the
+on-disk index format. A careless bump = cluster-wide outage (this
+happened — AGENTS.md §10).
+
+1. Find the running version: `kubectl get statefulset vespa-content -n darwin -o jsonpath='{..image}'`.
+2. Pick a target **≤30 minors ahead**. For a bigger jump, do it in
+   stages (e.g. `8.600 → 8.630 → 8.660 → …`), applying + verifying each.
+3. Edit the `vespa` `images:` entry in `k8s/overlays/{prod,local}/kustomization.yaml`.
+4. Apply via the guard — it will REFUSE a >30-minor upgrade:
+   ```bash
+   k8s/scripts/guarded-apply.sh prod
+   ```
+5. After each hop, confirm config servers serve (`:19071/state/v1/health` → 200)
+   and the doc count is intact before the next hop.
+
+### Vespa version guard (`k8s/scripts/guarded-apply.sh`)
+
+The wrapper reads the **live** running Vespa version and the version your
+overlay would deploy, and:
+- **refuses** an upgrade that jumps >30 minor releases (Vespa's limit),
+- **refuses** a major-version change (needs a dedicated migration),
+- **refuses** a floating/unparseable tag (`:latest`),
+- **warns + requires `FORCE=1`** on a large downgrade (legit only when
+  recovering to the on-disk version),
+- otherwise runs `kubectl diff` then `kubectl apply -k`.
+
+It checks against **live**, not the repo's previous pin, on purpose —
+config can drift out of git, and live is the only truth that matters at
+apply time.
 
 ### Add a new env var (non-secret)
 
