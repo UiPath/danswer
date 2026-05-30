@@ -20,6 +20,7 @@ resources:
   - inference-model-server.yaml
   - indexing-model-server.yaml
   - persistent-volumes.yaml
+  - redis.yaml  # cache + rate limiting; both prod and local deploy it
 
   # Vespa cluster (search index backend)
   - vespa-config.yaml

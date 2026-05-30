@@ -73,27 +73,18 @@ not using kustomize.
 
 | Path | What it ships | When to use |
 |---|---|---|
-| `redis/` (kustomize component) | Redis 7.2 StatefulSet + Service | Local dev (deploys an in-cluster Redis). Prod typically uses managed Redis instead — don't opt in here, just point `REDIS_HOST` at the managed FQDN in `env.properties`. |
 | `background-beat.yaml`, `background-celery.yaml`, `background-indexer-scheduler.yaml` | Split background topology (replaces the combined `background` deployment in base) | When you want horizontal scaling of background tasks |
 | `dask-scheduler.yaml`, `dask-worker.yaml` | Remote Dask scheduler topology (paired with `background-indexer-scheduler`) | When you switch from the in-process `LocalCluster` indexing to remote Dask |
 
+> **Redis used to live here** as an opt-in component. Both prod and local
+> now deploy the in-cluster Redis StatefulSet, so it moved to
+> `base/redis.yaml` — no per-overlay opt-in needed.
+
 **The "flag" for opting into an optional feature** is a single line in
-the overlay's `kustomization.yaml`:
-
-```yaml
-# k8s/overlays/local/kustomization.yaml
-components:
-  - ../../optional/redis      # comment out this line to skip
-```
-
-Prod's `kustomization.yaml` doesn't have that `components:` block at
-all → no Redis deployed in prod. Local does → in-cluster Redis comes
-along.
-
-To add more opt-in features the same way (e.g. wrap the split-background
-deployments as a component): create a directory under `optional/` with
-its own `kustomization.yaml` of `kind: Component`, then reference it
-from the overlay's `components:` block.
+the overlay's `kustomization.yaml` `components:` block. To wrap the
+split-background deployments as an opt-in component: create a directory
+under `optional/` with its own `kustomization.yaml` of `kind: Component`,
+then reference it from the overlay's `components:` block.
 
 See `MIGRATION.md` (repo root) for the broader rollout plan.
 
