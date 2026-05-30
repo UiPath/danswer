@@ -1,11 +1,13 @@
 # Kustomize Component — split-background + remote-Dask indexing topology.
 #
-# Replaces the single combined `background` deployment (in base) with:
-#   - background-beat            Celery beat scheduler (singleton)
-#   - background-celery          Celery workers (maintenance tasks)
+# Replaces the single combined `background` deployment (in base) with FOUR
+# deployments:
+#   - background-lite             beat + celery + slack-listener, co-located
+#                                 (3 containers, 1 pod) — the low-traffic
+#                                 singletons that don't scale with indexing
 #   - background-indexer-scheduler  the update.py polling loop, in remote-Dask mode
-#   - dask-scheduler             Dask scheduler Service + Deployment
-#   - dask-worker                Dask worker pods (scale these for indexing throughput)
+#   - dask-scheduler              Dask scheduler Service + Deployment
+#   - dask-worker                 Dask worker pods (scale these for indexing throughput)
 #
 # Parameterization mirrors base:
 #   - Image refs use the logical name `danswer-backend`; the including
@@ -13,15 +15,13 @@
 #   - Secrets/config load identically to base: explicit POSTGRES_USER /
 #     POSTGRES_PASSWORD via secretKeyRef, plus
 #     `envFrom: [configMapRef env-configmap, secretRef danswer-secrets]`.
-#   - Replica counts live in the `replicas:` block below (one place),
-#     not hardcoded in the manifests. dask-worker is the knob you turn
-#     for more indexing throughput.
+#   - Replica counts live in the `replicas:` block below (one place).
+#     dask-worker is the knob you turn for more indexing throughput.
 #   - Manifests are environment-neutral (NO node affinity / tolerations).
 #     Darwin's indexcpu-pool scheduling is added by the prod overlay when
 #     it opts in (see k8s/README.md → "Apply an optional component").
 #
-# This component is only meaningful when pulled into an overlay via its
-# `components:` field:
+# Only meaningful when pulled into an overlay via its `components:` field:
 #
 #   # k8s/overlays/prod/kustomization.yaml
 #   components:
@@ -34,23 +34,17 @@ apiVersion: kustomize.config.k8s.io/v1alpha1
 kind: Component
 
 resources:
-  - background-beat.yaml
-  - background-celery.yaml
+  - background-lite.yaml
   - background-indexer-scheduler.yaml
   - dask-scheduler.yaml
   - dask-worker.yaml
-  - slack-listener.yaml
 
 replicas:
-  - name: background-beat-deployment
-    count: 1                          # singleton — MUST stay 1 (dup beats double-fire tasks)
-  - name: background-celery-deployment
-    count: 1                          # maintenance only; each pod autoscales 3-10 threads
+  - name: background-lite-deployment
+    count: 1                          # singleton — beat + slack websocket; never >1
   - name: background-indexer-scheduler-deployment
     count: 1                          # singleton — the update.py polling loop
   - name: dask-scheduler-deployment
     count: 1                          # singleton bookkeeping process
   - name: dask-worker-deployment
     count: 2                          # max concurrent indexing jobs (1 connector per pod); raise if attempts backlog
-  - name: slack-listener-deployment
-    count: 1                          # singleton — Slack Socket Mode websocket; dup would double-process events

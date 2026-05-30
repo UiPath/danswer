@@ -74,7 +74,7 @@ logical image name only resolves through an overlay.)
 
 | Component | What it ships | When to use |
 |---|---|---|
-| `background-scaling/` | Split-background topology (`background-beat`, `background-celery`, `background-indexer-scheduler`, `slack-listener`) + remote Dask (`dask-scheduler`, `dask-worker`), replacing the combined `background` deployment in base | When you want horizontal scaling of background/indexing tasks |
+| `background-scaling/` | `background-lite` (beat + celery + slack-listener co-located, 1 pod) + `background-indexer-scheduler` + remote Dask (`dask-scheduler`, `dask-worker`), replacing the combined `background` deployment in base | When you want horizontal scaling of background/indexing tasks |
 
 **The "flag" for opting in** is a single line in the overlay's
 `kustomization.yaml` `components:` block (see "Apply an optional
@@ -165,7 +165,7 @@ replicas:
 patches:
   - target:
       kind: Deployment
-      labelSelector: "app in (background-celery,background-indexer-scheduler,dask-scheduler,dask-worker,slack-listener)"
+      labelSelector: "app in (background-lite,background-indexer-scheduler,dask-scheduler,dask-worker)"
     patch: |-
       - op: add
         path: /spec/template/spec/affinity
@@ -200,7 +200,7 @@ kubectl apply -k k8s/overlays/prod
 
 # Watch the new pods come up:
 kubectl rollout status deploy/dask-scheduler-deployment
-kubectl rollout status deploy/background-celery-deployment
+kubectl rollout status deploy/background-lite-deployment
 ```
 
 kustomize applies everything together; the new pods reference the same
@@ -215,8 +215,8 @@ Rollback: remove the `components:` line (and the patch), set
 `background-deployment` back to `count: 1`, re-apply. (The split pods are
 pruned on the next apply if you use `kubectl apply -k --prune`, or delete
 them by label.) Do NOT run the combined `background` deployment and
-`background-beat` at non-zero replicas simultaneously — two beat
-schedulers on one broker fire every periodic task twice.
+`background-lite` at non-zero replicas simultaneously — both run a celery
+beat, and two beats on one broker fire every periodic task twice.
 
 ## Conventions
 

@@ -1,0 +1,156 @@
+# background-lite — the low-traffic singletons that don't scale with
+# indexing load, co-located in one pod as three containers:
+#   - celery-worker    maintenance tasks (prune/sync/deletion/analytics);
+#                       autoscales 3-10 threads inside this one container
+#   - celery-beat      periodic-task scheduler (singleton)
+#   - slack-listener   Slack Socket Mode websocket (singleton)
+#
+# This replaces three separate deployments (background-celery,
+# background-beat, slack-listener) — none of them benefits from being its
+# own Deployment for the indexing-scaling goal, and collapsing them trims
+# the pod count and per-deployment resource reservations.
+#
+# Indexing is deliberately NOT here — that's the Dask path
+# (background-indexer-scheduler → dask-scheduler → dask-worker), which is
+# the part that actually scales.
+#
+# SINGLETON: replicas managed in kustomization.yaml at count: 1. The pod
+# contains celery-beat (dup beats double-fire periodic tasks) and the
+# Slack websocket listener (dup double-processes events), so this pod
+# must never run more than one replica. Each container restarts
+# independently if it crashes; the pod is rescheduled as a unit.
+#
+# Env-neutral like the rest of the component (logical danswer-backend
+# image; config/secrets via env-configmap + danswer-secrets). The Slack
+# tokens reach the listener through the envFrom secretRef.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: background-lite-deployment
+spec:
+  # MUST stay 1 — see the singleton note above. Set in the component
+  # kustomization replicas: block too; kept here as the manifest default.
+  replicas: 1
+  strategy:
+    # Recreate (not RollingUpdate): celery-beat must never overlap with a
+    # second beat during a rollout, or periodic tasks double-fire.
+    type: Recreate
+  selector:
+    matchLabels:
+      app: background-lite
+  template:
+    metadata:
+      labels:
+        app: background-lite
+    spec:
+      containers:
+      # --- celery worker (maintenance tasks) ---
+      - name: celery-worker
+        image: danswer-backend
+        imagePullPolicy: IfNotPresent
+        command:
+        - celery
+        - -A
+        - danswer.background.celery.celery_run:celery_app
+        - worker
+        - --pool=threads
+        - --autoscale=3,10
+        - --loglevel=INFO
+        env:
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              key: postgres_user
+              name: danswer-secrets
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: postgres_password
+              name: danswer-secrets
+        envFrom:
+        - configMapRef:
+            name: env-configmap
+        - secretRef:
+            name: danswer-secrets
+        volumeMounts:
+        - name: dynamic-storage
+          mountPath: /home/storage
+        - name: file-connector-storage
+          mountPath: /home/file_connector_storage
+        resources:
+          requests:
+            cpu: 200m
+            memory: 512Mi
+          limits:
+            cpu: '1'
+            memory: 2Gi
+      # --- celery beat (periodic scheduler) ---
+      - name: celery-beat
+        image: danswer-backend
+        imagePullPolicy: IfNotPresent
+        command:
+        - celery
+        - -A
+        - danswer.background.celery.celery_run:celery_app
+        - beat
+        - --loglevel=INFO
+        env:
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              key: postgres_user
+              name: danswer-secrets
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: postgres_password
+              name: danswer-secrets
+        envFrom:
+        - configMapRef:
+            name: env-configmap
+        - secretRef:
+            name: danswer-secrets
+        resources:
+          requests:
+            cpu: 50m
+            memory: 128Mi
+          limits:
+            cpu: 200m
+            memory: 256Mi
+      # --- slack bot listener ---
+      - name: slack-listener
+        image: danswer-backend
+        imagePullPolicy: IfNotPresent
+        command:
+        - python
+        - danswer/danswerbot/slack/listener.py
+        env:
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              key: postgres_user
+              name: danswer-secrets
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: postgres_password
+              name: danswer-secrets
+        envFrom:
+        - configMapRef:
+            name: env-configmap
+        - secretRef:
+            name: danswer-secrets
+        resources:
+          requests:
+            cpu: 100m
+            memory: 512Mi
+          limits:
+            cpu: 500m
+            memory: 1Gi
+      volumes:
+      - name: dynamic-storage
+        persistentVolumeClaim:
+          claimName: dynamic-pvc
+      - name: file-connector-storage
+        persistentVolumeClaim:
+          claimName: file-connector-pvc
