@@ -181,11 +181,26 @@ patches:
           - {effect: NoSchedule, key: darwin, operator: Equal, value: indexing}
 ```
 
-Then apply the overlay as usual:
+Then preview, verify, and apply — these are the commands to deploy the
+background-scaling topology (there is no standalone `kubectl apply -f`
+for `optional/background-scaling/`: its manifests use the logical
+`danswer-backend` image name, which only resolves through the overlay's
+`images:` block):
 
 ```bash
-kubectl config current-context        # verify before applying
+# Preview the rendered split-background + Dask pods:
+kubectl kustomize k8s/overlays/prod | grep -E "name: (background|dask)"
+
+# Diff against the live cluster before committing to it:
+kubectl diff -k k8s/overlays/prod
+
+# Apply (verify context first!):
+kubectl config current-context        # → 'darwin' for prod
 kubectl apply -k k8s/overlays/prod
+
+# Watch the new pods come up:
+kubectl rollout status deploy/dask-scheduler-deployment
+kubectl rollout status deploy/background-celery-deployment
 ```
 
 kustomize applies everything together; the new pods reference the same
