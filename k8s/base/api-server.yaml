@@ -65,6 +65,31 @@ spec:
         ports:
         - containerPort: 8080
           protocol: TCP
+        # startupProbe: the container runs `alembic upgrade heads` BEFORE
+        # uvicorn, so /health isn't up until migrations finish. This gives
+        # migrations + boot up to ~5 min (30 × 10s) before readiness/
+        # liveness start counting. It also transitively gates on Postgres:
+        # no migrations → no HTTP → never passes startup → pod isn't Ready.
+        startupProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          periodSeconds: 10
+          failureThreshold: 30
+          timeoutSeconds: 5
+        # readinessProbe: gates the api-server Service so it never routes
+        # to a pod still booting. Checks the app's OWN /health — NOT Vespa
+        # or Redis (those are partial/optional deps; coupling the API's
+        # availability to them would amplify outages — see the Vespa
+        # incident). No liveness probe by design: an aggressive liveness on
+        # a slow-starting api-server could kill it mid-migration.
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
         resources: {}
         volumeMounts:
         - mountPath: /home/storage
