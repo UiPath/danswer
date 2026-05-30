@@ -14,6 +14,11 @@ kind: Kustomization
 resources:
   - ../../base
 
+# Opt-in components. Production deploys an in-cluster Redis StatefulSet
+# (the same one the local overlay uses) rather than managed Redis.
+components:
+  - ../../optional/redis
+
 namespace: darwin
 
 # Image refs are logical names in base/. Kustomize rewrites them to the
