@@ -25,7 +25,7 @@ spec:
                 - indexcpu
       containers:
       - name: indexer-scheduler
-        image: sfbrdevhelmweacr.azurecr.io/danswer/danswer-backend:vha-138
+        image: danswer-backend
         imagePullPolicy: IfNotPresent
         command:
         - python

@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
       - name: beat
-        image: sfbrdevhelmweacr.azurecr.io/danswer/danswer-backend:vha-138
+        image: danswer-backend
         imagePullPolicy: IfNotPresent
         command:
         - celery

@@ -43,7 +43,7 @@ spec:
                 - indexcpu
       containers:
       - name: scheduler
-        image: sfbrdevhelmweacr.azurecr.io/danswer/danswer-backend:vha-138
+        image: danswer-backend
         imagePullPolicy: IfNotPresent
         command:
         - dask

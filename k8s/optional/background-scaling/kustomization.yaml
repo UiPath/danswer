@@ -1,0 +1,30 @@
+# Kustomize Component — split-background + remote-Dask indexing topology.
+#
+# Replaces the single combined `background` deployment (in base) with:
+#   - background-beat            Celery beat scheduler (singleton)
+#   - background-celery          Celery workers (maintenance tasks)
+#   - background-indexer-scheduler  the update.py polling loop, in remote-Dask mode
+#   - dask-scheduler             Dask scheduler Service + Deployment
+#   - dask-worker                Dask worker pods (scale these for indexing throughput)
+#
+# Image refs use the logical name `danswer-backend` — same as base — so
+# the including overlay's `images:` block parameterizes them. There is NO
+# images: block here; this component is only meaningful when pulled into an
+# overlay via its `components:` field:
+#
+#   # k8s/overlays/prod/kustomization.yaml
+#   components:
+#     - ../../optional/background-scaling
+#
+# When you opt in, also scale the base `background` deployment to 0 (set
+# its replica count to 0 in the overlay's `replicas:` block) so you don't
+# run two Celery beat schedulers on the same broker.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+resources:
+  - background-beat.yaml
+  - background-celery.yaml
+  - background-indexer-scheduler.yaml
+  - dask-scheduler.yaml
+  - dask-worker.yaml

@@ -1,16 +1,16 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: background-celery-deployment
+  name: dask-worker-deployment
 spec:
-  replicas: 2
+  replicas: 3
   selector:
     matchLabels:
-      app: background-celery
+      app: dask-worker
   template:
     metadata:
       labels:
-        app: background-celery
+        app: dask-worker
     spec:
       affinity:
         nodeAffinity:
@@ -22,18 +22,21 @@ spec:
                 values:
                 - indexcpu
       containers:
-      - name: celery
-        image: sfbrdevhelmweacr.azurecr.io/danswer/danswer-backend:vha-138
+      - name: worker
+        image: danswer-backend
         imagePullPolicy: IfNotPresent
         command:
-        - celery
-        - -A
-        - danswer.background.celery.celery_run:celery_app
+        - dask
         - worker
-        - --pool=threads
-        - --autoscale=3,10
-        - --loglevel=INFO
+        - tcp://dask-scheduler-service:8786
+        - --nworkers=1
+        - --nthreads=1
+        - --memory-limit=4GB
         env:
+        - name: PYTHONPATH
+          value: /app
+        - name: CURRENT_PROCESS_IS_AN_INDEXING_JOB
+          value: 'true'
         - name: POSTGRES_USER
           valueFrom:
             secretKeyRef:
@@ -60,11 +63,11 @@ spec:
           mountPath: /home/file_connector_storage
         resources:
           requests:
-            cpu: 200m
-            memory: 512Mi
-          limits:
-            cpu: '1'
+            cpu: 500m
             memory: 2Gi
+          limits:
+            cpu: '2'
+            memory: 4Gi
       tolerations:
       - effect: NoSchedule
         key: darwin

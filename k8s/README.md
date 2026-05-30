@@ -6,7 +6,7 @@ k8s/
 ├── overlays/
 │   ├── prod/          Darwin AKS production
 │   └── local/         Local dev (Rancher Desktop, Docker Desktop, kind)
-└── optional/          Opt-in deployments (split-background, Dask)
+└── optional/          Opt-in kustomize components (split-background + Dask)
 ```
 
 ## Quick start
@@ -65,20 +65,23 @@ machine (e.g. via docker-compose) are reachable.
 
 ### `optional/`
 
-Features that aren't part of base — opt in **per overlay** via the
-`components:` field, OR apply them plainly with `kubectl apply -f` when
-not using kustomize.
+Opt-in kustomize **components**. Each is a directory with its own
+`kustomization.yaml` of `kind: Component`. Image refs inside use the
+same logical names as base (`danswer-backend`), so when an overlay
+opts in, the overlay's `images:` block parameterizes them — identical
+to base. (They are NOT meant for standalone `kubectl apply -f`; the
+logical image name only resolves through an overlay.)
 
-| Path | What it ships | When to use |
+| Component | What it ships | When to use |
 |---|---|---|
-| `background-beat.yaml`, `background-celery.yaml`, `background-indexer-scheduler.yaml` | Split background topology (replaces the combined `background` deployment in base) | When you want horizontal scaling of background tasks |
-| `dask-scheduler.yaml`, `dask-worker.yaml` | Remote Dask scheduler topology (paired with `background-indexer-scheduler`) | When you switch from the in-process `LocalCluster` indexing to remote Dask |
+| `background-scaling/` | Split-background topology (`background-beat`, `background-celery`, `background-indexer-scheduler`) + remote Dask (`dask-scheduler`, `dask-worker`), replacing the combined `background` deployment in base | When you want horizontal scaling of background/indexing tasks |
 
-**The "flag" for opting into an optional feature** is a single line in
-the overlay's `kustomization.yaml` `components:` block. To wrap the
-split-background deployments as an opt-in component: create a directory
-under `optional/` with its own `kustomization.yaml` of `kind: Component`,
-then reference it from the overlay's `components:` block.
+**The "flag" for opting in** is a single line in the overlay's
+`kustomization.yaml` `components:` block (see "Apply an optional
+component" below). To add another opt-in feature: create a new
+directory under `optional/` with a `kind: Component`
+`kustomization.yaml`, use logical image names in its manifests, and
+reference it from the overlay's `components:`.
 
 ## First-time setup
 
@@ -135,55 +138,41 @@ REQUEST_RATE_LIMIT_PER_HOUR=300
 
 Then `kubectl apply -k k8s/overlays/prod`.
 
-### Apply the `optional/` manifests
+### Apply an optional component (split-background + Dask)
 
-`optional/` holds plain manifests (no kustomization of their own), so
-they're applied directly with `kubectl apply -f` against your current
-context — they are NOT pulled in by `kubectl apply -k k8s/overlays/...`.
-Make sure the right context is active first:
+Optional features are kustomize components, opted into from the overlay
+so they inherit its image tags / namespace / generated config. Two
+edits to the overlay's `kustomization.yaml`:
+
+```yaml
+# 1. Pull the component in:
+components:
+  - ../../optional/background-scaling
+
+# 2. Scale the base combined `background` deployment to 0 so you don't
+#    run two Celery beat schedulers on the same broker:
+replicas:
+  - name: background-deployment
+    count: 0
+```
+
+Then apply the overlay as usual:
 
 ```bash
 kubectl config current-context        # verify before applying
-
-# Apply a single optional manifest:
-kubectl apply -f k8s/optional/dask-scheduler.yaml
-
-# Apply the whole folder at once:
-kubectl apply -f k8s/optional/
+kubectl apply -k k8s/overlays/prod
 ```
 
-These reference the same `env-configmap` / `danswer-secrets` your
-overlay generates, so apply the overlay first (`kubectl apply -k
-k8s/overlays/prod`) — otherwise the optional pods start before the
-ConfigMap/Secret they depend on exist.
+kustomize applies everything together; the new pods reference the same
+overlay-generated `env-configmap` / `danswer-secrets`, and their
+`danswer-backend` image is rewritten to the overlay's pinned tag.
 
-#### Switch to the split-background + Dask topology
-
-This replaces the single combined `background` deployment (in base) with
-separate beat / celery / indexer-scheduler pods plus a remote Dask
-scheduler + workers. Apply in dependency order, then retire the combined
-deployment once the new pods are healthy:
-
-```bash
-# 1. Dask scheduler + workers first (the indexer-scheduler connects to them)
-kubectl apply -f k8s/optional/dask-scheduler.yaml
-kubectl apply -f k8s/optional/dask-worker.yaml
-kubectl rollout status deploy/dask-scheduler-deployment
-
-# 2. Split background pods
-kubectl apply -f k8s/optional/background-beat.yaml
-kubectl apply -f k8s/optional/background-celery.yaml
-kubectl apply -f k8s/optional/background-indexer-scheduler.yaml
-
-# 3. Once the new pods are Ready and you've seen an indexing attempt
-#    dispatch through the dask-scheduler, scale down the combined one:
-kubectl scale deploy/background-deployment --replicas=0
-```
-
-Rollback: `kubectl scale deploy/background-deployment --replicas=1` and
-delete the split pods. Do NOT run both at non-zero replicas long-term —
-two Celery beat schedulers on the same broker fire every periodic task
-twice.
+Rollback: remove the `components:` line, set `background-deployment`
+back to `count: 1`, re-apply. (The split pods are pruned on the next
+apply if you use `kubectl apply -k --prune`, or delete them by label.)
+Do NOT run the combined `background` deployment and `background-beat` at
+non-zero replicas simultaneously — two beat schedulers on one broker
+fire every periodic task twice.
 
 ## Conventions
 
