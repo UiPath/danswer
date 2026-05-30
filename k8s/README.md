@@ -79,16 +79,28 @@ opts in, the overlay's `images:` block parameterizes them — identical
 to base. (They are NOT meant for standalone `kubectl apply -f`; the
 logical image name only resolves through an overlay.)
 
-| Component | What it ships | When to use |
-|---|---|---|
-| `background-scaling/` | `background-lite` (beat + celery + slack-listener co-located, 1 pod) + `background-indexer-scheduler` + remote Dask (`dask-scheduler`, `dask-worker`), replacing the combined `background` deployment in base | When you want horizontal scaling of background/indexing tasks |
+Two kinds of thing live under `optional/`:
 
-**The "flag" for opting in** is a single line in the overlay's
-`kustomization.yaml` `components:` block (see "Apply an optional
-component" below). To add another opt-in feature: create a new
-directory under `optional/` with a `kind: Component`
-`kustomization.yaml`, use logical image names in its manifests, and
-reference it from the overlay's `components:`.
+- **Components** (`kind: Component`) — opt-in *into a danswer overlay* via
+  its `components:` block. Image refs use the same logical names as base,
+  so the overlay's `images:` block parameterizes them. NOT for standalone
+  `kubectl apply -f`.
+- **Standalone installs** (`kind: Kustomization`) — cluster-scoped
+  infrastructure applied on their own with `kubectl apply -k`, not pulled
+  into an overlay.
+
+| Path | Kind | What it ships | When to use |
+|---|---|---|---|
+| `background-scaling/` | Component | `background-lite` (beat + celery + slack-listener co-located, 1 pod) + `background-indexer-scheduler` + remote Dask (`dask-scheduler`, `dask-worker`), replacing the combined `background` deployment in base | Horizontal scaling of background/indexing tasks |
+| `keda-indexing-autoscale/` | Component | A KEDA `ScaledObject` + `TriggerAuthentication` that autoscales `dask-worker` on indexing backlog | Bursty indexing; scale workers to 0 when idle (needs KEDA + background-scaling) |
+| `keda/` | Standalone | The KEDA operator itself (CRDs + operator), pinned, into the `keda` namespace | Prereq for `keda-indexing-autoscale` — install once per cluster |
+
+**The "flag" for opting a *component* in** is a single line in the
+overlay's `kustomization.yaml` `components:` block (see "Apply an optional
+component" below). To add another: create a new directory under
+`optional/` with a `kind: Component` `kustomization.yaml`, use logical
+image names in its manifests, and reference it from the overlay's
+`components:`.
 
 ## First-time setup
 
@@ -288,10 +300,15 @@ running. (`status` is stored UPPERCASE — `native_enum=False` — verified
 against the live DB.)
 
 **Prerequisites + how to enable:**
-1. Install the KEDA operator cluster-wide (the `keda.sh` CRDs):
+1. Install the KEDA operator cluster-wide (CRDs + operator, into its own
+   `keda` namespace — pinned, no Helm):
    ```bash
-   kubectl apply --server-side -f https://github.com/kedacore/keda/releases/download/v2.14.0/keda-2.14.0.yaml
+   kubectl apply --server-side -k k8s/optional/keda
+   kubectl get pods -n keda          # operator + metrics-apiserver Running
    ```
+   (Installed once per cluster, independent of the danswer overlays.
+   `--server-side` is required — KEDA's CRDs are too large for client-side
+   apply. To bump KEDA, edit the version in `k8s/optional/keda/kustomization.yaml`.)
 2. Opt in **after** background-scaling, and **remove** `dask-worker-deployment`
    from the background-scaling `replicas:` block (KEDA owns that count now —
    leaving a static replicas entry fights the autoscaler):
