@@ -370,6 +370,48 @@ existing `darwin-kubernetes/background-deployment.yaml` and
 `api_server-service-deployment.yaml` are the canonical templates for
 the conventions.
 
+### 10. NEVER use `:latest` (or a floating tag) for Vespa — pin the exact version
+
+**This caused a full prod outage.** Vespa's config server refuses an
+auto-upgrade spanning more than ~30 releases (`VersionState
+.verifyVersionIntervalForUpgrade` → `Cannot upgrade from X to Y ...
+interval too large`). If a manifest change bumps the Vespa image to a
+much newer version, **every Vespa StatefulSet rolls and the config
+server crash-loops on bootstrap**, taking the whole cluster down
+(config tier → no quorum → cluster-wide `upstream connect error /
+connection refused` 503s on search AND the api-server's
+`ensure_indices_exist`).
+
+What triggered it: an image spec of bare `vespaengine/vespa` (which
+pulls `:latest` at pull time) was changed to an explicit
+`vespaengine/vespa:latest`, and on the next `kubectl apply` `:latest`
+had moved 30+ releases ahead of the running version.
+
+Rules:
+- **Pin Vespa to the exact version the cluster runs.** As of this
+  writing that is **`8.600.35`** — it's the on-disk format the content
+  nodes' index (1.6M+ docs, 100Gi PVCs) is written in. See the pinned
+  `images:` entry + comment in `k8s/overlays/{prod,local}/kustomization.yaml`.
+- **Upgrades are STEPWISE and deliberate** — at most ~30 releases per
+  hop, applied as an ordered operation, never a bare tag bump. Do NOT
+  set `VESPA_SKIP_UPGRADE_CHECK=true` to force a big jump on prod; it
+  risks the index format.
+- This applies to any version-stateful StatefulSet, but Vespa is the
+  one that bites.
+
+**Recovery if it happens again** (data is safe — it lives on the
+content PVCs, untouched): set all 5 Vespa StatefulSets' image back to
+the running version (`kubectl set image statefulset/vespa-* ...`),
+delete the config-server pods to recreate on the correct version, wait
+for `:19071/state/v1/health` → 200, then restart the api-server so
+`ensure_indices_exist` redeploys the schema. (Clearing the
+config-server ZooKeeper state via `vespa-configserver-remove-state` is
+only needed if the ZK state is genuinely corrupt — the version
+mismatch alone does NOT require it.) Vespa nodes also have **no
+liveness probes by design** (an aggressive one kills slow-but-healthy
+nodes); readiness probes on the Service-backed nodes
+(configserver/query/feed) gate traffic during the slow bootstrap.
+
 ---
 
 ## Common workflows
