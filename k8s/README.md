@@ -256,7 +256,7 @@ cache uses these key namespaces:
 | `danswer:personas:groups:<user_id>` | Per-user group cache — `PERSONA_CACHE_ENABLED` |
 | `danswer:ratelimit:msg:<actor>:<min\|hour>:<bucket>` | Per-user request counters — `REQUEST_RATE_LIMIT_ENABLED` |
 | `danswer:cc_pair_basic_info` | Chat-page connector indexing-status — `CC_PAIR_INFO_CACHE_ENABLED` |
-| `danswer:document_sets:user:<user_id>` | Per-user document-set list (chat bundle) — `DOCUMENT_SET_CACHE_ENABLED` |
+| `danswer:document_sets:all` | Global document-set list (chat bundle, MIT) — `DOCUMENT_SET_CACHE_ENABLED` |
 
 **1. Are the cache keys present?** (fastest "is it on" check — use `--scan`, never `KEYS`, on a live Redis)
 ```bash

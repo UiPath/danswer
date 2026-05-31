@@ -1,36 +1,32 @@
-"""Per-user document-set list cache, Redis-backed.
+"""Global document-set list cache, Redis-backed (MIT-scoped).
 
 The chat-page bundle fires ``GET /document-set`` →
 ``server/features/document_set/api.py::list_document_sets`` →
-``db/document_set.py::fetch_user_document_sets(user_id, …)`` on *every*
-page load. That read is a multi-join (DocumentSet ⋈ cc-pair mapping ⋈
-ConnectorCredentialPair) plus, in EE, a per-user permission query — run
-once per user per load. At a few hundred users clicking around chat it
+``db/document_set.py::fetch_user_document_sets`` on *every* page load.
+That read is a multi-join (DocumentSet ⋈ cc-pair mapping ⋈
+ConnectorCredentialPair). At a few hundred users clicking around chat it
 adds avoidable DB-pool pressure.
 
-Why **per-user** and not the global-list + Python-filter shape the
-persona cache uses: the document-set permission filter is
-edition-dependent. The EE override
-(``ee/danswer/db/document_set.py::fetch_document_sets``) filters by
-``is_public`` / ``DocumentSet__User`` / ``DocumentSet__UserGroup``, while
-the MIT base returns *all* document sets (they're organizational, not
-permission-enforced — the documents themselves are enforced at search
-time). Replicating that branchy logic in Python risks showing a user doc
-sets they shouldn't. Memoizing the exact result the versioned query
-returned **for that user** can never leak: it caches precisely what the
-real query produced. The trade-off is that a cold burst of N distinct
-users still costs N first-loads (not 1) — but repeat loads by the same
-user (the common case: new-chat / navigation / ``router.refresh``)
-collapse to a single DB hit per TTL window.
+In Danswer **MIT**, document sets are *not* permission-filtered — every
+user sees the same full list (they're organizational; the documents
+themselves are permission-enforced at search time). So one **global**
+cached list is correct for everyone, and 200 concurrent first-loads
+collapse to a single DB query.
+
+This module has **no dependency on the EE package** (different license).
+It only reads the MIT-core flag ``global_version.get_is_ee_version()`` to
+stay safe: if a deployment enables EE, ``fetch_user_document_sets`` starts
+filtering per user, at which point a shared global list would leak sets
+across users — so under EE we simply **bypass the cache** and read the DB
+directly. Nothing here imports ``ee.*``; the global build uses the
+``user_id=None`` path, which the core resolves to the MIT base query
+without going through the versioned (EE) dispatch at all.
 
 **Invalidation:** write-through. Every committing mutation in
-``db/document_set.py`` (create / update / sync / delete /
-to-be-deleted / get-or-create) calls :func:`invalidate_document_sets_all`
-after commit, which drops *all* per-user entries (membership/privacy
-changes can affect who sees what, so a targeted bust isn't enough). The
+``db/document_set.py`` calls :func:`invalidate_document_sets_all` after
+commit (a single ``DEL`` of the global key). The
 ``DOCUMENT_SET_CACHE_TTL_SECONDS`` backstop heals any missed bust;
-staleness is cosmetic (names/membership in the UI list), never a
-permission boundary.
+staleness is cosmetic (names/membership in the UI list).
 
 **Fail-open**: any Redis error logs and falls through to a direct DB
 build. **Default OFF**: ``DOCUMENT_SET_CACHE_ENABLED=false``.
@@ -50,21 +46,15 @@ from danswer.redis.redis_pool import DANSWER_REDIS_KEY_PREFIX
 from danswer.redis.redis_pool import get_redis_client
 from danswer.server.features.document_set.models import DocumentSet
 from danswer.utils.logger import setup_logger
+from danswer.utils.variable_functionality import global_version
 
 
 logger = setup_logger()
 
 
-# Per-user namespace. Any document-set mutation busts every key under it.
-_DOC_SETS_USER_KEY_PREFIX = DANSWER_REDIS_KEY_PREFIX + "document_sets:user:"
-# Stable suffix for the no-auth (user_id is None) case so it gets its own entry.
-_NOAUTH_SUFFIX = "__noauth__"
-
-
-def _user_key(user_id: UUID | None) -> str:
-    return _DOC_SETS_USER_KEY_PREFIX + (
-        str(user_id) if user_id is not None else _NOAUTH_SUFFIX
-    )
+# Single shared key — the full document-set list, identical for all users in
+# MIT. Any document-set mutation must invalidate it.
+_DOC_SETS_ALL_KEY = DANSWER_REDIS_KEY_PREFIX + "document_sets:all"
 
 
 # ---------------------------------------------------------------------------
@@ -75,17 +65,17 @@ def _user_key(user_id: UUID | None) -> str:
 def get_document_sets_for_user_cached(
     user_id: UUID | None, db_session: Session
 ) -> list[DocumentSet]:
-    """Return the ``DocumentSet`` list visible to ``user_id``.
+    """Return the ``DocumentSet`` list for ``user_id``.
 
-    Cache hit → deserialize stored JSON back into ``DocumentSet`` models.
-    Miss / disabled / Redis error → build from the DB via the versioned
-    ``fetch_user_document_sets`` (the source of truth, edition-correct).
+    * Cache disabled, OR EE enabled (per-user filtering) → direct DB build
+      for this user. The EE bypass avoids serving one user's filtered list
+      to another; we never import EE, only check the MIT-core version flag.
+    * MIT + enabled → the shared global list (built once, reused by all).
     """
-    if not DOCUMENT_SET_CACHE_ENABLED:
-        return _build_for_user(user_id, db_session)
+    if not DOCUMENT_SET_CACHE_ENABLED or global_version.get_is_ee_version():
+        return _build(user_id, db_session)
 
-    key = _user_key(user_id)
-    hit, cached = _safe_get(key)
+    hit, cached = _safe_get(_DOC_SETS_ALL_KEY)
     if hit and isinstance(cached, list):
         try:
             return [DocumentSet.parse_obj(d) for d in cached]
@@ -95,8 +85,11 @@ def get_document_sets_for_user_cached(
                 "Cached document-set list failed DocumentSet parse, refilling: %s", e
             )
 
-    result = _build_for_user(user_id, db_session)
-    _safe_set(key, [json.loads(ds.json()) for ds in result])
+    # Build the global list via the user_id=None path — in the core this is
+    # the MIT base query (all sets), and it never touches the versioned/EE
+    # dispatch.
+    result = _build(None, db_session)
+    _safe_set(_DOC_SETS_ALL_KEY, [json.loads(ds.json()) for ds in result])
     return result
 
 
@@ -106,24 +99,19 @@ def get_document_sets_for_user_cached(
 
 
 def invalidate_document_sets_all() -> None:
-    """Drop every per-user cached document-set list.
+    """Drop the cached global document-set list.
 
-    Call *after* ``db_session.commit()`` in any mutation that changes a
-    DocumentSet, its cc-pair mapping, or its user/group privacy. A blanket
-    bust (not a targeted one) because privacy/membership changes alter
-    which users should see a set. Cheap no-op when the cache is disabled.
+    Call *after* ``db_session.commit()`` in any document-set mutation.
+    Cheap no-op when the cache is disabled.
     """
     if not DOCUMENT_SET_CACHE_ENABLED:
         return
     try:
-        client = get_redis_client()
-        keys = list(client.scan_iter(match=_DOC_SETS_USER_KEY_PREFIX + "*", count=500))
-        if keys:
-            client.delete(*keys)
+        get_redis_client().delete(_DOC_SETS_ALL_KEY)
     except Exception as e:
         # Fail-open — the TTL backstop heals it. Loud log for a persistent
         # Redis outage.
-        logger.warning("invalidate_document_sets_all: Redis bust failed: %s", e)
+        logger.warning("invalidate_document_sets_all: Redis DEL failed: %s", e)
 
 
 # ---------------------------------------------------------------------------
@@ -131,12 +119,11 @@ def invalidate_document_sets_all() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _build_for_user(user_id: UUID | None, db_session: Session) -> list[DocumentSet]:
-    """Build the per-user ``DocumentSet`` list exactly as the endpoint did.
+def _build(user_id: UUID | None, db_session: Session) -> list[DocumentSet]:
+    """Build the ``DocumentSet`` list exactly as the endpoint did.
 
     Local imports keep this module free of an import cycle: ``db.document_set``
-    imports :func:`invalidate_document_sets_all` from here at module load, so
-    we must not import it at module level in return.
+    imports :func:`invalidate_document_sets_all` from here at module load.
     """
     from danswer.db.document_set import fetch_user_document_sets
     from danswer.server.documents.models import ConnectorCredentialPairDescriptor

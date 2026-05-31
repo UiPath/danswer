@@ -390,14 +390,14 @@ CC_PAIR_INFO_CACHE_TTL_SECONDS = int(
     os.environ.get("CC_PAIR_INFO_CACHE_TTL_SECONDS") or 60
 )
 
-# Per-user document-set list cache (the /document-set read on the chat-page
-# bundle). PER-USER (not global+filter like personas): the doc-set permission
-# filter differs by edition — EE filters by is_public/users/groups, MIT base
-# returns all — so we memoize the exact computed result per user instead of
-# replicating that logic (a parity bug there would leak doc-set visibility).
-# Write-through: every doc-set mutation busts ALL per-user entries; the TTL is
-# a short backstop for any missed bust (staleness is cosmetic — the documents
-# themselves stay permission-enforced at search time). Default OFF.
+# Global document-set list cache (the /document-set read on the chat-page
+# bundle). In Danswer MIT document sets aren't permission-filtered (every user
+# sees all), so one shared global list is correct — 200 concurrent first-loads
+# collapse to one DB query. MIT-scoped with no EE dependency: if a deployment
+# enables EE (per-user filtering), the cache bypasses to a direct DB read so it
+# can't leak sets across users. Write-through: every doc-set mutation busts the
+# key; the TTL is a short backstop (staleness is cosmetic — documents stay
+# permission-enforced at search time). Default OFF.
 DOCUMENT_SET_CACHE_ENABLED = (
     os.environ.get("DOCUMENT_SET_CACHE_ENABLED", "").lower() == "true"
 )
