@@ -1570,3 +1570,40 @@ class AnalyticsUserDailyStats(Base):
         server_default=func.now(),
         onupdate=func.now(),
     )
+
+
+class AnalyticsPersonaDailyStats(Base):
+    """Durable per-assistant-per-day chat activity counts. Powers the
+    "most-used assistants" leaderboard, and (by joining persona__document_set
+    at query time) an approximate "datasets in use" view.
+
+    Same durability contract as the other analytics rollups: upserted daily
+    BEFORE the retention sweep, kept indefinitely, so usage spans the full
+    history regardless of RETENTION_DAYS_CHAT. No FK to `persona` — the name
+    is joined live, so a deleted assistant drops off the leaderboard without
+    erasing historical counts. ``session_count`` is distinct chat sessions
+    that had at least one assistant reply that day.
+    """
+
+    __tablename__ = "analytics_persona_daily_stats"
+
+    persona_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    date: Mapped[datetime.date] = mapped_column(Date, primary_key=True)
+    session_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    message_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    like_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    dislike_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    rolled_up_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )

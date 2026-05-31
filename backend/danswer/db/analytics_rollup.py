@@ -58,6 +58,7 @@ from sqlalchemy.orm import Session
 from danswer.configs.constants import MessageType
 from danswer.db.engine import get_sqlalchemy_engine
 from danswer.db.models import AnalyticsDailyRollup
+from danswer.db.models import AnalyticsPersonaDailyStats
 from danswer.db.models import AnalyticsUserDailyStats
 from danswer.db.models import AnalyticsUserFirstSeen
 from danswer.db.models import ChatMessage
@@ -365,7 +366,9 @@ def upsert_user_daily_stats_for_date(
         select(
             ChatSession.user_id.label("user_id"),
             literal(target_date, Date).label("date"),
-            func.count(ChatMessage.id).label("message_count"),
+            # distinct: the feedback outerjoin can fan out a message into
+            # multiple rows (a message may have >1 feedback row).
+            func.count(func.distinct(ChatMessage.id)).label("message_count"),
             func.coalesce(
                 func.sum(case((ChatMessageFeedback.is_positive, 1), else_=0)), 0
             ).label("like_count"),
@@ -401,6 +404,75 @@ def upsert_user_daily_stats_for_date(
             AnalyticsUserDailyStats.date,
         ],
         set_={
+            "message_count": stmt.excluded.message_count,
+            "like_count": stmt.excluded.like_count,
+            "dislike_count": stmt.excluded.dislike_count,
+            "rolled_up_at": func.now(),
+        },
+    )
+    db_session.execute(stmt)
+    db_session.commit()
+
+
+def upsert_persona_daily_stats_for_date(
+    db_session: Session, target_date: datetime.date
+) -> None:
+    """Upsert one row per assistant (persona) active on ``target_date`` into
+    ``analytics_persona_daily_stats``.
+
+    Same durable/idempotent contract as the per-user variant. ``persona_id``
+    lives on chat_session, so this is a clean group-by. ``message_count``
+    uses COUNT(DISTINCT message) because the feedback outerjoin can fan a
+    message into multiple rows."""
+    start, end = _day_bounds(target_date)
+    per_persona = (
+        select(
+            ChatSession.persona_id.label("persona_id"),
+            literal(target_date, Date).label("date"),
+            func.count(func.distinct(ChatSession.id)).label("session_count"),
+            func.count(func.distinct(ChatMessage.id)).label("message_count"),
+            func.coalesce(
+                func.sum(case((ChatMessageFeedback.is_positive, 1), else_=0)), 0
+            ).label("like_count"),
+            func.coalesce(
+                func.sum(
+                    case(
+                        (ChatMessageFeedback.is_positive == False, 1),  # noqa: E712
+                        else_=0,
+                    )
+                ),
+                0,
+            ).label("dislike_count"),
+        )
+        .select_from(ChatMessage)
+        .join(ChatSession, ChatSession.id == ChatMessage.chat_session_id)
+        .outerjoin(
+            ChatMessageFeedback,
+            ChatMessageFeedback.chat_message_id == ChatMessage.id,
+        )
+        .where(ChatMessage.time_sent >= start)
+        .where(ChatMessage.time_sent < end)
+        .where(ChatMessage.message_type == MessageType.ASSISTANT)
+        .group_by(ChatSession.persona_id)
+    )
+    stmt = pg_insert(AnalyticsPersonaDailyStats.__table__).from_select(
+        [
+            "persona_id",
+            "date",
+            "session_count",
+            "message_count",
+            "like_count",
+            "dislike_count",
+        ],
+        per_persona,
+    )
+    stmt = stmt.on_conflict_do_update(
+        index_elements=[
+            AnalyticsPersonaDailyStats.persona_id,
+            AnalyticsPersonaDailyStats.date,
+        ],
+        set_={
+            "session_count": stmt.excluded.session_count,
             "message_count": stmt.excluded.message_count,
             "like_count": stmt.excluded.like_count,
             "dislike_count": stmt.excluded.dislike_count,
@@ -536,6 +608,7 @@ def run_rollup(today: datetime.date | None = None) -> int:
             # runs 07:30, sweep 08:00).
             capture_first_seen_for_date(db_session, current)
             upsert_user_daily_stats_for_date(db_session, current)
+            upsert_persona_daily_stats_for_date(db_session, current)
             current += datetime.timedelta(days=1)
             n += 1
 
@@ -569,6 +642,7 @@ def backfill_all_rollups(start_date: datetime.date, end_date: datetime.date) -> 
             # first-ever active day across all currently-available history.
             capture_first_seen_for_date(db_session, current)
             upsert_user_daily_stats_for_date(db_session, current)
+            upsert_persona_daily_stats_for_date(db_session, current)
             current += datetime.timedelta(days=1)
             n += 1
             if n % 30 == 0:

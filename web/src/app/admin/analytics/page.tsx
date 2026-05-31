@@ -83,6 +83,22 @@ interface PerUserChatStatsRow {
   last_active: string;
 }
 
+interface PersonaUsageRow {
+  persona_id: number;
+  name: string;
+  sessions: number;
+  messages: number;
+  likes: number;
+  dislikes: number;
+  last_active: string;
+}
+
+interface DocumentSetUsageRow {
+  document_set_id: number;
+  name: string;
+  attributed_messages: number;
+}
+
 type Granularity = "day" | "month";
 
 const DEFAULT_LOOKBACK_DAYS = 30;
@@ -198,6 +214,20 @@ export default function AnalyticsPage() {
     swrOpts
   );
 
+  const { data: personaData, error: personaErr } = useSWR<PersonaUsageRow[]>(
+    buildURL("/analytics/admin/persona-usage", range),
+    errorHandlingFetcher,
+    swrOpts
+  );
+
+  const { data: docSetUsageData, error: docSetUsageErr } = useSWR<
+    DocumentSetUsageRow[]
+  >(
+    buildURL("/analytics/admin/document-set-usage", range),
+    errorHandlingFetcher,
+    swrOpts
+  );
+
   // Snapshot endpoints — independent of date range, refresh on mount only.
   const { data: totalDocs, error: totalDocsErr } = useSWR<TotalDocsResponse>(
     buildURL("/analytics/admin/total-docs"),
@@ -229,6 +259,8 @@ export default function AnalyticsPage() {
     botErr ||
     adoptionErr ||
     perUserErr ||
+    personaErr ||
+    docSetUsageErr ||
     totalDocsErr ||
     docsBySourceErr ||
     slackChannelsErr;
@@ -362,6 +394,14 @@ export default function AnalyticsPage() {
         .filter((r) => r.docs_indexed > 0)
         .map((r) => ({ name: r.source, value: r.docs_indexed })),
     [docsBySource]
+  );
+
+  const docSetUsageBars = useMemo(
+    () =>
+      (docSetUsageData ?? [])
+        .filter((r) => r.attributed_messages > 0)
+        .map((r) => ({ name: r.name, value: r.attributed_messages })),
+    [docSetUsageData]
   );
 
   return (
@@ -593,6 +633,83 @@ export default function AnalyticsPage() {
               <Text className="mt-4">No chat activity in this date range.</Text>
             )}
           </Card>
+
+          <Grid numItems={1} numItemsLg={2} className="gap-4 mb-6">
+            <Card>
+              <Title>Most-Used Assistants</Title>
+              <Text>
+                By assistant replies over the selected range. Durable
+                aggregate — spans full history.
+              </Text>
+              {personaData && personaData.length > 0 ? (
+                <div className="mt-4 max-h-96 overflow-y-auto">
+                  <Table>
+                    <TableHead>
+                      <TableRow>
+                        <TableHeaderCell>Assistant</TableHeaderCell>
+                        <TableHeaderCell className="text-right">
+                          Messages
+                        </TableHeaderCell>
+                        <TableHeaderCell className="text-right">
+                          Sessions
+                        </TableHeaderCell>
+                        <TableHeaderCell className="text-right">
+                          Likes
+                        </TableHeaderCell>
+                        <TableHeaderCell className="text-right">
+                          Dislikes
+                        </TableHeaderCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {personaData.map((p) => (
+                        <TableRow key={p.persona_id}>
+                          <TableCell>{p.name}</TableCell>
+                          <TableCell className="text-right">
+                            {p.messages.toLocaleString()}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {p.sessions.toLocaleString()}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {p.likes.toLocaleString()}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {p.dislikes.toLocaleString()}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              ) : (
+                <Text className="mt-4">
+                  No assistant activity in this date range.
+                </Text>
+              )}
+            </Card>
+
+            <Card>
+              <Title>Datasets in Use (approximate)</Title>
+              <Text>
+                Assistant usage attributed to each document set attached to the
+                assistant. Approximate — counts an assistant&apos;s messages
+                toward all its datasets and uses current attachments, not
+                per-query retrieval.
+              </Text>
+              {docSetUsageBars.length > 0 ? (
+                <BarList
+                  className="mt-4"
+                  data={docSetUsageBars}
+                  valueFormatter={(n: number) => n.toLocaleString()}
+                />
+              ) : (
+                <Text className="mt-4">
+                  No dataset usage in this date range.
+                </Text>
+              )}
+            </Card>
+          </Grid>
 
           <Card className="mb-6">
             <Title>Docs Indexed by Source</Title>

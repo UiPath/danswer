@@ -26,6 +26,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from danswer.configs.constants import MessageType
+from danswer.db.models import AnalyticsPersonaDailyStats
 from danswer.db.models import AnalyticsUserDailyStats
 from danswer.db.models import AnalyticsUserFirstSeen
 from danswer.db.models import ChatMessage
@@ -34,6 +35,9 @@ from danswer.db.models import ChatSession
 from danswer.db.models import Connector
 from danswer.db.models import ConnectorCredentialPair
 from danswer.db.models import Document
+from danswer.db.models import DocumentSet
+from danswer.db.models import Persona
+from danswer.db.models import Persona__DocumentSet
 from danswer.db.models import User
 
 
@@ -208,6 +212,80 @@ def fetch_per_user_chat_stats(
         .where(AnalyticsUserDailyStats.date <= end_date)
         .group_by(User.id, User.email)
         .order_by(func.sum(AnalyticsUserDailyStats.message_count).desc())
+        .limit(limit)
+    )
+    return db_session.execute(stmt).all()  # type: ignore
+
+
+def fetch_persona_usage(
+    start: datetime.datetime,
+    end: datetime.datetime,
+    db_session: Session,
+    limit: int = 100,
+) -> Sequence[tuple[int, str, int, int, int, int, datetime.date]]:
+    """Top ``limit`` assistants by message volume over ``[start, end]`` from
+    the durable ``analytics_persona_daily_stats`` aggregate — spans full
+    history. Joined to ``persona`` for the name (a deleted assistant drops
+    off). Returns (persona_id, name, sessions, messages, likes, dislikes,
+    last_active)."""
+    start_date = start.date()
+    end_date = end.date()
+    stmt = (
+        select(  # type: ignore[call-overload]
+            Persona.id,
+            Persona.name,
+            func.coalesce(func.sum(AnalyticsPersonaDailyStats.session_count), 0),
+            func.coalesce(func.sum(AnalyticsPersonaDailyStats.message_count), 0),
+            func.coalesce(func.sum(AnalyticsPersonaDailyStats.like_count), 0),
+            func.coalesce(func.sum(AnalyticsPersonaDailyStats.dislike_count), 0),
+            func.max(AnalyticsPersonaDailyStats.date),
+        )
+        .select_from(AnalyticsPersonaDailyStats)
+        .join(Persona, Persona.id == AnalyticsPersonaDailyStats.persona_id)
+        .where(AnalyticsPersonaDailyStats.date >= start_date)
+        .where(AnalyticsPersonaDailyStats.date <= end_date)
+        .group_by(Persona.id, Persona.name)
+        .order_by(func.sum(AnalyticsPersonaDailyStats.message_count).desc())
+        .limit(limit)
+    )
+    return db_session.execute(stmt).all()  # type: ignore
+
+
+def fetch_document_set_usage(
+    start: datetime.datetime,
+    end: datetime.datetime,
+    db_session: Session,
+    limit: int = 100,
+) -> Sequence[tuple[int, str, int]]:
+    """APPROXIMATE "datasets in use" over ``[start, end]``: each assistant's
+    message volume attributed to every document set currently attached to it
+    (via persona__document_set).
+
+    This is availability-weighted, not retrieval-truth: an assistant's
+    messages are counted toward ALL its document sets (so totals can exceed
+    the real query count), and it uses CURRENT attachments (membership drift
+    isn't historical). There is no per-query record of which document set
+    actually served a result, so this is the best durable signal without new
+    instrumentation. Returns (document_set_id, name, attributed_messages).
+    """
+    start_date = start.date()
+    end_date = end.date()
+    stmt = (
+        select(
+            DocumentSet.id,
+            DocumentSet.name,
+            func.coalesce(func.sum(AnalyticsPersonaDailyStats.message_count), 0),
+        )
+        .select_from(AnalyticsPersonaDailyStats)
+        .join(
+            Persona__DocumentSet,
+            Persona__DocumentSet.persona_id == AnalyticsPersonaDailyStats.persona_id,
+        )
+        .join(DocumentSet, DocumentSet.id == Persona__DocumentSet.document_set_id)
+        .where(AnalyticsPersonaDailyStats.date >= start_date)
+        .where(AnalyticsPersonaDailyStats.date <= end_date)
+        .group_by(DocumentSet.id, DocumentSet.name)
+        .order_by(func.sum(AnalyticsPersonaDailyStats.message_count).desc())
         .limit(limit)
     )
     return db_session.execute(stmt).all()  # type: ignore

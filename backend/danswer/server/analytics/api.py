@@ -21,7 +21,9 @@ from sqlalchemy.orm import Session
 import danswer.db.models as db_models
 from danswer.auth.users import current_admin_user
 from danswer.db.analytics import fetch_docs_per_source
+from danswer.db.analytics import fetch_document_set_usage
 from danswer.db.analytics import fetch_per_user_chat_stats
+from danswer.db.analytics import fetch_persona_usage
 from danswer.db.analytics import fetch_slack_bot_channel_stats
 from danswer.db.analytics import fetch_total_docs_indexed
 from danswer.db.analytics import fetch_user_adoption
@@ -175,6 +177,82 @@ def get_per_user_analytics(
             last_active=last_active,
         )
         for user_id, email, total_messages, total_likes, total_dislikes, last_active in rows
+    ]
+
+
+class PersonaUsageResponse(BaseModel):
+    persona_id: int
+    name: str
+    sessions: int
+    messages: int
+    likes: int
+    dislikes: int
+    last_active: datetime.date
+
+
+@router.get("/admin/persona-usage")
+def get_persona_usage_analytics(
+    start: datetime.datetime | None = None,
+    end: datetime.datetime | None = None,
+    limit: int = 100,
+    _: db_models.User | None = Depends(current_admin_user),
+    db_session: Session = Depends(get_session),
+) -> list[PersonaUsageResponse]:
+    """Most-used assistants over the range, from the durable
+    analytics_persona_daily_stats aggregate (spans full history)."""
+    rows = fetch_persona_usage(
+        start=start or (datetime.datetime.utcnow() - datetime.timedelta(days=90)),
+        end=end or datetime.datetime.utcnow(),
+        db_session=db_session,
+        limit=limit,
+    )
+    return [
+        PersonaUsageResponse(
+            persona_id=persona_id,
+            name=name,
+            sessions=int(sessions),
+            messages=int(messages),
+            likes=int(likes),
+            dislikes=int(dislikes),
+            last_active=last_active,
+        )
+        for persona_id, name, sessions, messages, likes, dislikes, last_active in rows
+    ]
+
+
+class DocumentSetUsageResponse(BaseModel):
+    document_set_id: int
+    name: str
+    # APPROXIMATE: assistant message volume attributed to every document set
+    # attached to the assistant (see fetch_document_set_usage). Not a
+    # per-query retrieval count.
+    attributed_messages: int
+
+
+@router.get("/admin/document-set-usage")
+def get_document_set_usage_analytics(
+    start: datetime.datetime | None = None,
+    end: datetime.datetime | None = None,
+    limit: int = 100,
+    _: db_models.User | None = Depends(current_admin_user),
+    db_session: Session = Depends(get_session),
+) -> list[DocumentSetUsageResponse]:
+    """Approximate datasets-in-use over the range, derived from assistant
+    usage × current persona→document-set attachments (see the db function's
+    caveats)."""
+    rows = fetch_document_set_usage(
+        start=start or (datetime.datetime.utcnow() - datetime.timedelta(days=90)),
+        end=end or datetime.datetime.utcnow(),
+        db_session=db_session,
+        limit=limit,
+    )
+    return [
+        DocumentSetUsageResponse(
+            document_set_id=document_set_id,
+            name=name,
+            attributed_messages=int(attributed_messages),
+        )
+        for document_set_id, name, attributed_messages in rows
     ]
 
 
