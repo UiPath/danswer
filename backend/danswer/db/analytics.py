@@ -26,6 +26,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from danswer.configs.constants import MessageType
+from danswer.db.models import AnalyticsUserDailyStats
 from danswer.db.models import AnalyticsUserFirstSeen
 from danswer.db.models import ChatMessage
 from danswer.db.models import ChatMessageFeedback
@@ -179,46 +180,34 @@ def fetch_per_user_chat_stats(
     db_session: Session,
     limit: int = 100,
 ) -> Sequence[tuple[UUID, str, int, int, int, datetime.date]]:
-    """Top ``limit`` users by assistant-message volume over ``[start, end]``,
-    with like/dislike tallies and last-active date, joined to ``user`` for
-    email. Inner join on ``user`` drops anonymous (null-user) sessions.
+    """Top ``limit`` users by message volume over ``[start, end]``, with
+    like/dislike tallies and last-active date, joined to ``user`` for email.
 
-    Reads raw chat, so it only covers the last RETENTION_DAYS_CHAT of data —
-    this is a recent-activity leaderboard, not an all-time one.
+    Reads the durable ``analytics_user_daily_stats`` aggregate (upserted
+    daily by the rollup), NOT raw chat — so it spans the full history
+    regardless of RETENTION_DAYS_CHAT. Inner join on ``user`` drops
+    anonymous sessions and deleted users (whose counts persist in the
+    aggregate but shouldn't surface by email).
     """
+    start_date = start.date()
+    end_date = end.date()
     stmt = (
-        # SA's select() overloads don't type a 6-col coalesce/max projection;
+        # SA's select() overloads don't type a 6-col sum/max projection;
         # the runtime is fine (the existing analytics selects do the same).
         select(  # type: ignore[call-overload]
             User.id,
             User.email,
-            func.count(ChatMessage.id),
-            func.coalesce(
-                func.sum(case((ChatMessageFeedback.is_positive, 1), else_=0)), 0
-            ),
-            func.coalesce(
-                func.sum(
-                    case(
-                        (ChatMessageFeedback.is_positive == False, 1),  # noqa: E712
-                        else_=0,
-                    )
-                ),
-                0,
-            ),
-            func.max(cast(ChatMessage.time_sent, Date)),
+            func.coalesce(func.sum(AnalyticsUserDailyStats.message_count), 0),
+            func.coalesce(func.sum(AnalyticsUserDailyStats.like_count), 0),
+            func.coalesce(func.sum(AnalyticsUserDailyStats.dislike_count), 0),
+            func.max(AnalyticsUserDailyStats.date),
         )
-        .select_from(ChatMessage)
-        .join(ChatSession, ChatSession.id == ChatMessage.chat_session_id)
-        .join(User, User.id == ChatSession.user_id)
-        .outerjoin(
-            ChatMessageFeedback,
-            ChatMessageFeedback.chat_message_id == ChatMessage.id,
-        )
-        .where(ChatMessage.time_sent >= start)
-        .where(ChatMessage.time_sent <= end)
-        .where(ChatMessage.message_type == MessageType.ASSISTANT)
+        .select_from(AnalyticsUserDailyStats)
+        .join(User, User.id == AnalyticsUserDailyStats.user_id)
+        .where(AnalyticsUserDailyStats.date >= start_date)
+        .where(AnalyticsUserDailyStats.date <= end_date)
         .group_by(User.id, User.email)
-        .order_by(func.count(ChatMessage.id).desc())
+        .order_by(func.sum(AnalyticsUserDailyStats.message_count).desc())
         .limit(limit)
     )
     return db_session.execute(stmt).all()  # type: ignore

@@ -1532,3 +1532,41 @@ class AnalyticsUserFirstSeen(Base):
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+
+
+class AnalyticsUserDailyStats(Base):
+    """Durable per-user-per-day chat activity counts. Powers the "top users
+    by activity" leaderboard on the admin Analytics page.
+
+    Same durability contract as AnalyticsDailyRollup / AnalyticsUserFirstSeen:
+    upserted daily by the rollup (one row per active user per UTC day) BEFORE
+    the retention sweep, then kept indefinitely. Reading the leaderboard from
+    this aggregate — instead of raw chat_message — means it spans the full
+    history regardless of RETENTION_DAYS_CHAT, not just the last window.
+
+    Idempotent: the rollup re-upserts the sliding recompute window with
+    ON CONFLICT (user_id, date) DO UPDATE, so late-arriving feedback is
+    reflected. No FK to `user` (see AnalyticsUserFirstSeen) — the email is
+    joined live at query time, so a deleted user simply drops off the
+    leaderboard without erasing the historical counts.
+    """
+
+    __tablename__ = "analytics_user_daily_stats"
+
+    user_id: Mapped[UUID] = mapped_column(GUID(), primary_key=True)
+    date: Mapped[datetime.date] = mapped_column(Date, primary_key=True)
+    message_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    like_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    dislike_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    rolled_up_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )

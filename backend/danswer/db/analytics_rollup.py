@@ -58,6 +58,7 @@ from sqlalchemy.orm import Session
 from danswer.configs.constants import MessageType
 from danswer.db.engine import get_sqlalchemy_engine
 from danswer.db.models import AnalyticsDailyRollup
+from danswer.db.models import AnalyticsUserDailyStats
 from danswer.db.models import AnalyticsUserFirstSeen
 from danswer.db.models import ChatMessage
 from danswer.db.models import ChatMessageFeedback
@@ -347,6 +348,69 @@ def capture_first_seen_for_date(
     db_session.commit()
 
 
+def upsert_user_daily_stats_for_date(
+    db_session: Session, target_date: datetime.date
+) -> None:
+    """Upsert one row per active user for ``target_date`` into
+    ``analytics_user_daily_stats`` (message / like / dislike counts).
+
+    Single INSERT … SELECT … ON CONFLICT (user_id, date) DO UPDATE, so a
+    re-run over the sliding window recomputes that day's per-user counts
+    (reflecting late feedback). Once written the rows outlive the raw
+    chat_message rows that retention deletes — the leaderboard reads this
+    aggregate, so it spans full history rather than the last
+    RETENTION_DAYS_CHAT."""
+    start, end = _day_bounds(target_date)
+    per_user = (
+        select(
+            ChatSession.user_id.label("user_id"),
+            literal(target_date, Date).label("date"),
+            func.count(ChatMessage.id).label("message_count"),
+            func.coalesce(
+                func.sum(case((ChatMessageFeedback.is_positive, 1), else_=0)), 0
+            ).label("like_count"),
+            func.coalesce(
+                func.sum(
+                    case(
+                        (ChatMessageFeedback.is_positive == False, 1),  # noqa: E712
+                        else_=0,
+                    )
+                ),
+                0,
+            ).label("dislike_count"),
+        )
+        .select_from(ChatMessage)
+        .join(ChatSession, ChatSession.id == ChatMessage.chat_session_id)
+        .outerjoin(
+            ChatMessageFeedback,
+            ChatMessageFeedback.chat_message_id == ChatMessage.id,
+        )
+        .where(ChatMessage.time_sent >= start)
+        .where(ChatMessage.time_sent < end)
+        .where(ChatMessage.message_type == MessageType.ASSISTANT)
+        .where(ChatSession.user_id.is_not(None))
+        .group_by(ChatSession.user_id)
+    )
+    stmt = pg_insert(AnalyticsUserDailyStats.__table__).from_select(
+        ["user_id", "date", "message_count", "like_count", "dislike_count"],
+        per_user,
+    )
+    stmt = stmt.on_conflict_do_update(
+        index_elements=[
+            AnalyticsUserDailyStats.user_id,
+            AnalyticsUserDailyStats.date,
+        ],
+        set_={
+            "message_count": stmt.excluded.message_count,
+            "like_count": stmt.excluded.like_count,
+            "dislike_count": stmt.excluded.dislike_count,
+            "rolled_up_at": func.now(),
+        },
+    )
+    db_session.execute(stmt)
+    db_session.commit()
+
+
 # ---------------------------------------------------------------------------
 # Batch operations — sliding window (daily task) + full backfill
 # ---------------------------------------------------------------------------
@@ -467,9 +531,11 @@ def run_rollup(today: datetime.date | None = None) -> int:
         current = start
         while current <= today:
             upsert_rollup_for_date(db_session, current)
-            # Capture first-seen in the same ascending pass, before retention
-            # can delete the day's chat rows (rollup runs 07:30, sweep 08:00).
+            # Capture first-seen + per-user daily stats in the same ascending
+            # pass, before retention can delete the day's chat rows (rollup
+            # runs 07:30, sweep 08:00).
             capture_first_seen_for_date(db_session, current)
+            upsert_user_daily_stats_for_date(db_session, current)
             current += datetime.timedelta(days=1)
             n += 1
 
@@ -502,6 +568,7 @@ def backfill_all_rollups(start_date: datetime.date, end_date: datetime.date) -> 
             # Walk ascending so each user's first_seen_date is their true
             # first-ever active day across all currently-available history.
             capture_first_seen_for_date(db_session, current)
+            upsert_user_daily_stats_for_date(db_session, current)
             current += datetime.timedelta(days=1)
             n += 1
             if n % 30 == 0:

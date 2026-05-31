@@ -156,8 +156,9 @@ def get_per_user_analytics(
     _: db_models.User | None = Depends(current_admin_user),
     db_session: Session = Depends(get_session),
 ) -> list[PerUserChatStatsResponse]:
-    """Top users by message volume over the range (recent-activity
-    leaderboard — only covers the last RETENTION_DAYS_CHAT of chat data)."""
+    """Top users by message volume over the range, from the durable
+    analytics_user_daily_stats aggregate — spans full history (survives
+    chat retention)."""
     rows = fetch_per_user_chat_stats(
         start=start or (datetime.datetime.utcnow() - datetime.timedelta(days=90)),
         end=end or datetime.datetime.utcnow(),

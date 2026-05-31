@@ -545,8 +545,8 @@ export default function AnalyticsPage() {
             <Title>Top Users by Activity</Title>
             <Text>
               Most active users over the selected range, by assistant replies.
-              Covers recent chat data only (older chats are purged by
-              retention; the adoption totals above are not).
+              From the durable daily aggregate, so it spans full history even
+              after old chats are purged by retention.
             </Text>
             {perUserData && perUserData.length > 0 ? (
               <div className="mt-4 max-h-96 overflow-y-auto">
