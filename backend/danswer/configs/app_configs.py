@@ -347,13 +347,9 @@ CELERY_REDIS_DB_NUMBER = int(os.environ.get("CELERY_REDIS_DB_NUMBER") or 1)
 # When false (default), the store behaves exactly as before; when true,
 # reads check Redis first and writes/deletes invalidate Redis. Fail-open:
 # Redis errors degrade to direct Postgres, never an outage.
-REDIS_KV_CACHE_ENABLED = (
-    os.environ.get("REDIS_KV_CACHE_ENABLED", "").lower() == "true"
-)
+REDIS_KV_CACHE_ENABLED = os.environ.get("REDIS_KV_CACHE_ENABLED", "").lower() == "true"
 # TTL (seconds) for KV entries cached in Redis (1 day default).
-REDIS_KV_CACHE_TTL_SECONDS = int(
-    os.environ.get("REDIS_KV_CACHE_TTL_SECONDS") or 86400
-)
+REDIS_KV_CACHE_TTL_SECONDS = int(os.environ.get("REDIS_KV_CACHE_TTL_SECONDS") or 86400)
 
 # Per-user request-rate limiter (Redis-backed). Default OFF — complements
 # the token-budget limiter in token_limit.py with a request-count cap that
@@ -366,18 +362,14 @@ REQUEST_RATE_LIMIT_ENABLED = (
 REQUEST_RATE_LIMIT_PER_MINUTE = int(
     os.environ.get("REQUEST_RATE_LIMIT_PER_MINUTE") or 0
 )
-REQUEST_RATE_LIMIT_PER_HOUR = int(
-    os.environ.get("REQUEST_RATE_LIMIT_PER_HOUR") or 0
-)
+REQUEST_RATE_LIMIT_PER_HOUR = int(os.environ.get("REQUEST_RATE_LIMIT_PER_HOUR") or 0)
 
 # Per-user persona ("assistant") list cache. Caches the global persona list
 # + per-user group memberships in Redis; permission filter runs in Python
 # at request time. Explicit write-through invalidation lives in the
 # db/persona.py and ee/.../user_group.py mutation paths — the TTL below is
 # only a long-tail safety net for missed busts. Default OFF.
-PERSONA_CACHE_ENABLED = (
-    os.environ.get("PERSONA_CACHE_ENABLED", "").lower() == "true"
-)
+PERSONA_CACHE_ENABLED = os.environ.get("PERSONA_CACHE_ENABLED", "").lower() == "true"
 PERSONA_CACHE_TTL_SECONDS = int(
     os.environ.get("PERSONA_CACHE_TTL_SECONDS") or 86400  # 24 h backstop
 )
