@@ -225,9 +225,7 @@ def _get_user_group_ids_cached(user_id: UUID, db_session: Session) -> list[int]:
         return [int(x) for x in cached]
 
     rows = db_session.scalars(
-        select(User__UserGroup.user_group_id).where(
-            User__UserGroup.user_id == user_id
-        )
+        select(User__UserGroup.user_group_id).where(User__UserGroup.user_id == user_id)
     ).all()
     group_ids = [int(r) for r in rows]
     _safe_set(key, group_ids)
@@ -282,9 +280,7 @@ def _safe_get(key: str) -> tuple[bool, Any]:
     try:
         return (True, json.loads(raw))
     except (TypeError, ValueError) as e:
-        logger.warning(
-            "persona_cache: corrupt entry at %s, ignoring: %s", key, e
-        )
+        logger.warning("persona_cache: corrupt entry at %s, ignoring: %s", key, e)
         return (False, None)
 
 
@@ -295,9 +291,7 @@ def _safe_set(key: str, val: Any) -> None:
         # Defensive — _get_all_personas_cached/_get_user_group_ids_cached
         # only ever cache JSON-clean values. If this fires the cache is
         # silently skipped and the inner read still served the caller.
-        logger.warning(
-            "persona_cache: skipping non-JSON value at %s: %s", key, e
-        )
+        logger.warning("persona_cache: skipping non-JSON value at %s: %s", key, e)
         return
     try:
         get_redis_client().set(key, payload, ex=PERSONA_CACHE_TTL_SECONDS)

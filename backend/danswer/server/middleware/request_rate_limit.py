@@ -131,9 +131,7 @@ def _actor_key(user: User | None, request: Request) -> str | None:
     return f"ip:{client_ip}"
 
 
-def _enforce_window(
-    *, actor: str, label: str, window_seconds: int, limit: int
-) -> None:
+def _enforce_window(*, actor: str, label: str, window_seconds: int, limit: int) -> None:
     """Increment-and-check one window for one actor.
 
     Raises ``HTTPException(429)`` if the post-increment count exceeds
