@@ -9,6 +9,7 @@ from sqlalchemy import or_
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from danswer.db.document_set_cache import invalidate_document_sets_all
 from danswer.db.models import ConnectorCredentialPair
 from danswer.db.models import Document
 from danswer.db.models import DocumentByConnectorCredentialPair
@@ -130,6 +131,9 @@ def insert_document_set(
         )
 
         db_session.commit()
+        # Write-through: drop the per-user document-set cache (no-op if
+        # disabled). After commit so a concurrent reader can't refill stale.
+        invalidate_document_sets_all()
     except:
         db_session.rollback()
         raise
@@ -194,6 +198,7 @@ def update_document_set(
         ]
         db_session.add_all(ds_cc_pairs)
         db_session.commit()
+        invalidate_document_sets_all()  # write-through bust (see insert_document_set)
     except:
         db_session.rollback()
         raise
@@ -214,6 +219,7 @@ def mark_document_set_as_synced(document_set_id: int, db_session: Session) -> No
         db_session=db_session, document_set_id=document_set_id, is_current=False
     )
     db_session.commit()
+    invalidate_document_sets_all()  # write-through bust (background sync changes membership)
 
 
 def delete_document_set(
@@ -225,6 +231,7 @@ def delete_document_set(
     )
     db_session.delete(document_set_row)
     db_session.commit()
+    invalidate_document_sets_all()  # write-through bust (see insert_document_set)
 
 
 def mark_document_set_as_to_be_deleted(
@@ -265,6 +272,7 @@ def mark_document_set_as_to_be_deleted(
         # are no more relationships to cc pairs
         document_set_row.is_up_to_date = False
         db_session.commit()
+        invalidate_document_sets_all()  # write-through bust (see insert_document_set)
     except:
         db_session.rollback()
         raise
@@ -486,6 +494,7 @@ def get_or_create_document_set_by_name(
 
     db_session.add(new_doc_set)
     db_session.commit()
+    invalidate_document_sets_all()  # write-through bust (see insert_document_set)
 
     return new_doc_set
 

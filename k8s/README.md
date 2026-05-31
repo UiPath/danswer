@@ -227,6 +227,7 @@ REQUEST_RATE_LIMIT_PER_MINUTE=20   # per authenticated user (per-IP for anon), n
 REQUEST_RATE_LIMIT_PER_HOUR=300
 PERSONA_CACHE_ENABLED=true         # global persona-list cache + per-user group cache
 CC_PAIR_INFO_CACHE_ENABLED=true    # chat-page connector indexing-status (~300ms read), 60s global TTL
+DOCUMENT_SET_CACHE_ENABLED=true    # per-user document-set list (chat bundle), write-through busted, 300s backstop
 ```
 
 Then apply **and restart the consumers** (the apply alone won't — see the
@@ -255,6 +256,7 @@ cache uses these key namespaces:
 | `danswer:personas:groups:<user_id>` | Per-user group cache — `PERSONA_CACHE_ENABLED` |
 | `danswer:ratelimit:msg:<actor>:<min\|hour>:<bucket>` | Per-user request counters — `REQUEST_RATE_LIMIT_ENABLED` |
 | `danswer:cc_pair_basic_info` | Chat-page connector indexing-status — `CC_PAIR_INFO_CACHE_ENABLED` |
+| `danswer:document_sets:user:<user_id>` | Per-user document-set list (chat bundle) — `DOCUMENT_SET_CACHE_ENABLED` |
 
 **1. Are the cache keys present?** (fastest "is it on" check — use `--scan`, never `KEYS`, on a live Redis)
 ```bash
@@ -313,7 +315,7 @@ restart the pods that actually consume the changed vars:
 
 | Changed vars | Restart | Why |
 |---|---|---|
-| Redis flags (`REDIS_*`, `REQUEST_RATE_LIMIT_*`, `PERSONA_CACHE_*`, `CC_PAIR_INFO_CACHE_*`) | `api-server` + `background` | api-server runs the rate limiter + reads the caches; background reads config (Slack/OAuth tokens) and busts the persona cache on group mutations |
+| Redis flags (`REDIS_*`, `REQUEST_RATE_LIMIT_*`, `PERSONA_CACHE_*`, `CC_PAIR_INFO_CACHE_*`, `DOCUMENT_SET_CACHE_*`) | `api-server` + `background` | api-server runs the rate limiter + reads the caches; background reads config (Slack/OAuth tokens) and busts the persona + document-set caches on mutations (incl. the doc-set sync task) |
 | Celery broker (`CELERY_BROKER_REDIS_ENABLED`, `CELERY_REDIS_DB_NUMBER`) | `background` | the Celery worker + beat (in the `background` pod) read the broker URL at startup. **Restart worker AND beat together** so they don't split across two brokers mid-flight |
 | DB pool (`POSTGRES_POOL_SIZE`, `POSTGRES_POOL_OVERFLOW`) | `api-server` + `background` | engine pool is built once per process at first DB use; both pods build their own |
 | LLM / search / connector vars (`GEN_AI_*`, `QA_TIMEOUT`, `MULTILINGUAL_*`, etc.) | `api-server` + `background` | both run the chat/search/index paths |
