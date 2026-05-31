@@ -14,7 +14,13 @@ from danswer.background.task_utils import build_celery_task_wrapper
 from danswer.background.task_utils import name_cc_cleanup_task
 from danswer.background.task_utils import name_cc_prune_task
 from danswer.background.task_utils import name_document_set_sync_task
+from danswer.configs.app_configs import CELERY_BROKER_REDIS_ENABLED
+from danswer.configs.app_configs import CELERY_REDIS_DB_NUMBER
 from danswer.configs.app_configs import JOB_TIMEOUT
+from danswer.configs.app_configs import REDIS_HOST
+from danswer.configs.app_configs import REDIS_PASSWORD
+from danswer.configs.app_configs import REDIS_PORT
+from danswer.configs.app_configs import REDIS_SSL
 from danswer.connectors.factory import instantiate_connector
 from danswer.connectors.models import InputType
 from danswer.db.connector_credential_pair import get_connector_credential_pair
@@ -41,9 +47,24 @@ from danswer.utils.logger import setup_logger
 
 logger = setup_logger()
 
-connection_string = build_connection_string(db_api=SYNC_DB_API)
-celery_broker_url = f"sqla+{connection_string}"
-celery_backend_url = f"db+{connection_string}"
+if CELERY_BROKER_REDIS_ENABLED:
+    # Redis broker + result backend. Removes Celery's queue traffic from
+    # Postgres (the default sqla+/db+ transport polls and writes the DB).
+    # A dedicated logical DB (CELERY_REDIS_DB_NUMBER) keeps Celery's keys
+    # off the cache/rate-limit DB. Task status is tracked in our own
+    # task_queue_jobs table, not this backend, so it's safe to relocate.
+    _redis_scheme = "rediss" if REDIS_SSL else "redis"
+    _redis_auth = f":{REDIS_PASSWORD}@" if REDIS_PASSWORD else ""
+    _redis_url = (
+        f"{_redis_scheme}://{_redis_auth}{REDIS_HOST}:{REDIS_PORT}"
+        f"/{CELERY_REDIS_DB_NUMBER}"
+    )
+    celery_broker_url = _redis_url
+    celery_backend_url = _redis_url
+else:
+    connection_string = build_connection_string(db_api=SYNC_DB_API)
+    celery_broker_url = f"sqla+{connection_string}"
+    celery_backend_url = f"db+{connection_string}"
 celery_app = Celery(__name__, broker=celery_broker_url, backend=celery_backend_url)
 
 

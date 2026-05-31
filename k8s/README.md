@@ -313,7 +313,9 @@ restart the pods that actually consume the changed vars:
 
 | Changed vars | Restart | Why |
 |---|---|---|
-| Redis flags (`REDIS_*`, `REQUEST_RATE_LIMIT_*`, `PERSONA_CACHE_*`) | `api-server` + `background` | api-server runs the rate limiter + reads the caches; background reads config (Slack/OAuth tokens) and busts the persona cache on group mutations |
+| Redis flags (`REDIS_*`, `REQUEST_RATE_LIMIT_*`, `PERSONA_CACHE_*`, `CC_PAIR_INFO_CACHE_*`) | `api-server` + `background` | api-server runs the rate limiter + reads the caches; background reads config (Slack/OAuth tokens) and busts the persona cache on group mutations |
+| Celery broker (`CELERY_BROKER_REDIS_ENABLED`, `CELERY_REDIS_DB_NUMBER`) | `background` | the Celery worker + beat (in the `background` pod) read the broker URL at startup. **Restart worker AND beat together** so they don't split across two brokers mid-flight |
+| DB pool (`POSTGRES_POOL_SIZE`, `POSTGRES_POOL_OVERFLOW`) | `api-server` + `background` | engine pool is built once per process at first DB use; both pods build their own |
 | LLM / search / connector vars (`GEN_AI_*`, `QA_TIMEOUT`, `MULTILINGUAL_*`, etc.) | `api-server` + `background` | both run the chat/search/index paths |
 | Model-server vars (`DOCUMENT_ENCODER_MODEL`, `NORMALIZE_EMBEDDINGS`, …) | `inference-model-server` + `indexing-model-server` | only the model servers read these |
 | `WEB_DOMAIN` / `INTERNAL_URL` / frontend | `web-server` (+ `api-server` for `WEB_DOMAIN` / OIDC redirect) | |
@@ -329,6 +331,36 @@ kubectl rollout restart deploy/api-server-deployment deploy/background-deploymen
 > `kubectl rollout restart deploy/background-lite-deployment deploy/background-indexer-scheduler-deployment deploy/dask-worker-deployment -n darwin`.
 > The model servers, `nginx`, and `web-server` do **not** use the Redis
 > features — no need to restart them for a Redis flag flip.
+
+### Celery on Redis + Postgres pool sizing
+
+Two knobs that reduce/contain Postgres connection pressure (the real ceiling
+for chat at scale — DB sessions are held through the LLM stream):
+
+- **`CELERY_BROKER_REDIS_ENABLED=true`** (prod on, local off) moves Celery's
+  broker + result backend from Postgres to Redis (logical DB
+  `CELERY_REDIS_DB_NUMBER`, default `1` — separate from the cache/rate-limit
+  DB `0`). This stops the Celery worker + beat from polling/writing Postgres
+  for their queue. Task **status** is unaffected: this fork tracks it in its
+  own `task_queue_jobs` table, not the Celery backend. Indexing is still Dask.
+  Note: unlike the **cache** (fail-open), the **broker** is a hard dependency
+  — if Redis is down, Celery maintenance tasks (prune / doc-set sync /
+  user-group sync / deletion / analytics / retention) won't run until it's
+  back. Chat and indexing are unaffected (they don't use Celery).
+- **`POSTGRES_POOL_SIZE` / `POSTGRES_POOL_OVERFLOW`** (default 40 / 10) size
+  the SQLAlchemy pool **per process**. A pod's max connections is
+  `(size + overflow)` per engine, and api-server uses both a sync and an
+  async engine — so up to `2 × (size + overflow)` per api-server pod.
+  Cluster total = that × replicas of every DB-touching pod, and must stay
+  under Azure Postgres `max_connections` with headroom for boot migrations.
+  **Lower these as you add api-server replicas.**
+
+Verify the Celery queue is on Redis (not Postgres) after enabling:
+```bash
+# Celery keys live in DB 1; you should see kombu/celery keys appear here:
+kubectl exec -n darwin redis-0 -c redis -- redis-cli -n 1 --scan --pattern '*' | head
+# And the old Postgres broker tables should stop growing (kombu_message).
+```
 
 ### Apply an optional component (split-background + Dask)
 

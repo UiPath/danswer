@@ -64,7 +64,7 @@ moved on substantially. This table is the explicit map.
 | Indexing runtime | Celery `docfetching` + `docprocessing` workers | **Dask `LocalCluster`** in `update.py` (Celery only does maintenance) |
 | Number of Celery workers | Eight specialized workers (primary, light, heavy, kg_processing, monitoring, beat, etc.) | One worker + beat, spawned by `dev_run_background_jobs.py` |
 | Celery task definition | `@shared_task` under `background/celery/tasks/` | `@celery_app.task` in `background/celery/celery_app.py` |
-| Celery broker | Redis | SQLAlchemy/Postgres (`sqla+postgresql+psycopg2://…`) |
+| Celery broker | Redis | SQLAlchemy/Postgres by default; **optionally Redis** via `CELERY_BROKER_REDIS_ENABLED=true` (logical DB `CELERY_REDIS_DB_NUMBER`, default 1). Prod enables it to keep Celery's queue traffic off Postgres. Indexing is still Dask either way. |
 | Error handling | `raise OnyxError(OnyxErrorCode.X, …)` everywhere; no `HTTPException` | Plain `HTTPException(status_code=…, detail=…)` is the norm here. `OnyxError` doesn't exist. |
 | FastAPI return types | "Don't use `response_model=`, just type the function" | Both styles exist in this fork (the typed-return-annotation form is the majority — `response_model=` only appears once in `connector.py:560`). New endpoints should use the typed-return form. Don't strip the existing `response_model=` without checking serialization behavior. |
 | LLM call instrumentation | Every call must open a `LLMFlow`-tagged span via `traced_llm_call(...)` | No tracing system. `LLMFlow` doesn't exist. |
@@ -165,8 +165,9 @@ web/src/
 deployment/docker_compose/
   docker-compose.dev.yml           ← local stack (relational_db + index/Vespa +
                                      api_server + web_server + model_server +
-                                     background + nginx). Note: no Redis
-                                     here — Celery uses Postgres as its broker.
+                                     background + nginx). Celery brokers on
+                                     Postgres by default, or Redis when
+                                     CELERY_BROKER_REDIS_ENABLED=true.
 ```
 
 ---

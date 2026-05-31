@@ -142,6 +142,16 @@ POSTGRES_HOST = os.environ.get("POSTGRES_HOST") or "localhost"
 POSTGRES_PORT = os.environ.get("POSTGRES_PORT") or "5432"
 POSTGRES_DB = os.environ.get("POSTGRES_DB") or "postgres"
 
+# SQLAlchemy connection-pool sizing, PER PROCESS. Max connections a single
+# process can open to Postgres is POSTGRES_POOL_SIZE + POSTGRES_POOL_OVERFLOW.
+# The cluster-wide total is (that) × (replicas of every pod that imports the
+# engine: api-server, background, model servers if they touch the DB), and it
+# must stay under Postgres `max_connections` with headroom. Defaults preserve
+# the previous hardcoded 40+10; override DOWN per deployment as you scale
+# replicas (e.g. a small api-server pool when running many replicas).
+POSTGRES_POOL_SIZE = int(os.environ.get("POSTGRES_POOL_SIZE") or 40)
+POSTGRES_POOL_OVERFLOW = int(os.environ.get("POSTGRES_POOL_OVERFLOW") or 10)
+
 
 #####
 # Connector Configs
@@ -319,6 +329,19 @@ REDIS_SSL = os.environ.get("REDIS_SSL", "").lower() == "true"
 REDIS_POOL_MAX_CONNECTIONS = int(os.environ.get("REDIS_POOL_MAX_CONNECTIONS") or 50)
 REDIS_HEALTH_CHECK_INTERVAL = int(os.environ.get("REDIS_HEALTH_CHECK_INTERVAL") or 60)
 REDIS_SOCKET_TIMEOUT_SECONDS = int(os.environ.get("REDIS_SOCKET_TIMEOUT_SECONDS") or 3)
+
+# Celery broker + result backend on Redis (instead of the default
+# SQLAlchemy/Postgres transport). Default OFF so local dev without Redis
+# still boots on the Postgres broker. When ON, Celery stops polling/writing
+# Postgres for its queue, removing that load from the DB. Uses a SEPARATE
+# Redis logical DB from the cache (CELERY_REDIS_DB_NUMBER, default 1) so
+# Celery's keys never collide with cache/rate-limit keys on REDIS_DB_NUMBER.
+# Task STATUS is unaffected — this fork tracks it in its own task_queue_jobs
+# table, not Celery's result backend.
+CELERY_BROKER_REDIS_ENABLED = (
+    os.environ.get("CELERY_BROKER_REDIS_ENABLED", "").lower() == "true"
+)
+CELERY_REDIS_DB_NUMBER = int(os.environ.get("CELERY_REDIS_DB_NUMBER") or 1)
 
 # Read-through KV cache layered atop PostgresBackedDynamicConfigStore.
 # When false (default), the store behaves exactly as before; when true,
