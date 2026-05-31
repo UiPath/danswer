@@ -26,12 +26,14 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from danswer.configs.constants import MessageType
+from danswer.db.models import AnalyticsUserFirstSeen
 from danswer.db.models import ChatMessage
 from danswer.db.models import ChatMessageFeedback
 from danswer.db.models import ChatSession
 from danswer.db.models import Connector
 from danswer.db.models import ConnectorCredentialPair
 from danswer.db.models import Document
+from danswer.db.models import User
 
 
 def fetch_query_analytics(
@@ -134,6 +136,91 @@ def fetch_per_user_query_analytics(
         .order_by(cast(ChatMessage.time_sent, Date), ChatSession.user_id)
     )
 
+    return db_session.execute(stmt).all()  # type: ignore
+
+
+def fetch_user_adoption(
+    start: datetime.datetime,
+    end: datetime.datetime,
+    db_session: Session,
+) -> list[tuple[datetime.date, int, int]]:
+    """Per-day ``(date, new_users, cumulative_users)`` from the durable
+    ``analytics_user_first_seen`` table — the chat adoption curve.
+
+    Read from the aggregate, NOT raw chat, so it spans the full history
+    regardless of RETENTION_DAYS_CHAT. ``cumulative_users`` folds in users
+    whose first-seen predates ``start`` so the running total is continuous.
+    Only days on which at least one user first appeared are returned.
+    """
+    start_date = start.date()
+    end_date = end.date()
+    rows = db_session.execute(
+        select(
+            AnalyticsUserFirstSeen.first_seen_date,
+            func.count().label("new_users"),
+        )
+        .where(AnalyticsUserFirstSeen.first_seen_date <= end_date)
+        .group_by(AnalyticsUserFirstSeen.first_seen_date)
+        .order_by(AnalyticsUserFirstSeen.first_seen_date)
+    ).all()
+
+    out: list[tuple[datetime.date, int, int]] = []
+    cumulative = 0
+    for day, new_users in rows:
+        cumulative += int(new_users)
+        if day >= start_date:
+            out.append((day, int(new_users), cumulative))
+    return out
+
+
+def fetch_per_user_chat_stats(
+    start: datetime.datetime,
+    end: datetime.datetime,
+    db_session: Session,
+    limit: int = 100,
+) -> Sequence[tuple[UUID, str, int, int, int, datetime.date]]:
+    """Top ``limit`` users by assistant-message volume over ``[start, end]``,
+    with like/dislike tallies and last-active date, joined to ``user`` for
+    email. Inner join on ``user`` drops anonymous (null-user) sessions.
+
+    Reads raw chat, so it only covers the last RETENTION_DAYS_CHAT of data —
+    this is a recent-activity leaderboard, not an all-time one.
+    """
+    stmt = (
+        # SA's select() overloads don't type a 6-col coalesce/max projection;
+        # the runtime is fine (the existing analytics selects do the same).
+        select(  # type: ignore[call-overload]
+            User.id,
+            User.email,
+            func.count(ChatMessage.id),
+            func.coalesce(
+                func.sum(case((ChatMessageFeedback.is_positive, 1), else_=0)), 0
+            ),
+            func.coalesce(
+                func.sum(
+                    case(
+                        (ChatMessageFeedback.is_positive == False, 1),  # noqa: E712
+                        else_=0,
+                    )
+                ),
+                0,
+            ),
+            func.max(cast(ChatMessage.time_sent, Date)),
+        )
+        .select_from(ChatMessage)
+        .join(ChatSession, ChatSession.id == ChatMessage.chat_session_id)
+        .join(User, User.id == ChatSession.user_id)
+        .outerjoin(
+            ChatMessageFeedback,
+            ChatMessageFeedback.chat_message_id == ChatMessage.id,
+        )
+        .where(ChatMessage.time_sent >= start)
+        .where(ChatMessage.time_sent <= end)
+        .where(ChatMessage.message_type == MessageType.ASSISTANT)
+        .group_by(User.id, User.email)
+        .order_by(func.count(ChatMessage.id).desc())
+        .limit(limit)
+    )
     return db_session.execute(stmt).all()  # type: ignore
 
 

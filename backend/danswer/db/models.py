@@ -11,6 +11,7 @@ from uuid import UUID
 from fastapi_users_db_sqlalchemy import SQLAlchemyBaseOAuthAccountTableUUID
 from fastapi_users_db_sqlalchemy import SQLAlchemyBaseUserTableUUID
 from fastapi_users_db_sqlalchemy.access_token import SQLAlchemyBaseAccessTokenTableUUID
+from fastapi_users_db_sqlalchemy.generics import GUID
 from sqlalchemy import Boolean
 from sqlalchemy import Date
 from sqlalchemy import DateTime
@@ -1453,7 +1454,7 @@ class AnalyticsDailyRollup(Base):
     retention deletes.
 
     `chat_message` / `chat_session` rows older than RETENTION_DAYS_CHAT
-    (default 30d) are purged by the daily retention sweep. The analytics
+    (default 90d) are purged by the daily retention sweep. The analytics
     endpoints used to read directly from those tables, so any date range
     older than ~30 days returned zeros. This rollup table is computed
     BEFORE the retention sweep each day (Celery beat at 07:30 UTC, sweep
@@ -1501,4 +1502,33 @@ class AnalyticsDailyRollup(Base):
         nullable=False,
         server_default=func.now(),
         onupdate=func.now(),
+    )
+
+
+class AnalyticsUserFirstSeen(Base):
+    """Durable record of the first UTC date each user used chat (asked a
+    question). Powers the adoption curve ("how many distinct users have ever
+    tried chat") on the admin Analytics page.
+
+    Populated incrementally by the analytics rollup (BEFORE the retention
+    sweep), one row per user, ever — ``first_seen_date`` is written once and
+    never moves forward (INSERT ... ON CONFLICT DO NOTHING). This is what
+    makes adoption survive chat retention: once chat_message rows age out of
+    RETENTION_DAYS_CHAT they're deleted, so "first time we saw user X" can no
+    longer be recomputed from raw data — it must be captured here while the
+    data still exists.
+
+    Deliberately NO foreign key to ``user`` (mirrors AnalyticsDailyRollup's
+    no-FK stance): deleting a user must not erase the historical fact that
+    they once adopted chat, and must not cascade into this aggregate.
+    """
+
+    __tablename__ = "analytics_user_first_seen"
+
+    user_id: Mapped[UUID] = mapped_column(GUID(), primary_key=True)
+    first_seen_date: Mapped[datetime.date] = mapped_column(
+        Date, nullable=False, index=True
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
     )

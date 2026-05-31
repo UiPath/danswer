@@ -48,6 +48,7 @@ from sqlalchemy import case
 from sqlalchemy import cast
 from sqlalchemy import Date
 from sqlalchemy import func
+from sqlalchemy import literal
 from sqlalchemy import or_
 from sqlalchemy import select
 from sqlalchemy import text
@@ -57,6 +58,7 @@ from sqlalchemy.orm import Session
 from danswer.configs.constants import MessageType
 from danswer.db.engine import get_sqlalchemy_engine
 from danswer.db.models import AnalyticsDailyRollup
+from danswer.db.models import AnalyticsUserFirstSeen
 from danswer.db.models import ChatMessage
 from danswer.db.models import ChatMessageFeedback
 from danswer.db.models import ChatSession
@@ -309,6 +311,42 @@ def upsert_rollup_for_date(
     return metrics
 
 
+def capture_first_seen_for_date(
+    db_session: Session, target_date: datetime.date
+) -> None:
+    """Record ``first_seen_date`` for every user active on ``target_date``
+    who isn't already in ``analytics_user_first_seen``.
+
+    INSERT … SELECT … ON CONFLICT (user_id) DO NOTHING: a user already
+    present keeps their stored date, so first-seen never moves forward.
+    Because :func:`run_rollup` walks dates ascending, the earliest date in
+    the processed window on which a user appears is the one recorded — and
+    for the full backfill that's their true first-ever day. Once written,
+    the row is immune to chat retention deletes (this is the whole point:
+    the adoption curve must outlive the raw chat_message rows)."""
+    start, end = _day_bounds(target_date)
+    active_user_ids = (
+        select(
+            ChatSession.user_id.label("user_id"),
+            literal(target_date, Date).label("first_seen_date"),
+        )
+        .select_from(ChatMessage)
+        .join(ChatSession, ChatSession.id == ChatMessage.chat_session_id)
+        .where(ChatMessage.time_sent >= start)
+        .where(ChatMessage.time_sent < end)
+        .where(ChatMessage.message_type == MessageType.ASSISTANT)
+        .where(ChatSession.user_id.is_not(None))
+        .distinct()
+    )
+    stmt = (
+        pg_insert(AnalyticsUserFirstSeen.__table__)
+        .from_select(["user_id", "first_seen_date"], active_user_ids)
+        .on_conflict_do_nothing(index_elements=[AnalyticsUserFirstSeen.user_id])
+    )
+    db_session.execute(stmt)
+    db_session.commit()
+
+
 # ---------------------------------------------------------------------------
 # Batch operations — sliding window (daily task) + full backfill
 # ---------------------------------------------------------------------------
@@ -429,6 +467,9 @@ def run_rollup(today: datetime.date | None = None) -> int:
         current = start
         while current <= today:
             upsert_rollup_for_date(db_session, current)
+            # Capture first-seen in the same ascending pass, before retention
+            # can delete the day's chat rows (rollup runs 07:30, sweep 08:00).
+            capture_first_seen_for_date(db_session, current)
             current += datetime.timedelta(days=1)
             n += 1
 
@@ -458,6 +499,9 @@ def backfill_all_rollups(start_date: datetime.date, end_date: datetime.date) -> 
         current = start_date
         while current <= end_date:
             upsert_rollup_for_date(db_session, current)
+            # Walk ascending so each user's first_seen_date is their true
+            # first-ever active day across all currently-available history.
+            capture_first_seen_for_date(db_session, current)
             current += datetime.timedelta(days=1)
             n += 1
             if n % 30 == 0:

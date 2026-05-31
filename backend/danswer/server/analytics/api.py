@@ -21,8 +21,10 @@ from sqlalchemy.orm import Session
 import danswer.db.models as db_models
 from danswer.auth.users import current_admin_user
 from danswer.db.analytics import fetch_docs_per_source
+from danswer.db.analytics import fetch_per_user_chat_stats
 from danswer.db.analytics import fetch_slack_bot_channel_stats
 from danswer.db.analytics import fetch_total_docs_indexed
+from danswer.db.analytics import fetch_user_adoption
 from danswer.db.analytics_rollup import fetch_danswerbot_analytics_from_rollup
 from danswer.db.analytics_rollup import fetch_query_analytics_from_rollup
 from danswer.db.analytics_rollup import fetch_user_analytics_from_rollup
@@ -103,6 +105,75 @@ def get_user_analytics(
     return [
         UserAnalyticsResponse(total_active_users=int(active_users), date=date)
         for active_users, date in rows
+    ]
+
+
+class UserAdoptionResponse(BaseModel):
+    # Users who first used chat on this date.
+    new_users: int
+    # Running total of distinct users who had ever used chat as of this date.
+    cumulative_users: int
+    date: datetime.date
+
+
+@router.get("/admin/user-adoption")
+def get_user_adoption_analytics(
+    start: datetime.datetime | None = None,
+    end: datetime.datetime | None = None,
+    _: db_models.User | None = Depends(current_admin_user),
+    db_session: Session = Depends(get_session),
+) -> list[UserAdoptionResponse]:
+    """Chat adoption curve: new + cumulative distinct users per day, served
+    from the durable `analytics_user_first_seen` table (survives chat
+    retention)."""
+    rows = fetch_user_adoption(
+        start=start or (datetime.datetime.utcnow() - datetime.timedelta(days=90)),
+        end=end or datetime.datetime.utcnow(),
+        db_session=db_session,
+    )
+    return [
+        UserAdoptionResponse(
+            new_users=new_users, cumulative_users=cumulative_users, date=date
+        )
+        for date, new_users, cumulative_users in rows
+    ]
+
+
+class PerUserChatStatsResponse(BaseModel):
+    user_id: str
+    email: str
+    total_messages: int
+    total_likes: int
+    total_dislikes: int
+    last_active: datetime.date
+
+
+@router.get("/admin/per-user")
+def get_per_user_analytics(
+    start: datetime.datetime | None = None,
+    end: datetime.datetime | None = None,
+    limit: int = 100,
+    _: db_models.User | None = Depends(current_admin_user),
+    db_session: Session = Depends(get_session),
+) -> list[PerUserChatStatsResponse]:
+    """Top users by message volume over the range (recent-activity
+    leaderboard — only covers the last RETENTION_DAYS_CHAT of chat data)."""
+    rows = fetch_per_user_chat_stats(
+        start=start or (datetime.datetime.utcnow() - datetime.timedelta(days=90)),
+        end=end or datetime.datetime.utcnow(),
+        db_session=db_session,
+        limit=limit,
+    )
+    return [
+        PerUserChatStatsResponse(
+            user_id=str(user_id),
+            email=email,
+            total_messages=int(total_messages),
+            total_likes=int(total_likes),
+            total_dislikes=int(total_dislikes),
+            last_active=last_active,
+        )
+        for user_id, email, total_messages, total_likes, total_dislikes, last_active in rows
     ]
 
 
