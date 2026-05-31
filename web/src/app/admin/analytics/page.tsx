@@ -10,6 +10,11 @@ import {
   DateRangePickerValue,
   Grid,
   Metric,
+  Tab,
+  TabGroup,
+  TabList,
+  TabPanel,
+  TabPanels,
   Table,
   TableBody,
   TableCell,
@@ -208,7 +213,9 @@ export default function AnalyticsPage() {
     swrOpts
   );
 
-  const { data: perUserData, error: perUserErr } = useSWR<PerUserChatStatsRow[]>(
+  const { data: perUserData, error: perUserErr } = useSWR<
+    PerUserChatStatsRow[]
+  >(
     buildURL("/analytics/admin/per-user", range),
     errorHandlingFetcher,
     swrOpts
@@ -441,290 +448,306 @@ export default function AnalyticsPage() {
       {isInitialLoading ? (
         <LoadingAnimation text="Loading analytics" />
       ) : (
-        <>
-          {/* Top row: range-scoped KPIs */}
-          <Grid
-            numItems={1}
-            numItemsSm={2}
-            numItemsLg={3}
-            className="gap-4 mb-4"
-          >
-            <Card>
-              <Text>Total Queries (range)</Text>
-              <Metric>{kpis.totalQueries.toLocaleString()}</Metric>
-            </Card>
-            <Card>
-              <Text>Peak Daily Active Users</Text>
-              <Metric>{kpis.peakActiveUsers.toLocaleString()}</Metric>
-            </Card>
-            <Card>
-              <Text>Auto-Resolution Rate (Slack)</Text>
-              <Metric>
-                {kpis.autoResolvePct !== null ? `${kpis.autoResolvePct}%` : "—"}
-              </Metric>
-            </Card>
-          </Grid>
+        <TabGroup>
+          <TabList className="mb-6">
+            <Tab>Overview</Tab>
+            <Tab>User Activity</Tab>
+          </TabList>
+          <TabPanels>
+            <TabPanel>
+              {/* Top row: range-scoped KPIs */}
+              <Grid
+                numItems={1}
+                numItemsSm={2}
+                numItemsLg={3}
+                className="gap-4 mb-4"
+              >
+                <Card>
+                  <Text>Total Queries (range)</Text>
+                  <Metric>{kpis.totalQueries.toLocaleString()}</Metric>
+                </Card>
+                <Card>
+                  <Text>Peak Daily Active Users</Text>
+                  <Metric>{kpis.peakActiveUsers.toLocaleString()}</Metric>
+                </Card>
+                <Card>
+                  <Text>Auto-Resolution Rate (Slack)</Text>
+                  <Metric>
+                    {kpis.autoResolvePct !== null
+                      ? `${kpis.autoResolvePct}%`
+                      : "—"}
+                  </Metric>
+                </Card>
+              </Grid>
 
-          {/* Snapshot KPIs — current state, independent of date range */}
-          <Grid
-            numItems={1}
-            numItemsSm={2}
-            numItemsLg={4}
-            className="gap-4 mb-6"
-          >
-            <Card>
-              <Text>Total Docs Indexed</Text>
-              <Metric>
-                {totalDocs
-                  ? totalDocs.total_docs_indexed.toLocaleString()
-                  : "—"}
-              </Metric>
-              <Text className="mt-1 text-xs">
-                {totalDocs
-                  ? `${totalDocs.unique_docs.toLocaleString()} unique`
-                  : ""}
-              </Text>
-            </Card>
-            <Card>
-              <Text>Slack Channels Enabled</Text>
-              <Metric>
-                {slackChannels
-                  ? slackChannels.enabled_channels.toLocaleString()
-                  : "—"}
-              </Metric>
-              <Text className="mt-1 text-xs">
-                {slackChannels
-                  ? `across ${slackChannels.total_configs} config(s)`
-                  : ""}
-              </Text>
-            </Card>
-            <Card>
-              <Text>Positive Feedback %</Text>
-              <Metric>
-                {kpis.positivity !== null ? `${kpis.positivity}%` : "—"}
-              </Metric>
-              <Text className="mt-1 text-xs">over selected date range</Text>
-            </Card>
-            <Card>
-              <Text>Sources Active</Text>
-              <Metric>
-                {docsBySource ? docsBySourceBars.length.toLocaleString() : "—"}
-              </Metric>
-              <Text className="mt-1 text-xs">
-                {docsBySource ? `of ${docsBySource.length} configured` : ""}
-              </Text>
-            </Card>
-          </Grid>
+              {/* Snapshot KPIs — current state, independent of date range */}
+              <Grid
+                numItems={1}
+                numItemsSm={2}
+                numItemsLg={4}
+                className="gap-4 mb-6"
+              >
+                <Card>
+                  <Text>Total Docs Indexed</Text>
+                  <Metric>
+                    {totalDocs
+                      ? totalDocs.total_docs_indexed.toLocaleString()
+                      : "—"}
+                  </Metric>
+                  <Text className="mt-1 text-xs">
+                    {totalDocs
+                      ? `${totalDocs.unique_docs.toLocaleString()} unique`
+                      : ""}
+                  </Text>
+                </Card>
+                <Card>
+                  <Text>Slack Channels Enabled</Text>
+                  <Metric>
+                    {slackChannels
+                      ? slackChannels.enabled_channels.toLocaleString()
+                      : "—"}
+                  </Metric>
+                  <Text className="mt-1 text-xs">
+                    {slackChannels
+                      ? `across ${slackChannels.total_configs} config(s)`
+                      : ""}
+                  </Text>
+                </Card>
+                <Card>
+                  <Text>Positive Feedback %</Text>
+                  <Metric>
+                    {kpis.positivity !== null ? `${kpis.positivity}%` : "—"}
+                  </Metric>
+                  <Text className="mt-1 text-xs">over selected date range</Text>
+                </Card>
+                <Card>
+                  <Text>Sources Active</Text>
+                  <Metric>
+                    {docsBySource
+                      ? docsBySourceBars.length.toLocaleString()
+                      : "—"}
+                  </Metric>
+                  <Text className="mt-1 text-xs">
+                    {docsBySource ? `of ${docsBySource.length} configured` : ""}
+                  </Text>
+                </Card>
+              </Grid>
 
-          <Grid numItems={1} numItemsLg={2} className="gap-4 mb-6">
-            <Card>
-              <Title>Users and Query Trend</Title>
-              <Text>
-                {granularity === "day"
-                  ? "Daily"
-                  : "Monthly (Active Users = peak day)"}{" "}
-                assistant replies overlaid with active users
-              </Text>
-              <AreaChart
-                className="mt-4 h-72"
-                data={queryPerformanceData}
-                index="date"
-                categories={["Queries", "Active Users"]}
-                colors={["blue", "green"]}
-                showLegend={true}
-                noDataText="No data in this date range"
-              />
-            </Card>
+              <Grid numItems={1} numItemsLg={2} className="gap-4 mb-6">
+                <Card>
+                  <Title>Users and Query Trend</Title>
+                  <Text>
+                    {granularity === "day"
+                      ? "Daily"
+                      : "Monthly (Active Users = peak day)"}{" "}
+                    assistant replies overlaid with active users
+                  </Text>
+                  <AreaChart
+                    className="mt-4 h-72"
+                    data={queryPerformanceData}
+                    index="date"
+                    categories={["Queries", "Active Users"]}
+                    colors={["blue", "green"]}
+                    showLegend={true}
+                    noDataText="No data in this date range"
+                  />
+                </Card>
 
-            <Card>
-              <Title>Feedback Trend</Title>
-              <Text>
-                {granularity === "day" ? "Daily" : "Monthly"} thumbs up vs
-                thumbs down
-              </Text>
-              <AreaChart
-                className="mt-4 h-72"
-                data={feedbackData}
-                index="date"
-                categories={["Likes", "Dislikes"]}
-                colors={["emerald", "rose"]}
-                showLegend={true}
-                noDataText="No feedback in this date range"
-              />
-            </Card>
-          </Grid>
+                <Card>
+                  <Title>Feedback Trend</Title>
+                  <Text>
+                    {granularity === "day" ? "Daily" : "Monthly"} thumbs up vs
+                    thumbs down
+                  </Text>
+                  <AreaChart
+                    className="mt-4 h-72"
+                    data={feedbackData}
+                    index="date"
+                    categories={["Likes", "Dislikes"]}
+                    colors={["emerald", "rose"]}
+                    showLegend={true}
+                    noDataText="No feedback in this date range"
+                  />
+                </Card>
+              </Grid>
 
-          <Card className="mb-6">
-            <Title>Chat Adoption</Title>
-            <Text>
-              {granularity === "day" ? "Daily" : "Monthly"} new users overlaid
-              with the cumulative number who have ever tried chat
-            </Text>
-            <div className="flex flex-wrap gap-8 mt-3">
-              <div>
-                <Text className="text-xs">Users who ever tried chat</Text>
-                <Metric>{kpis.totalUsersEverTried.toLocaleString()}</Metric>
-              </div>
-              <div>
-                <Text className="text-xs">New users (range)</Text>
-                <Metric>{kpis.newUsersInRange.toLocaleString()}</Metric>
-              </div>
-            </div>
-            <AreaChart
-              className="mt-4 h-72"
-              data={adoptionChartData}
-              index="date"
-              categories={["New Users", "Cumulative Users"]}
-              colors={["cyan", "indigo"]}
-              showLegend={true}
-              noDataText="No adoption data yet"
-            />
-          </Card>
+              <Card className="mb-6">
+                <Title>Docs Indexed by Source</Title>
+                <Text>Snapshot — sum across all cc-pairs per source type</Text>
+                {docsBySourceBars.length > 0 ? (
+                  <BarList
+                    className="mt-4"
+                    data={docsBySourceBars}
+                    valueFormatter={(n: number) => n.toLocaleString()}
+                  />
+                ) : (
+                  <Text className="mt-4">No documents indexed yet.</Text>
+                )}
+              </Card>
+            </TabPanel>
 
-          <Card className="mb-6">
-            <Title>Top Users by Activity</Title>
-            <Text>
-              Most active users over the selected range, by assistant replies.
-              From the durable daily aggregate, so it spans full history even
-              after old chats are purged by retention.
-            </Text>
-            {perUserData && perUserData.length > 0 ? (
-              <div className="mt-4 max-h-96 overflow-y-auto">
-                <Table>
-                  <TableHead>
-                    <TableRow>
-                      <TableHeaderCell>User</TableHeaderCell>
-                      <TableHeaderCell className="text-right">
-                        Messages
-                      </TableHeaderCell>
-                      <TableHeaderCell className="text-right">
-                        Likes
-                      </TableHeaderCell>
-                      <TableHeaderCell className="text-right">
-                        Dislikes
-                      </TableHeaderCell>
-                      <TableHeaderCell className="text-right">
-                        Last Active
-                      </TableHeaderCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {perUserData.map((u) => (
-                      <TableRow key={u.user_id}>
-                        <TableCell>{u.email}</TableCell>
-                        <TableCell className="text-right">
-                          {u.total_messages.toLocaleString()}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {u.total_likes.toLocaleString()}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {u.total_dislikes.toLocaleString()}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {u.last_active}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            ) : (
-              <Text className="mt-4">No chat activity in this date range.</Text>
-            )}
-          </Card>
-
-          <Grid numItems={1} numItemsLg={2} className="gap-4 mb-6">
-            <Card>
-              <Title>Most-Used Assistants</Title>
-              <Text>
-                By assistant replies over the selected range. Durable
-                aggregate — spans full history.
-              </Text>
-              {personaData && personaData.length > 0 ? (
-                <div className="mt-4 max-h-96 overflow-y-auto">
-                  <Table>
-                    <TableHead>
-                      <TableRow>
-                        <TableHeaderCell>Assistant</TableHeaderCell>
-                        <TableHeaderCell className="text-right">
-                          Messages
-                        </TableHeaderCell>
-                        <TableHeaderCell className="text-right">
-                          Sessions
-                        </TableHeaderCell>
-                        <TableHeaderCell className="text-right">
-                          Likes
-                        </TableHeaderCell>
-                        <TableHeaderCell className="text-right">
-                          Dislikes
-                        </TableHeaderCell>
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {personaData.map((p) => (
-                        <TableRow key={p.persona_id}>
-                          <TableCell>{p.name}</TableCell>
-                          <TableCell className="text-right">
-                            {p.messages.toLocaleString()}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            {p.sessions.toLocaleString()}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            {p.likes.toLocaleString()}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            {p.dislikes.toLocaleString()}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
+            <TabPanel>
+              <Card className="mb-6">
+                <Title>Chat Adoption</Title>
+                <Text>
+                  {granularity === "day" ? "Daily" : "Monthly"} new users
+                  overlaid with the cumulative number who have ever tried chat
+                </Text>
+                <div className="flex flex-wrap gap-8 mt-3">
+                  <div>
+                    <Text className="text-xs">Users who ever tried chat</Text>
+                    <Metric>{kpis.totalUsersEverTried.toLocaleString()}</Metric>
+                  </div>
+                  <div>
+                    <Text className="text-xs">New users (range)</Text>
+                    <Metric>{kpis.newUsersInRange.toLocaleString()}</Metric>
+                  </div>
                 </div>
-              ) : (
-                <Text className="mt-4">
-                  No assistant activity in this date range.
-                </Text>
-              )}
-            </Card>
-
-            <Card>
-              <Title>Datasets in Use (approximate)</Title>
-              <Text>
-                Assistant usage attributed to each document set attached to the
-                assistant. Approximate — counts an assistant&apos;s messages
-                toward all its datasets and uses current attachments, not
-                per-query retrieval.
-              </Text>
-              {docSetUsageBars.length > 0 ? (
-                <BarList
-                  className="mt-4"
-                  data={docSetUsageBars}
-                  valueFormatter={(n: number) => n.toLocaleString()}
+                <AreaChart
+                  className="mt-4 h-72"
+                  data={adoptionChartData}
+                  index="date"
+                  categories={["New Users", "Cumulative Users"]}
+                  colors={["cyan", "indigo"]}
+                  showLegend={true}
+                  noDataText="No adoption data yet"
                 />
-              ) : (
-                <Text className="mt-4">
-                  No dataset usage in this date range.
-                </Text>
-              )}
-            </Card>
-          </Grid>
+              </Card>
 
-          <Card className="mb-6">
-            <Title>Docs Indexed by Source</Title>
-            <Text>Snapshot — sum across all cc-pairs per source type</Text>
-            {docsBySourceBars.length > 0 ? (
-              <BarList
-                className="mt-4"
-                data={docsBySourceBars}
-                valueFormatter={(n: number) => n.toLocaleString()}
-              />
-            ) : (
-              <Text className="mt-4">No documents indexed yet.</Text>
-            )}
-          </Card>
-        </>
+              <Card className="mb-6">
+                <Title>Top Users by Activity</Title>
+                <Text>
+                  Most active users over the selected range, by assistant
+                  replies. From the durable daily aggregate, so it spans full
+                  history even after old chats are purged by retention.
+                </Text>
+                {perUserData && perUserData.length > 0 ? (
+                  <div className="mt-4 max-h-96 overflow-y-auto">
+                    <Table>
+                      <TableHead>
+                        <TableRow>
+                          <TableHeaderCell>User</TableHeaderCell>
+                          <TableHeaderCell className="text-right">
+                            Messages
+                          </TableHeaderCell>
+                          <TableHeaderCell className="text-right">
+                            Likes
+                          </TableHeaderCell>
+                          <TableHeaderCell className="text-right">
+                            Dislikes
+                          </TableHeaderCell>
+                          <TableHeaderCell className="text-right">
+                            Last Active
+                          </TableHeaderCell>
+                        </TableRow>
+                      </TableHead>
+                      <TableBody>
+                        {perUserData.map((u) => (
+                          <TableRow key={u.user_id}>
+                            <TableCell>{u.email}</TableCell>
+                            <TableCell className="text-right">
+                              {u.total_messages.toLocaleString()}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              {u.total_likes.toLocaleString()}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              {u.total_dislikes.toLocaleString()}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              {u.last_active}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                ) : (
+                  <Text className="mt-4">
+                    No chat activity in this date range.
+                  </Text>
+                )}
+              </Card>
+
+              <Grid numItems={1} numItemsLg={2} className="gap-4 mb-6">
+                <Card>
+                  <Title>Most-Used Assistants</Title>
+                  <Text>
+                    By assistant replies over the selected range. Durable
+                    aggregate — spans full history.
+                  </Text>
+                  {personaData && personaData.length > 0 ? (
+                    <div className="mt-4 max-h-96 overflow-y-auto">
+                      <Table>
+                        <TableHead>
+                          <TableRow>
+                            <TableHeaderCell>Assistant</TableHeaderCell>
+                            <TableHeaderCell className="text-right">
+                              Messages
+                            </TableHeaderCell>
+                            <TableHeaderCell className="text-right">
+                              Sessions
+                            </TableHeaderCell>
+                            <TableHeaderCell className="text-right">
+                              Likes
+                            </TableHeaderCell>
+                            <TableHeaderCell className="text-right">
+                              Dislikes
+                            </TableHeaderCell>
+                          </TableRow>
+                        </TableHead>
+                        <TableBody>
+                          {personaData.map((p) => (
+                            <TableRow key={p.persona_id}>
+                              <TableCell>{p.name}</TableCell>
+                              <TableCell className="text-right">
+                                {p.messages.toLocaleString()}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                {p.sessions.toLocaleString()}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                {p.likes.toLocaleString()}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                {p.dislikes.toLocaleString()}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  ) : (
+                    <Text className="mt-4">
+                      No assistant activity in this date range.
+                    </Text>
+                  )}
+                </Card>
+
+                <Card>
+                  <Title>Datasets in Use (approximate)</Title>
+                  <Text>
+                    Assistant usage attributed to each document set attached to
+                    the assistant. Approximate — counts an assistant&apos;s
+                    messages toward all its datasets and uses current
+                    attachments, not per-query retrieval.
+                  </Text>
+                  {docSetUsageBars.length > 0 ? (
+                    <BarList
+                      className="mt-4"
+                      data={docSetUsageBars}
+                      valueFormatter={(n: number) => n.toLocaleString()}
+                    />
+                  ) : (
+                    <Text className="mt-4">
+                      No dataset usage in this date range.
+                    </Text>
+                  )}
+                </Card>
+              </Grid>
+            </TabPanel>
+          </TabPanels>
+        </TabGroup>
       )}
     </div>
   );
