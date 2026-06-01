@@ -310,23 +310,45 @@ class AzureBlobFileStore(FileStore):
         import datetime
 
         from azure.storage.blob import BlobSasPermissions  # type: ignore
+        from azure.storage.blob import BlobServiceClient  # type: ignore
         from azure.storage.blob import generate_blob_sas  # type: ignore
 
-        cfg = _parse_azure_conn_str(AZURE_BLOB_CONNECTION_STRING)
-        account_name = cfg["AccountName"]
-        blob_endpoint = (
-            cfg.get("BlobEndpoint") or f"https://{account_name}.blob.core.windows.net"
-        )
+        # Let the SDK parse the connection string — it's authoritative about
+        # the account name + blob endpoint (handles Azurite, custom endpoints,
+        # and key casing/ordering that a hand-rolled parse trips on).
+        svc = BlobServiceClient.from_connection_string(AZURE_BLOB_CONNECTION_STRING)
+
+        # The account KEY is needed to sign the SAS. Prefer the SDK-parsed
+        # credential (handles the `UseDevelopmentStorage=true` shorthand, where
+        # the dev key isn't literally in the string); fall back to a
+        # case-insensitive parse. SAS-token / managed-identity strings have no
+        # key — we can't mint an account-key SAS from those.
+        account_key = getattr(getattr(svc, "credential", None), "account_key", None)
+        if not account_key:
+            cfg = {
+                k.lower(): v
+                for k, v in _parse_azure_conn_str(AZURE_BLOB_CONNECTION_STRING).items()
+            }
+            account_key = cfg.get("accountkey")
+        if not account_key:
+            raise RuntimeError(
+                "Could not resolve an AccountKey from AZURE_BLOB_CONNECTION_STRING "
+                "— an account-key connection string is required to mint upload SAS "
+                "URLs (SAS-token / managed-identity strings aren't supported here)."
+            )
+
         sas = generate_blob_sas(
-            account_name=account_name,
+            account_name=svc.account_name,
             container_name=AZURE_BLOB_CONTAINER,
             blob_name=file_name,
-            account_key=cfg["AccountKey"],
+            account_key=account_key,
             permission=BlobSasPermissions(write=True, create=True),
             expiry=datetime.datetime.utcnow()
             + datetime.timedelta(minutes=expiry_minutes),
         )
-        return f"{blob_endpoint.rstrip('/')}/{AZURE_BLOB_CONTAINER}/{file_name}?{sas}"
+        # svc.url is the parsed blob endpoint (e.g. Azurite's
+        # http://127.0.0.1:10000/devstoreaccount1).
+        return f"{svc.url.rstrip('/')}/{AZURE_BLOB_CONTAINER}/{file_name}?{sas}"
 
     def register_object(
         self,
