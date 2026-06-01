@@ -1018,10 +1018,11 @@ export function ChatPage({
       return;
     }
 
-    // Client-side byte pre-check (mirrors backend CHAT_FILE_MAX_SIZE_MB default;
-    // the backend is authoritative — a doc can still be rejected on the token
-    // gate after extraction).
-    const MAX_FILE_SIZE_MB = 25;
+    // Client-side byte pre-check, reading the SAME limit the backend enforces
+    // (CHAT_FILE_MAX_SIZE_MB, surfaced via settings; falls back to 25 if
+    // absent). The backend is still authoritative — a doc can additionally be
+    // rejected on the token gate after extraction.
+    const MAX_FILE_SIZE_MB = settings?.settings?.chat_file_max_size_mb ?? 25;
     const tooLarge = acceptedFiles.find(
       (file) => file.size > MAX_FILE_SIZE_MB * 1024 * 1024
     );
