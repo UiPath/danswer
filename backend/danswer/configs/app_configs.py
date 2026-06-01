@@ -152,6 +152,17 @@ POSTGRES_DB = os.environ.get("POSTGRES_DB") or "postgres"
 POSTGRES_POOL_SIZE = int(os.environ.get("POSTGRES_POOL_SIZE") or 40)
 POSTGRES_POOL_OVERFLOW = int(os.environ.get("POSTGRES_POOL_OVERFLOW") or 10)
 
+# File store backend — where uploaded files / chat attachments / connector
+# blobs live. Default "PostgresBackedFileStore" (Postgres large objects).
+# Set to "AzureBlobFileStore" to offload the BYTES to Azure Blob Storage
+# (metadata stays in the file_store table): keeps the DB/WAL/backups lean and
+# stops file reads from holding a Postgres connection for the whole stream.
+FILE_STORE_TYPE = os.environ.get("FILE_STORE_TYPE") or "PostgresBackedFileStore"
+# Only used when FILE_STORE_TYPE=AzureBlobFileStore (secret — set in
+# danswer-secrets). Container is auto-created on first use if absent.
+AZURE_BLOB_CONNECTION_STRING = os.environ.get("AZURE_BLOB_CONNECTION_STRING") or ""
+AZURE_BLOB_CONTAINER = os.environ.get("AZURE_BLOB_CONTAINER") or "danswer-files"
+
 
 #####
 # Connector Configs

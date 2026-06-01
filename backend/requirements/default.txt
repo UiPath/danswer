@@ -2,6 +2,9 @@ aiohttp==3.9.4
 alembic==1.10.4
 asyncpg==0.27.0
 atlassian-python-api==3.37.0
+# Optional file-store backend (FILE_STORE_TYPE=AzureBlobFileStore). Imported
+# lazily in file_store.py, so only needed when that backend is selected.
+azure-storage-blob==12.19.1
 bcrypt==4.0.1  # pin: passlib 1.7.4 reads bcrypt.__about__, removed in bcrypt 4.1+
 beautifulsoup4==4.12.2
 # bokeh powers the Dask scheduler dashboard at :8787. Required by

@@ -1178,7 +1178,12 @@ class PGFileStore(Base):
     file_origin: Mapped[FileOrigin] = mapped_column(Enum(FileOrigin, native_enum=False))
     file_type: Mapped[str] = mapped_column(String, default="text/plain")
     file_metadata: Mapped[JSON_ro] = mapped_column(postgresql.JSONB(), nullable=True)
-    lobj_oid: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Exactly one of these locates the bytes:
+    #   lobj_oid    — Postgres large object (PostgresBackedFileStore)
+    #   object_key  — Blob/object key (AzureBlobFileStore); metadata stays here
+    # Both nullable so the two backends coexist during migration.
+    lobj_oid: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    object_key: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
 """
