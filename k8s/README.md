@@ -398,6 +398,28 @@ Notes:
   decoupled.
 - Default (`PostgresBackedFileStore`) is unchanged; this is fully opt-in.
 
+#### Direct-to-Blob chat uploads (requires Storage CORS)
+
+When the Azure backend is active, chat file uploads go **straight from the
+browser to Blob** via a short-lived SAS URL (`POST /chat/file/upload-url` →
+browser `PUT` → `POST /chat/file/confirm`), bypassing the api-server — much
+faster and it shows a real progress bar. On the Postgres backend the client
+auto-falls-back to the two-hop server upload.
+
+For the browser `PUT` to succeed, the storage account needs **CORS rules**
+allowing the web origin (one-time, per account):
+
+```bash
+az storage cors add --services b \
+  --methods PUT OPTIONS GET \
+  --origins https://darwin.westeurope.cloudapp.azure.com \
+  --allowed-headers '*' --exposed-headers '*' --max-age 3600 \
+  --account-name <account> --account-key <key>
+```
+
+Without the CORS rule the browser blocks the PUT (preflight fails) and
+uploads error — that's the first thing to check if direct uploads fail.
+
 ### Apply an optional component (split-background + Dask)
 
 Optional features are kustomize components, opted into from the overlay
