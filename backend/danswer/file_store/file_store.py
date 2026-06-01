@@ -164,6 +164,13 @@ _az_container_client: Any = None
 _az_lock = threading.Lock()
 
 
+def _parse_azure_conn_str(conn_str: str) -> dict[str, str]:
+    """Parse an Azure Storage connection string into its parts. Split on the
+    FIRST '=' per segment so values containing '=' (AccountKey ends with '==',
+    BlobEndpoint has '://') survive intact."""
+    return dict(seg.split("=", 1) for seg in conn_str.split(";") if "=" in seg)
+
+
 def _get_azure_container_client() -> Any:
     global _az_container_client
     if _az_container_client is None:
@@ -294,6 +301,55 @@ class AzureBlobFileStore(FileStore):
         except Exception:
             self.db_session.rollback()
             raise
+
+    def generate_upload_sas_url(self, file_name: str, expiry_minutes: int = 30) -> str:
+        """Mint a short-lived, write/create-scoped SAS URL so a client can PUT
+        bytes DIRECTLY to Blob (bypassing the server). Used by the chat
+        direct-upload flow. The blob is `file_name`; record the metadata row
+        afterward with :meth:`register_object`."""
+        import datetime
+
+        from azure.storage.blob import BlobSasPermissions  # type: ignore
+        from azure.storage.blob import generate_blob_sas  # type: ignore
+
+        cfg = _parse_azure_conn_str(AZURE_BLOB_CONNECTION_STRING)
+        account_name = cfg["AccountName"]
+        blob_endpoint = (
+            cfg.get("BlobEndpoint") or f"https://{account_name}.blob.core.windows.net"
+        )
+        sas = generate_blob_sas(
+            account_name=account_name,
+            container_name=AZURE_BLOB_CONTAINER,
+            blob_name=file_name,
+            account_key=cfg["AccountKey"],
+            permission=BlobSasPermissions(write=True, create=True),
+            expiry=datetime.datetime.utcnow()
+            + datetime.timedelta(minutes=expiry_minutes),
+        )
+        return f"{blob_endpoint.rstrip('/')}/{AZURE_BLOB_CONTAINER}/{file_name}?{sas}"
+
+    def register_object(
+        self,
+        file_name: str,
+        display_name: str | None,
+        file_origin: FileOrigin,
+        file_type: str,
+        file_metadata: dict | None = None,
+    ) -> None:
+        """Record the metadata row for a blob uploaded out-of-band (e.g. a
+        client direct-to-Blob SAS upload). Does NOT touch the bytes — they're
+        already in the container under `file_name`."""
+        upsert_pgfilestore(
+            file_name=file_name,
+            display_name=display_name or file_name,
+            file_origin=file_origin,
+            file_type=file_type,
+            object_key=file_name,
+            lobj_oid=None,
+            db_session=self.db_session,
+            file_metadata=file_metadata,
+            commit=True,
+        )
 
 
 def get_default_file_store(db_session: Session) -> FileStore:

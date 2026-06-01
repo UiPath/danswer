@@ -1,5 +1,6 @@
 import io
 import uuid
+from typing import cast
 
 from fastapi import APIRouter
 from fastapi import Depends
@@ -15,6 +16,7 @@ from danswer.auth.api_key import validate_api_key
 from danswer.auth.users import current_user
 from danswer.chat.chat_utils import create_chat_chain
 from danswer.chat.process_message import stream_chat_message
+from danswer.configs.app_configs import FILE_STORE_TYPE
 from danswer.configs.app_configs import WEB_DOMAIN
 from danswer.configs.constants import FileOrigin
 from danswer.configs.constants import MessageType
@@ -37,6 +39,7 @@ from danswer.db.persona import get_persona_by_id
 from danswer.document_index.document_index_utils import get_both_index_names
 from danswer.document_index.factory import get_default_document_index
 from danswer.file_processing.extract_file_text import extract_file_text
+from danswer.file_store.file_store import AzureBlobFileStore
 from danswer.file_store.file_store import get_default_file_store
 from danswer.file_store.models import ChatFileType
 from danswer.file_store.models import FileDescriptor
@@ -576,6 +579,127 @@ def upload_files_for_chat(
         "files": [
             {"id": file_id, "type": file_type, "name": file_name}
             for file_id, file_name, file_type in file_info
+        ]
+    }
+
+
+# --- Direct-to-Blob upload (SAS) -------------------------------------------
+# Lets the browser PUT files straight to Azure Blob, bypassing the server
+# (faster + offloads api-server bandwidth). Two steps: mint a SAS URL, then
+# confirm so the server records metadata (+ extracts text for docs). Only
+# active when the Azure file store is configured; otherwise the client falls
+# back to the two-hop POST /chat/file above.
+
+_IMAGE_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp"}
+_DOCUMENT_CONTENT_TYPES = {
+    "application/pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "message/rfc822",
+    "application/epub+zip",
+}
+
+
+def _chat_file_type_for(content_type: str | None) -> ChatFileType:
+    if content_type in _IMAGE_CONTENT_TYPES:
+        return ChatFileType.IMAGE
+    if content_type in _DOCUMENT_CONTENT_TYPES:
+        return ChatFileType.DOC
+    return ChatFileType.PLAIN_TEXT
+
+
+class ChatFileUploadUrlItem(BaseModel):
+    name: str
+    content_type: str | None = None
+
+
+class ChatFileUploadUrlRequest(BaseModel):
+    files: list[ChatFileUploadUrlItem]
+
+
+class ChatFileUploadUrlResponseItem(BaseModel):
+    file_id: str
+    upload_url: str
+    content_type: str | None = None
+
+
+class ChatFileUploadUrlResponse(BaseModel):
+    # False → the active file store can't do direct uploads (e.g. Postgres);
+    # the client should fall back to the two-hop POST /chat/file.
+    direct_upload: bool
+    files: list[ChatFileUploadUrlResponseItem] = []
+
+
+@router.post("/file/upload-url")
+def get_chat_file_upload_urls(
+    req: ChatFileUploadUrlRequest,
+    db_session: Session = Depends(get_session),
+    _: User | None = Depends(current_user),
+) -> ChatFileUploadUrlResponse:
+    """Mint short-lived SAS URLs so the client PUTs files DIRECTLY to Blob."""
+    if FILE_STORE_TYPE != AzureBlobFileStore.__name__:
+        return ChatFileUploadUrlResponse(direct_upload=False)
+    store = cast(AzureBlobFileStore, get_default_file_store(db_session))
+    items: list[ChatFileUploadUrlResponseItem] = []
+    for f in req.files:
+        file_id = str(uuid.uuid4())
+        items.append(
+            ChatFileUploadUrlResponseItem(
+                file_id=file_id,
+                upload_url=store.generate_upload_sas_url(file_id),
+                content_type=f.content_type,
+            )
+        )
+    return ChatFileUploadUrlResponse(direct_upload=True, files=items)
+
+
+class ChatFileConfirmItem(BaseModel):
+    file_id: str
+    name: str | None = None
+    content_type: str | None = None
+
+
+class ChatFileConfirmRequest(BaseModel):
+    files: list[ChatFileConfirmItem]
+
+
+@router.post("/file/confirm")
+def confirm_chat_file_uploads(
+    req: ChatFileConfirmRequest,
+    db_session: Session = Depends(get_session),
+    _: User | None = Depends(current_user),
+) -> dict[str, list[FileDescriptor]]:
+    """After the client direct-uploads to Blob, record each file's metadata
+    row and (for docs) extract text server-side — mirrors the tail of
+    upload_files_for_chat. Returns the FileDescriptors to attach to a message."""
+    store = cast(AzureBlobFileStore, get_default_file_store(db_session))
+    file_info: list[tuple[str, str | None, ChatFileType]] = []
+    for f in req.files:
+        file_type = _chat_file_type_for(f.content_type)
+        store.register_object(
+            file_name=f.file_id,
+            display_name=f.name,
+            file_origin=FileOrigin.CHAT_UPLOAD,
+            file_type=f.content_type or file_type.value,
+        )
+        if file_type == ChatFileType.DOC:
+            raw = store.read_file(f.file_id, mode="b", use_tempfile=True)
+            extracted_text = extract_file_text(file_name=f.name, file=raw)
+            text_file_id = str(uuid.uuid4())
+            store.save_file(
+                file_name=text_file_id,
+                content=io.BytesIO(extracted_text.encode()),
+                display_name=f.name,
+                file_origin=FileOrigin.CHAT_UPLOAD,
+                file_type="text/plain",
+            )
+            file_info.append((text_file_id, f.name, ChatFileType.PLAIN_TEXT))
+        else:
+            file_info.append((f.file_id, f.name, file_type))
+    return {
+        "files": [
+            {"id": fid, "type": ftype, "name": fname} for fid, fname, ftype in file_info
         ]
     }
 
