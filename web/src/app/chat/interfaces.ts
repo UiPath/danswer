@@ -32,6 +32,8 @@ export interface FileDescriptor {
   name?: string | null;
   // FE only
   isUploading?: boolean;
+  // FE only — upload progress 0-100 while isUploading
+  progress?: number;
 }
 
 export interface ToolCallMetadata {

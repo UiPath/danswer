@@ -385,10 +385,10 @@ export function ChatPage({
           (persona) => persona.id === existingChatSessionPersonaId
         )
       : defaultSelectedPersonaId !== undefined
-        ? filteredAssistants.find(
-            (persona) => persona.id === defaultSelectedPersonaId
-          )
-        : undefined
+      ? filteredAssistants.find(
+          (persona) => persona.id === defaultSelectedPersonaId
+        )
+      : undefined
   );
   const livePersona =
     selectedPersona || filteredAssistants[0] || availablePersonas[0];
@@ -1024,13 +1024,13 @@ export function ChatPage({
         ? ChatFileType.IMAGE
         : ChatFileType.DOCUMENT,
       isUploading: true,
+      progress: 0,
     }));
 
-    // only show loading spinner for reasonably large files
-    const totalSize = acceptedFiles.reduce((sum, file) => sum + file.size, 0);
-    if (totalSize > 50 * 1024) {
-      setCurrentMessageFiles((prev) => [...prev, ...tempFileDescriptors]);
-    }
+    // Always show the previews (with a progress bar) so the user can see the
+    // upload is actually happening — and so the send button stays gated until
+    // it finishes (see ChatInputBar's anyFilesUploading).
+    setCurrentMessageFiles((prev) => [...prev, ...tempFileDescriptors]);
 
     const removeTempFiles = (prev: FileDescriptor[]) => {
       return prev.filter(
@@ -1038,7 +1038,18 @@ export function ChatPage({
       );
     };
 
-    uploadFilesForChat(acceptedFiles).then(([files, error]) => {
+    // Per-file upload progress → update the matching temp descriptor.
+    const updateProgress = (index: number, percent: number) => {
+      const tempId = tempFileDescriptors[index]?.id;
+      if (!tempId) return;
+      setCurrentMessageFiles((prev) =>
+        prev.map((file) =>
+          file.id === tempId ? { ...file, progress: percent } : file
+        )
+      );
+    };
+
+    uploadFilesForChat(acceptedFiles, updateProgress).then(([files, error]) => {
       if (error) {
         setCurrentMessageFiles((prev) => removeTempFiles(prev));
         setPopup({

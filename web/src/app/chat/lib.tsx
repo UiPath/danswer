@@ -569,24 +569,114 @@ export function buildChatUrl(
   return "/chat";
 }
 
-export async function uploadFilesForChat(
-  files: File[]
+// PUT one file straight to Azure Blob via a SAS URL, reporting progress.
+function putToBlobWithProgress(
+  url: string,
+  file: File,
+  onProgress: (percent: number) => void
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("PUT", url);
+    xhr.setRequestHeader("x-ms-blob-type", "BlockBlob");
+    if (file.type) xhr.setRequestHeader("Content-Type", file.type);
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable)
+        onProgress(Math.round((e.loaded / e.total) * 100));
+    };
+    xhr.onload = () =>
+      xhr.status >= 200 && xhr.status < 300
+        ? resolve()
+        : reject(new Error(`Blob upload failed (${xhr.status})`));
+    xhr.onerror = () => reject(new Error("network error during upload"));
+    xhr.send(file);
+  });
+}
+
+// Fallback: two-hop upload through the api-server (Postgres file store, or
+// when direct upload is unavailable). XHR so we still get a progress bar.
+function uploadViaServer(
+  files: File[],
+  onProgress?: (index: number, percent: number) => void
 ): Promise<[FileDescriptor[], string | null]> {
-  const formData = new FormData();
-  files.forEach((file) => {
-    formData.append("files", file);
+  return new Promise((resolve) => {
+    const formData = new FormData();
+    files.forEach((file) => formData.append("files", file));
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/chat/file");
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) {
+        const percent = Math.round((e.loaded / e.total) * 100);
+        files.forEach((_, i) => onProgress?.(i, percent));
+      }
+    };
+    xhr.onload = () =>
+      xhr.status >= 200 && xhr.status < 300
+        ? resolve([
+            JSON.parse(xhr.responseText).files as FileDescriptor[],
+            null,
+          ])
+        : resolve([[], `Failed to upload files (${xhr.status})`]);
+    xhr.onerror = () => resolve([[], "network error during upload"]);
+    xhr.send(formData);
   });
+}
 
-  const response = await fetch("/api/chat/file", {
+export async function uploadFilesForChat(
+  files: File[],
+  onProgress?: (index: number, percent: number) => void
+): Promise<[FileDescriptor[], string | null]> {
+  // 1. Ask the server for direct-to-Blob upload URLs (Azure backend only).
+  const urlResp = await fetch("/api/chat/file/upload-url", {
     method: "POST",
-    body: formData,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      files: files.map((f) => ({ name: f.name, content_type: f.type || null })),
+    }),
   });
-  if (!response.ok) {
-    return [[], `Failed to upload files - ${(await response.json()).detail}`];
+  if (!urlResp.ok) {
+    return [[], `Failed to start upload - ${(await urlResp.json()).detail}`];
   }
-  const responseJson = await response.json();
+  const urlJson = await urlResp.json();
 
-  return [responseJson.files as FileDescriptor[], null];
+  // 2a. Not Azure → fall back to the two-hop server upload.
+  if (!urlJson.direct_upload) {
+    return uploadViaServer(files, onProgress);
+  }
+
+  // 2b. Azure → PUT each file directly to Blob (bypasses the server).
+  const items: { file_id: string; upload_url: string }[] = urlJson.files;
+  try {
+    await Promise.all(
+      items.map((item, i) =>
+        putToBlobWithProgress(item.upload_url, files[i], (p) =>
+          onProgress?.(i, p)
+        )
+      )
+    );
+  } catch (e) {
+    return [[], `Failed to upload files - ${e}`];
+  }
+
+  // 3. Confirm so the server records metadata (+ extracts doc text).
+  const confirmResp = await fetch("/api/chat/file/confirm", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      files: items.map((item, i) => ({
+        file_id: item.file_id,
+        name: files[i].name,
+        content_type: files[i].type || null,
+      })),
+    }),
+  });
+  if (!confirmResp.ok) {
+    return [
+      [],
+      `Failed to finalize upload - ${(await confirmResp.json()).detail}`,
+    ];
+  }
+  return [(await confirmResp.json()).files as FileDescriptor[], null];
 }
 
 export function useScrollonStream({

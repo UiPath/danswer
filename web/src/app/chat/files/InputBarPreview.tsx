@@ -56,6 +56,8 @@ export function InputBarPreview({
             absolute
             inset-0
             flex
+            flex-col
+            gap-1
             items-center
             justify-center
             bg-black
@@ -65,6 +67,11 @@ export function InputBarPreview({
           "
         >
           <FiLoader className="animate-spin text-white" />
+          {file.progress != null && (
+            <span className="text-white text-xs font-medium">
+              {file.progress}%
+            </span>
+          )}
         </div>
       )}
       {renderContent()}
