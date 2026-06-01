@@ -175,7 +175,14 @@ def _get_azure_container_client() -> Any:
                         "AZURE_BLOB_CONNECTION_STRING is unset."
                     )
                 # Lazy import — optional dependency (azure-storage-blob).
-                from azure.storage.blob import BlobServiceClient  # type: ignore
+                try:
+                    from azure.storage.blob import BlobServiceClient  # type: ignore
+                except ImportError as e:
+                    raise RuntimeError(
+                        "FILE_STORE_TYPE=AzureBlobFileStore requires the "
+                        "azure-storage-blob package (it's in requirements; "
+                        "rebuild the image or `pip install azure-storage-blob`)."
+                    ) from e
 
                 svc = BlobServiceClient.from_connection_string(
                     AZURE_BLOB_CONNECTION_STRING
