@@ -314,27 +314,36 @@ class AzureBlobFileStore(FileStore):
         from azure.storage.blob import generate_blob_sas  # type: ignore
 
         # Let the SDK parse the connection string — it's authoritative about
-        # the account name + blob endpoint (handles Azurite, custom endpoints,
-        # and key casing/ordering that a hand-rolled parse trips on).
+        # the blob endpoint (handles Azurite, custom endpoints, and key
+        # casing/ordering that a hand-rolled parse trips on).
         svc = BlobServiceClient.from_connection_string(AZURE_BLOB_CONNECTION_STRING)
+        blob_endpoint = svc.url.rstrip("/")
+        cfg = {
+            k.lower(): v
+            for k, v in _parse_azure_conn_str(AZURE_BLOB_CONNECTION_STRING).items()
+        }
 
-        # The account KEY is needed to sign the SAS. Prefer the SDK-parsed
-        # credential (handles the `UseDevelopmentStorage=true` shorthand, where
-        # the dev key isn't literally in the string); fall back to a
-        # case-insensitive parse. SAS-token / managed-identity strings have no
-        # key — we can't mint an account-key SAS from those.
+        # Case 1: the connection string already carries a SAS token (no account
+        # key present, e.g. an account/service SAS from the portal). We can't
+        # mint a new per-blob SAS (that needs the key) — and don't need to:
+        # reuse the existing SAS for the PUT. It must grant create/write on
+        # blobs (sp must include c+w) and the container must already exist.
+        existing_sas = cfg.get("sharedaccesssignature")
+        if existing_sas:
+            return f"{blob_endpoint}/{AZURE_BLOB_CONTAINER}/{file_name}?{existing_sas}"
+
+        # Case 2: account-key connection string → mint a short-lived, scoped,
+        # per-blob SAS (the preferred, tighter form). Prefer the SDK-parsed
+        # credential (handles `UseDevelopmentStorage=true`), fall back to parse.
         account_key = getattr(getattr(svc, "credential", None), "account_key", None)
         if not account_key:
-            cfg = {
-                k.lower(): v
-                for k, v in _parse_azure_conn_str(AZURE_BLOB_CONNECTION_STRING).items()
-            }
             account_key = cfg.get("accountkey")
         if not account_key:
             raise RuntimeError(
-                "Could not resolve an AccountKey from AZURE_BLOB_CONNECTION_STRING "
-                "— an account-key connection string is required to mint upload SAS "
-                "URLs (SAS-token / managed-identity strings aren't supported here)."
+                "AZURE_BLOB_CONNECTION_STRING has neither an AccountKey nor a "
+                "SharedAccessSignature — can't authorize a direct upload. Use an "
+                "account-key connection string (preferred — mints scoped per-blob "
+                "SAS) or one containing a SAS with create+write blob permission."
             )
 
         sas = generate_blob_sas(
@@ -346,9 +355,7 @@ class AzureBlobFileStore(FileStore):
             expiry=datetime.datetime.utcnow()
             + datetime.timedelta(minutes=expiry_minutes),
         )
-        # svc.url is the parsed blob endpoint (e.g. Azurite's
-        # http://127.0.0.1:10000/devstoreaccount1).
-        return f"{svc.url.rstrip('/')}/{AZURE_BLOB_CONTAINER}/{file_name}?{sas}"
+        return f"{blob_endpoint}/{AZURE_BLOB_CONTAINER}/{file_name}?{sas}"
 
     def register_object(
         self,
