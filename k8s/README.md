@@ -364,6 +364,40 @@ kubectl exec -n darwin redis-0 -c redis -- redis-cli -n 1 --scan --pattern '*' |
 # And the old Postgres broker tables should stop growing (kombu_message).
 ```
 
+### File store: offload bytes to Azure Blob
+
+By default uploaded files / chat attachments / connector blobs are stored
+as **Postgres large objects**. At scale that bloats the DB/WAL/backups, and
+every read pins a Postgres connection for the whole file stream (competes
+with the chat connection pool). The `AzureBlobFileStore` backend keeps the
+small **metadata row** in Postgres but moves the **bytes** to Azure Blob.
+
+Cutover (graceful — un-migrated files keep reading from their lobj):
+
+```bash
+# 1. The image must include azure-storage-blob (it's in requirements now) —
+#    rebuild/redeploy the backend image.
+# 2. alembic upgrade head   (adds file_store.object_key, makes lobj_oid nullable)
+# 3. Put the storage-account connection string in secrets.env:
+#    AZURE_BLOB_CONNECTION_STRING=...      (see secrets.env.example)
+# 4. Flip the backend in env.properties:
+#    FILE_STORE_TYPE=AzureBlobFileStore
+#    AZURE_BLOB_CONTAINER=danswer-files
+# 5. Apply + restart api-server & background (configmap won't auto-roll).
+# 6. Migrate existing lobjs → Blob (idempotent; safe to resume):
+cd backend && PYTHONPATH=$(pwd) python scripts/migrate_file_store_to_azure_blob.py
+#    (--dry-run first to see the count)
+```
+
+Notes:
+- Steps 4–5 can precede 6: new uploads go to Blob immediately, and reads of
+  not-yet-migrated files transparently fall back to the lobj. Run the
+  migration promptly so the lobjs (and the bloat) actually go away.
+- `azure-storage-blob` is **lazy-imported** — the app runs fine without it
+  unless `FILE_STORE_TYPE=AzureBlobFileStore` is set, so the dep/flag are
+  decoupled.
+- Default (`PostgresBackedFileStore`) is unchanged; this is fully opt-in.
+
 ### Apply an optional component (split-background + Dask)
 
 Optional features are kustomize components, opted into from the overlay
