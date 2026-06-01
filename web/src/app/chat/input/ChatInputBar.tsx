@@ -79,6 +79,13 @@ export function ChatInputBar({
     }
   }, [message]);
 
+  // Block sending while any attached file is still uploading — otherwise the
+  // message references a file_id whose file_store row doesn't exist yet, and
+  // the backend errors ("File by name ... does not exist"). Send re-enables
+  // automatically once the upload(s) finish (the per-file spinner clears).
+  const anyFilesUploading = files.some((file) => file.isUploading);
+  const canSubmit = !!message && !isStreaming && !anyFilesUploading;
+
   const handlePaste = (event: React.ClipboardEvent) => {
     const items = event.clipboardData?.items;
     if (items) {
@@ -217,7 +224,9 @@ export function ChatInputBar({
                 {filteredPersonas.map((currentPersona, index) => (
                   <button
                     key={index}
-                    className={`px-2 ${assistantIconIndex == index && "bg-hover"} rounded content-start flex gap-x-1 py-1.5 w-full  hover:bg-hover cursor-pointer`}
+                    className={`px-2 ${
+                      assistantIconIndex == index && "bg-hover"
+                    } rounded content-start flex gap-x-1 py-1.5 w-full  hover:bg-hover cursor-pointer`}
                     onClick={() => {
                       updateCurrentPersona(currentPersona);
                     }}
@@ -233,7 +242,9 @@ export function ChatInputBar({
                 <a
                   key={filteredPersonas.length}
                   target="_blank"
-                  className={`${assistantIconIndex == filteredPersonas.length && "bg-hover"} px-3 flex gap-x-1 py-2 w-full  items-center  hover:bg-hover-light cursor-pointer"`}
+                  className={`${
+                    assistantIconIndex == filteredPersonas.length && "bg-hover"
+                  } px-3 flex gap-x-1 py-2 w-full  items-center  hover:bg-hover-light cursor-pointer"`}
                   href="/assistants/new"
                 >
                   <FiPlus size={17} />
@@ -354,13 +365,16 @@ export function ChatInputBar({
               placeholder="Send a message..."
               value={message}
               onKeyDown={(event) => {
-                if (
+                if (event.key === "Enter" && !event.shiftKey && canSubmit) {
+                  onSubmit();
+                  event.preventDefault();
+                } else if (
                   event.key === "Enter" &&
                   !event.shiftKey &&
-                  message &&
-                  !isStreaming
+                  anyFilesUploading
                 ) {
-                  onSubmit();
+                  // Swallow the Enter so a half-typed message isn't sent
+                  // against a not-yet-uploaded file.
                   event.preventDefault();
                 }
               }}
@@ -420,10 +434,19 @@ export function ChatInputBar({
             </div>
             <div className="absolute bottom-2.5 right-10">
               <div
-                className="cursor-pointer"
+                className={
+                  anyFilesUploading && !isStreaming
+                    ? "cursor-not-allowed"
+                    : "cursor-pointer"
+                }
+                title={
+                  anyFilesUploading
+                    ? "Waiting for file upload to finish…"
+                    : undefined
+                }
                 onClick={() => {
                   if (!isStreaming) {
-                    if (message) {
+                    if (canSubmit) {
                       onSubmit();
                     }
                   } else {
@@ -434,8 +457,8 @@ export function ChatInputBar({
                 <FiSend
                   size={18}
                   className={`text-emphasis w-9 h-9 p-2 rounded-lg ${
-                    message ? "bg-blue-200" : ""
-                  }`}
+                    anyFilesUploading && !isStreaming ? "opacity-40 " : ""
+                  }${message ? "bg-blue-200" : ""}`}
                 />
               </div>
             </div>
