@@ -316,7 +316,21 @@ class AzureBlobFileStore(FileStore):
         # Let the SDK parse the connection string — it's authoritative about
         # the blob endpoint (handles Azurite, custom endpoints, and key
         # casing/ordering that a hand-rolled parse trips on).
-        svc = BlobServiceClient.from_connection_string(AZURE_BLOB_CONNECTION_STRING)
+        try:
+            svc = BlobServiceClient.from_connection_string(AZURE_BLOB_CONNECTION_STRING)
+        except Exception as e:
+            # Surface a SAFE diagnostic (key NAMES + length only, never the
+            # secret value). The usual cause: the shell split the value on a
+            # ';' so the process only got the first segment.
+            keys = sorted(_parse_azure_conn_str(AZURE_BLOB_CONNECTION_STRING).keys())
+            raise RuntimeError(
+                f"AZURE_BLOB_CONNECTION_STRING is malformed: the process received "
+                f"a value of length {len(AZURE_BLOB_CONNECTION_STRING)} with keys "
+                f"{keys}. If that's just ['DefaultEndpointsProtocol'] it was "
+                f"truncated at the first ';' — single-quote the value where it's "
+                f"set AND restart the api-server in that shell (it reads the env "
+                f"once at startup)."
+            ) from e
         blob_endpoint = svc.url.rstrip("/")
 
         # Account-key connection string → mint a short-lived, scoped, per-blob
