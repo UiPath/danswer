@@ -72,11 +72,11 @@ spec:
             name: env-configmap
         - secretRef:
             name: danswer-secrets
-        volumeMounts:
-        - name: dynamic-storage
-          mountPath: /home/storage
-        - name: file-connector-storage
-          mountPath: /home/file_connector_storage
+        # No PVCs: the file store (File connector uploads) and dynamic config
+        # are Postgres-backed in this fork (PGFileStore lobjs +
+        # PostgresBackedDynamicConfigStore). Nothing here reads /home/storage
+        # or /home/file_connector_storage. See README "Apply an optional
+        # component" for why the split deployments mount no volumes.
         resources:
           requests:
             cpu: 200m
@@ -147,10 +147,3 @@ spec:
           limits:
             cpu: 500m
             memory: 1Gi
-      volumes:
-      - name: dynamic-storage
-        persistentVolumeClaim:
-          claimName: dynamic-pvc
-      - name: file-connector-storage
-        persistentVolumeClaim:
-          claimName: file-connector-pvc

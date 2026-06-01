@@ -372,20 +372,24 @@ component carries its own replica counts (in
 `optional/background-scaling/kustomization.yaml`) and env-neutral
 manifests; the overlay adds image tags and any env-specific scheduling.
 
-Edit the overlay's `kustomization.yaml`:
+**To enable it, two edits to the overlay's `kustomization.yaml` are
+REQUIRED (steps 1–2); step 3 is prod-only and optional.**
 
 ```yaml
-# 1. Pull the component in:
+# 1. REQUIRED — pull the component in:
 components:
   - ../../optional/background-scaling
 
-# 2. Scale the base combined `background` deployment to 0 so you don't
-#    run two Celery beat schedulers on the same broker:
+# 2. REQUIRED — scale the base combined `background` deployment to 0, or
+#    you run two Celery beat schedulers on one broker (every periodic task
+#    fires twice). This is the ONLY entry you must add to the overlay's
+#    replicas: block; the split deployments' counts come from the component
+#    (see "Replica counts" below).
 replicas:
   - name: background-deployment
     count: 0
 
-# 3. (prod only) The component manifests are env-neutral — no node
+# 3. OPTIONAL (prod only) — the component manifests are env-neutral — no node
 #    affinity. To pin the indexing-side pods to the Darwin indexcpu pool,
 #    add a patch. Skip this on local (no such node pool):
 patches:
@@ -433,9 +437,44 @@ kustomize applies everything together; the new pods reference the same
 overlay-generated `env-configmap` / `danswer-secrets`, and their
 `danswer-backend` image is rewritten to the overlay's pinned tag.
 
-To change replica counts, edit the `replicas:` block in
-`optional/background-scaling/kustomization.yaml` (dask-worker is the
-indexing-throughput knob).
+#### Replica counts
+
+The four split deployments get their counts from the **`replicas:` block in
+`optional/background-scaling/kustomization.yaml`** — that's the single
+source of truth:
+
+```yaml
+replicas:
+  - name: background-lite-deployment            { count: 1 }  # singleton — beat + slack; never >1
+  - name: background-indexer-scheduler-deployment { count: 1 } # singleton — the update.py loop
+  - name: dask-scheduler-deployment             { count: 1 }  # singleton
+  - name: dask-worker-deployment                { count: 2 }  # ← THE indexing-throughput knob
+```
+
+The `replicas: N` you see inside each deployment YAML is just a manifest
+**default** — kustomize's `replicas:` transformer overrides it at render
+time, so editing the YAML directly has no effect through kustomize. To
+scale indexing, change `dask-worker-deployment`'s count here. (You can also
+override any of these from the *overlay's* own `replicas:` block — the
+overlay is applied last and wins — handy if you want a different
+dask-worker count per environment without editing the shared component.)
+
+`background-lite`, `background-indexer-scheduler`, and `dask-scheduler` are
+**hard singletons** (`count: 1`); raising them double-runs beat / the Slack
+websocket / the scheduler loop. Only `dask-worker` scales.
+
+#### Volumes / PVCs — the split deployments mount NONE
+
+None of the four split deployments mount `dynamic-pvc` or
+`file-connector-pvc`. In this fork the file store (File-connector uploads)
+is **Postgres-backed** (`PGFileStore` large objects) and the dynamic config
+store is Postgres-backed too — nothing reads `/home/storage` or
+`/home/file_connector_storage` (grep the code: zero references). The mounts
+were upstream carryover. Dropping them also avoids a real bug:
+`dynamic-pvc` is **ReadWriteOnce**, so mounting it across the scheduler +
+workers + lite pod risks multi-attach failures. (The base `api-server` /
+`background` still mount them for now — harmless, but equally vestigial; a
+separate cleanup.)
 
 Rollback: remove the `components:` line (and the patch), set
 `background-deployment` back to `count: 1`, re-apply. (The split pods are

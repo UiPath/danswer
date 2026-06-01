@@ -40,11 +40,8 @@ spec:
             name: env-configmap
         - secretRef:
             name: danswer-secrets
-        volumeMounts:
-        - name: dynamic-storage
-          mountPath: /home/storage
-        - name: file-connector-storage
-          mountPath: /home/file_connector_storage
+        # No PVCs — the scheduler only polls Postgres + submits Dask futures;
+        # the file store / dynamic config are Postgres-backed (see README).
         resources:
           requests:
             cpu: 200m
@@ -52,10 +49,3 @@ spec:
           limits:
             cpu: 500m
             memory: 1Gi
-      volumes:
-      - name: dynamic-storage
-        persistentVolumeClaim:
-          claimName: dynamic-pvc
-      - name: file-connector-storage
-        persistentVolumeClaim:
-          claimName: file-connector-pvc

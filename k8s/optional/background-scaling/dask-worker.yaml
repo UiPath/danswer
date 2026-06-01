@@ -42,11 +42,11 @@ spec:
             name: env-configmap
         - secretRef:
             name: danswer-secrets
-        volumeMounts:
-        - name: dynamic-storage
-          mountPath: /home/storage
-        - name: file-connector-storage
-          mountPath: /home/file_connector_storage
+        # No PVCs — indexing reads File-connector uploads from PGFileStore
+        # (Postgres large objects), not /home/file_connector_storage; the
+        # dynamic config store is Postgres-backed too. Connector temp files
+        # (if any) go to the container's /tmp. This also keeps each worker
+        # off the RWO dynamic-pvc, which can't multi-attach. See README.
         resources:
           requests:
             cpu: 500m
@@ -54,10 +54,3 @@ spec:
           limits:
             cpu: '2'
             memory: 4Gi
-      volumes:
-      - name: dynamic-storage
-        persistentVolumeClaim:
-          claimName: dynamic-pvc
-      - name: file-connector-storage
-        persistentVolumeClaim:
-          claimName: file-connector-pvc
