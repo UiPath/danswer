@@ -163,6 +163,17 @@ FILE_STORE_TYPE = os.environ.get("FILE_STORE_TYPE") or "PostgresBackedFileStore"
 AZURE_BLOB_CONNECTION_STRING = os.environ.get("AZURE_BLOB_CONNECTION_STRING") or ""
 AZURE_BLOB_CONTAINER = os.environ.get("AZURE_BLOB_CONTAINER") or "danswer-files"
 
+# Chat file-upload limits. A chat-attached doc is stuffed WHOLE into the LLM
+# prompt (no retrieval), so it's bounded by the model context window. Two
+# guards: a cheap byte cap (all types), and a token cap on the extracted text
+# (the real protection — rejects docs that would overflow). The token budget
+# is CHAT_FILE_MAX_TOKEN_FRACTION of the model's max input tokens, leaving room
+# for the system prompt, history, and the response.
+CHAT_FILE_MAX_SIZE_MB = int(os.environ.get("CHAT_FILE_MAX_SIZE_MB") or 25)
+CHAT_FILE_MAX_TOKEN_FRACTION = float(
+    os.environ.get("CHAT_FILE_MAX_TOKEN_FRACTION") or 0.5
+)
+
 
 #####
 # Connector Configs

@@ -16,6 +16,8 @@ from danswer.auth.api_key import validate_api_key
 from danswer.auth.users import current_user
 from danswer.chat.chat_utils import create_chat_chain
 from danswer.chat.process_message import stream_chat_message
+from danswer.configs.app_configs import CHAT_FILE_MAX_SIZE_MB
+from danswer.configs.app_configs import CHAT_FILE_MAX_TOKEN_FRACTION
 from danswer.configs.app_configs import FILE_STORE_TYPE
 from danswer.configs.app_configs import WEB_DOMAIN
 from danswer.configs.constants import FileOrigin
@@ -50,6 +52,7 @@ from danswer.llm.exceptions import GenAIDisabledException
 from danswer.llm.factory import get_default_llms
 from danswer.llm.headers import get_litellm_additional_request_headers
 from danswer.llm.utils import get_default_llm_tokenizer
+from danswer.llm.utils import get_max_input_tokens
 from danswer.secondary_llm_flows.chat_session_naming import (
     get_renamed_conversation_name,
 )
@@ -78,6 +81,52 @@ logger = setup_logger()
 
 router = APIRouter(prefix="/chat", dependencies=[Depends(validate_api_key)])
 # api_router = APIRouter(prefix="/chat", dependencies=[Depends(validate_api_key)])
+
+
+# --- Chat file-upload limits ----------------------------------------------
+# A chat-attached doc is stuffed WHOLE into the LLM prompt (no retrieval), so
+# the real ceiling is the model context window. _reject_if_text_too_long is
+# the meaningful guard; the byte cap is a cheap pre-filter.
+def _max_chat_file_tokens() -> int:
+    """CHAT_FILE_MAX_TOKEN_FRACTION of the default LLM's max input tokens.
+    Falls back to a conservative default if the model map can't be resolved,
+    so a lookup failure never blocks uploads."""
+    try:
+        llm, _ = get_default_llms()
+        max_input = get_max_input_tokens(
+            model_name=llm.config.model_name,
+            model_provider=llm.config.model_provider,
+        )
+    except Exception:
+        max_input = 128_000
+    return int(max_input * CHAT_FILE_MAX_TOKEN_FRACTION)
+
+
+def _reject_if_file_too_large(size: int | None, filename: str | None) -> None:
+    if size and size > CHAT_FILE_MAX_SIZE_MB * 1024 * 1024:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"File '{filename or ''}' is {size // (1024 * 1024)}MB; the "
+                f"upload limit is {CHAT_FILE_MAX_SIZE_MB}MB."
+            ),
+        )
+
+
+def _reject_if_text_too_long(text: str, filename: str | None) -> None:
+    n_tokens = len(get_default_llm_tokenizer().encode(text))
+    budget = _max_chat_file_tokens()
+    if n_tokens > budget:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Document '{filename or ''}' is too large to chat with "
+                f"(~{n_tokens:,} tokens; limit {budget:,}). The whole document "
+                "is sent to the model, so it must fit the context window — "
+                "upload a smaller excerpt, or add it as a connector to search "
+                "over it instead."
+            ),
+        )
 
 
 @router.get("/get-user-chat-sessions")
@@ -525,6 +574,10 @@ def upload_files_for_chat(
                 )
             raise HTTPException(status_code=400, detail=error_detail)
 
+        # Byte cap, all types (cheap pre-filter; the token gate below is the
+        # real protection for text/docs).
+        _reject_if_file_too_large(file.size, file.filename)
+
         if (
             file.content_type in image_content_types
             and file.size
@@ -560,6 +613,13 @@ def upload_files_for_chat(
         # to re-extract it every time we send a message
         if file_type == ChatFileType.DOC:
             extracted_text = extract_file_text(file_name=file.filename, file=file.file)
+            # Token gate: the extracted text gets stuffed whole into the prompt.
+            # Reject (and drop the just-stored raw file) if it can't fit.
+            try:
+                _reject_if_text_too_long(extracted_text, file.filename)
+            except HTTPException:
+                file_store.delete_file(file_id)
+                raise
             text_file_id = str(uuid.uuid4())
             file_store.save_file(
                 file_name=text_file_id,
@@ -573,6 +633,17 @@ def upload_files_for_chat(
             # message
             file_info.append((text_file_id, file.filename, ChatFileType.PLAIN_TEXT))
         else:
+            if file_type == ChatFileType.PLAIN_TEXT:
+                # Plain text is stuffed as-is — token-gate it too (read the
+                # just-stored copy back so we don't depend on stream position).
+                raw = file_store.read_file(file_id, mode="b", use_tempfile=True)
+                try:
+                    _reject_if_text_too_long(
+                        raw.read().decode("utf-8", errors="ignore"), file.filename
+                    )
+                except HTTPException:
+                    file_store.delete_file(file_id)
+                    raise
             file_info.append((file_id, file.filename, file_type))
 
     return {
@@ -612,6 +683,9 @@ def _chat_file_type_for(content_type: str | None) -> ChatFileType:
 class ChatFileUploadUrlItem(BaseModel):
     name: str
     content_type: str | None = None
+    # Client-reported size — byte-gated here; the authoritative content gate
+    # is the token check at /file/confirm (after extraction).
+    size: int | None = None
 
 
 class ChatFileUploadUrlRequest(BaseModel):
@@ -643,6 +717,7 @@ def get_chat_file_upload_urls(
     store = cast(AzureBlobFileStore, get_default_file_store(db_session))
     items: list[ChatFileUploadUrlResponseItem] = []
     for f in req.files:
+        _reject_if_file_too_large(f.size, f.name)
         file_id = str(uuid.uuid4())
         items.append(
             ChatFileUploadUrlResponseItem(
@@ -686,6 +761,13 @@ def confirm_chat_file_uploads(
         if file_type == ChatFileType.DOC:
             raw = store.read_file(f.file_id, mode="b", use_tempfile=True)
             extracted_text = extract_file_text(file_name=f.name, file=raw)
+            # Token gate (stuffed whole into the prompt). On reject, drop the
+            # orphan blob the client already uploaded.
+            try:
+                _reject_if_text_too_long(extracted_text, f.name)
+            except HTTPException:
+                store.delete_file(f.file_id)
+                raise
             text_file_id = str(uuid.uuid4())
             store.save_file(
                 file_name=text_file_id,
@@ -696,6 +778,15 @@ def confirm_chat_file_uploads(
             )
             file_info.append((text_file_id, f.name, ChatFileType.PLAIN_TEXT))
         else:
+            if file_type == ChatFileType.PLAIN_TEXT:
+                raw = store.read_file(f.file_id, mode="b", use_tempfile=True)
+                try:
+                    _reject_if_text_too_long(
+                        raw.read().decode("utf-8", errors="ignore"), f.name
+                    )
+                except HTTPException:
+                    store.delete_file(f.file_id)
+                    raise
             file_info.append((f.file_id, f.name, file_type))
     return {
         "files": [

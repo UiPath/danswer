@@ -631,7 +631,11 @@ export async function uploadFilesForChat(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      files: files.map((f) => ({ name: f.name, content_type: f.type || null })),
+      files: files.map((f) => ({
+        name: f.name,
+        content_type: f.type || null,
+        size: f.size,
+      })),
     }),
   });
   if (!urlResp.ok) {

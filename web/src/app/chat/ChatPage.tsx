@@ -1018,6 +1018,21 @@ export function ChatPage({
       return;
     }
 
+    // Client-side byte pre-check (mirrors backend CHAT_FILE_MAX_SIZE_MB default;
+    // the backend is authoritative — a doc can still be rejected on the token
+    // gate after extraction).
+    const MAX_FILE_SIZE_MB = 25;
+    const tooLarge = acceptedFiles.find(
+      (file) => file.size > MAX_FILE_SIZE_MB * 1024 * 1024
+    );
+    if (tooLarge) {
+      setPopup({
+        type: "error",
+        message: `"${tooLarge.name}" is too large (max ${MAX_FILE_SIZE_MB}MB).`,
+      });
+      return;
+    }
+
     const tempFileDescriptors = acceptedFiles.map((file) => ({
       id: uuidv4(),
       type: file.type.startsWith("image/")
