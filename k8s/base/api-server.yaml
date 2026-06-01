@@ -91,18 +91,11 @@ spec:
           timeoutSeconds: 5
           failureThreshold: 3
         resources: {}
-        volumeMounts:
-        - mountPath: /home/storage
-          name: dynamic-storage
-        - mountPath: /home/file_connector_storage
-          name: file-connector-storage
-      volumes:
-      - name: dynamic-storage
-        persistentVolumeClaim:
-          claimName: dynamic-pvc
-      - name: file-connector-storage
-        persistentVolumeClaim:
-          claimName: file-connector-pvc
+        # No volumes: the file store (uploads) and dynamic config are
+        # Postgres-backed (or Azure Blob for files) — nothing reads
+        # /home/storage or /home/file_connector_storage (grep the code: zero
+        # references). The dynamic-pvc / file-connector-pvc claims still exist
+        # in persistent-volumes.yaml; they're just no longer mounted here.
 ---
 apiVersion: v1
 kind: Service

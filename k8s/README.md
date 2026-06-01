@@ -526,11 +526,16 @@ None of the four split deployments mount `dynamic-pvc` or
 is **Postgres-backed** (`PGFileStore` large objects) and the dynamic config
 store is Postgres-backed too — nothing reads `/home/storage` or
 `/home/file_connector_storage` (grep the code: zero references). The mounts
-were upstream carryover. Dropping them also avoids a real bug:
-`dynamic-pvc` is **ReadWriteOnce**, so mounting it across the scheduler +
-workers + lite pod risks multi-attach failures. (The base `api-server` /
-`background` still mount them for now — harmless, but equally vestigial; a
-separate cleanup.)
+were upstream carryover. The base `api-server` / `background` deployments
+also no longer mount them. The `dynamic-pvc` / `file-connector-pvc` claims
+are still **defined** in `persistent-volumes.yaml` (so the live volumes
+aren't deleted) — they're simply unmounted everywhere now.
+
+(Aside: `dynamic-pvc` is declared `ReadWriteOnce` yet was mounted by
+api-server + background on different nodes in prod — that "worked" only
+because `azurefile-csi` is an SMB share, not a block device, so it ignores
+the single-attach restriction. The RWO label was misleading-for-usage, not
+an active outage risk. Moot now that nothing mounts it.)
 
 Rollback: remove the `components:` line (and the patch), set
 `background-deployment` back to `count: 1`, re-apply. (The split pods are

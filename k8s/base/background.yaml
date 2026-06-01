@@ -40,15 +40,7 @@ spec:
           requests:
             cpu: '2'
             memory: 10Gi
-        volumeMounts:
-        - mountPath: /home/storage
-          name: dynamic-storage
-        - mountPath: /home/file_connector_storage
-          name: file-connector-storage
-      volumes:
-      - name: dynamic-storage
-        persistentVolumeClaim:
-          claimName: dynamic-pvc
-      - name: file-connector-storage
-        persistentVolumeClaim:
-          claimName: file-connector-pvc
+        # No volumes — vestigial like the split deployments: the file store and
+        # dynamic config are Postgres-backed (files optionally Azure Blob), so
+        # nothing reads /home/storage or /home/file_connector_storage. The PVCs
+        # remain defined in persistent-volumes.yaml, just unmounted here.
