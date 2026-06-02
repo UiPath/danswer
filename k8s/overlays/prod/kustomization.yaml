@@ -25,47 +25,19 @@ namespace: darwin
 images:
   - name: danswer-backend
     newName: sfbrdevhelmweacr.azurecr.io/danswer/danswer-backend
-    newTag: vha-138
+    newTag: vha-139
   - name: danswer-web-server
     newName: sfbrdevhelmweacr.azurecr.io/danswer/danswer-web-server
-    newTag: vha-70
+    newTag: vha-71
   - name: danswer-model-server
     newName: danswer/danswer-model-server
     newTag: v0.3.94
   - name: nginx
     newName: nginx
     newTag: 1.23.4-alpine
-  # Vespa — one entry PER ROLE (the base manifests use per-role logical
-  # names). All pinned to the SAME version the cluster actually runs.
-  # NEVER use :latest — it pulled 8.696.20, a >30-release jump from
-  # 8.600.35, which Vespa's config server refuses (incompatible-upgrade
-  # guard) → cluster-wide outage. 8.600.35 is the deployed on-disk version
-  # (the content nodes' index is in this format).
-  #
-  # Do NOT hand-edit these tags to a higher version and `kubectl apply` —
-  # that bumps all roles at once with no ordering or version-stepping.
-  # Upgrades go through k8s/scripts/vespa-upgrade.sh (ordered, health-gated,
-  # ≤30 releases per hop); afterwards, sync these tags to match live so git
-  # ≈ cluster.
-  - name: vespa-configserver
-    newName: vespaengine/vespa
-    newTag: "8.600.35"
-  - name: vespa-admin
-    newName: vespaengine/vespa
-    newTag: "8.600.35"
-  - name: vespa-content
-    newName: vespaengine/vespa
-    newTag: "8.600.35"
-  - name: vespa-feed
-    newName: vespaengine/vespa
-    newTag: "8.600.35"
-  - name: vespa-query
-    newName: vespaengine/vespa
-    newTag: "8.600.35"
-  - name: busybox
-    # Pinned (was :latest). Only an init chown helper, but same drift hygiene.
-    newName: busybox
-    newTag: "1.36.1"
+  # Vespa images live in the separate Vespa overlay (k8s/overlays/prod-vespa)
+  # now that Vespa is applied independently of the app — see that file and
+  # k8s/README.md.
 
 replicas:
   - name: api-server-deployment

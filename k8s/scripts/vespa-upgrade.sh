@@ -163,4 +163,4 @@ done
 
 echo "Vespa upgrade $CUR -> $TARGET complete across all roles."
 echo "NOW: update the per-role vespa newTag values to \"$TARGET\" in"
-echo "     k8s/overlays/{prod,local}/kustomization.yaml so git matches live."
+echo "     k8s/overlays/{prod,local}-vespa/kustomization.yaml so git matches live."

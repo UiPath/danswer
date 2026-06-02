@@ -22,7 +22,11 @@ resources:
   - persistent-volumes.yaml
   - redis.yaml  # cache + rate limiting; both prod and local deploy it
 
-  # Vespa cluster (search index backend) — grouped in its own folder with a
-  # dedicated kustomization; see vespa/kustomization.yaml for the rationale
-  # and k8s/scripts/vespa-upgrade.sh for the ordered upgrade procedure.
-  - vespa/
+  # NOTE: Vespa is intentionally NOT part of base. It is a stateful subsystem
+  # with a PINNED version and an ordered, health-gated upgrade procedure, so
+  # re-applying it on every routine app rollout (`kubectl apply -k
+  # overlays/{prod,local}`) is dangerous — a drifted manifest could roll the
+  # StatefulSets. Vespa manifests live in base/vespa/ and are applied
+  # DELIBERATELY via their own overlay: `kubectl apply -k
+  # k8s/overlays/{prod,local}-vespa`. Version upgrades go through
+  # k8s/scripts/vespa-upgrade.sh. See k8s/README.md.
