@@ -396,9 +396,12 @@ def fetch_documents_for_document_set_paginated(
     current_only: bool = True,
     last_document_id: str | None = None,
     limit: int = 100,
-) -> tuple[Sequence[Document], str | None]:
+) -> tuple[Sequence[str], str | None]:
+    # Selects only Document.id — the sole caller (document-set sync) uses just
+    # the ids, and the keyset cursor is the last id. Selecting full Document
+    # ORM rows per batch was needless materialization.
     stmt = (
-        select(Document)
+        select(Document.id)
         .join(
             DocumentByConnectorCredentialPair,
             DocumentByConnectorCredentialPair.id == Document.id,
@@ -434,8 +437,8 @@ def fetch_documents_for_document_set_paginated(
         )
     stmt = stmt.distinct()
 
-    documents = db_session.scalars(stmt).all()
-    return documents, documents[-1].id if documents else None
+    document_ids = db_session.scalars(stmt).all()
+    return document_ids, document_ids[-1] if document_ids else None
 
 
 def fetch_document_sets_for_documents(

@@ -189,6 +189,13 @@ def fetch_latest_index_attempt_by_connector(
         return []
 
     for connector in connectors:
+        # NOTE: legacy Query.first() DOES emit LIMIT 1, so this ordered query
+        # over the large index_attempt table is safe despite running per
+        # connector. If you ever migrate this to the 2.x style
+        # `db_session.execute(select(...).order_by(...)).scalars().first()`,
+        # you MUST add `.limit(1)` — Result.first() does NOT add LIMIT and would
+        # materialize the connector's entire attempt history (the exact bug that
+        # was fixed in db/index_attempt.py::get_last_attempt).
         latest_index_attempt = (
             db_session.query(IndexAttempt)
             .filter(IndexAttempt.connector_id == connector.id)

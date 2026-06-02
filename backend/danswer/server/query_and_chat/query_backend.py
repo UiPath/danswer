@@ -93,6 +93,9 @@ def get_tags(
     # If this is empty or None, then tags for all sources are considered
     sources: list[DocumentSource] | None = None,
     allow_prefix: bool = True,  # This is currently the only option
+    # Optional cap on tags returned. Default None preserves the existing
+    # unbounded behavior; a client can pass a limit to bound the response.
+    limit: int | None = None,
     _: User = Depends(current_user),
     db_session: Session = Depends(get_session),
 ) -> TagResponse:
@@ -102,6 +105,7 @@ def get_tags(
     db_tags = get_tags_by_value_prefix_for_source_types(
         tag_value_prefix=match_pattern,
         sources=sources,
+        limit=limit,
         db_session=db_session,
     )
     server_tags = [

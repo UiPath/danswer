@@ -45,6 +45,29 @@ def get_documents_for_connector_credential_pair(
     return db_session.scalars(stmt).all()
 
 
+def get_document_ids_for_connector_credential_pair(
+    db_session: Session, connector_id: int, credential_id: int
+) -> list[str]:
+    """Same document set as get_documents_for_connector_credential_pair, but
+    selects ONLY the id column.
+
+    Callers that just need the set of indexed document ids (e.g. the prune task,
+    which diffs them against the connector's current docs) were materializing
+    full DbDocument ORM rows for the connector's ENTIRE corpus just to read
+    `.id` — hundreds of MB on large connectors. Same WHERE + DISTINCT, so the
+    returned id set is identical."""
+    initial_doc_ids_stmt = select(DocumentByConnectorCredentialPair.id).where(
+        and_(
+            DocumentByConnectorCredentialPair.connector_id == connector_id,
+            DocumentByConnectorCredentialPair.credential_id == credential_id,
+        )
+    )
+    stmt = (
+        select(DbDocument.id).where(DbDocument.id.in_(initial_doc_ids_stmt)).distinct()
+    )
+    return list(db_session.scalars(stmt).all())
+
+
 def get_documents_by_ids(
     document_ids: list[str],
     db_session: Session,

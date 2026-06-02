@@ -110,6 +110,7 @@ def get_tags_by_value_prefix_for_source_types(
     tag_value_prefix: str | None,
     sources: list[DocumentSource] | None,
     db_session: Session,
+    limit: int | None = None,
 ) -> list[Tag]:
     query = select(Tag)
 
@@ -118,6 +119,12 @@ def get_tags_by_value_prefix_for_source_types(
 
     if sources:
         query = query.where(Tag.source.in_(sources))
+
+    # Optional bound (default None = unbounded, unchanged). When no prefix is
+    # given this would otherwise load every Tag row for the source(s); the knob
+    # lets callers cap it without changing existing behavior.
+    if limit is not None:
+        query = query.limit(limit)
 
     result = db_session.execute(query)
 

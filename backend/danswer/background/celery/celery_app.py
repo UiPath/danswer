@@ -28,7 +28,7 @@ from danswer.db.connector_credential_pair import get_connector_credential_pairs
 from danswer.db.connector_credential_pair import release_deletion_lock
 from danswer.db.connector_credential_pair import try_acquire_deletion_lock
 from danswer.db.deletion_attempt import check_deletion_attempt_is_allowed
-from danswer.db.document import get_documents_for_connector_credential_pair
+from danswer.db.document import get_document_ids_for_connector_credential_pair
 from danswer.db.document import prepare_to_modify_documents
 from danswer.db.document_set import delete_document_set
 from danswer.db.document_set import fetch_document_sets
@@ -198,14 +198,13 @@ def prune_documents_task(connector_id: int, credential_id: int) -> None:
                 runnable_connector
             )
 
-            all_indexed_document_ids = {
-                doc.id
-                for doc in get_documents_for_connector_credential_pair(
+            all_indexed_document_ids = set(
+                get_document_ids_for_connector_credential_pair(
                     db_session=db_session,
                     connector_id=connector_id,
                     credential_id=credential_id,
                 )
-            }
+            )
 
             doc_ids_to_remove = list(all_indexed_document_ids - all_connector_doc_ids)
 
@@ -275,7 +274,7 @@ def sync_document_set_task(document_set_id: int) -> None:
         try:
             cursor = None
             while True:
-                document_batch, cursor = fetch_documents_for_document_set_paginated(
+                document_id_batch, cursor = fetch_documents_for_document_set_paginated(
                     document_set_id=document_set_id,
                     db_session=db_session,
                     current_only=False,
@@ -283,7 +282,7 @@ def sync_document_set_task(document_set_id: int) -> None:
                     limit=_SYNC_BATCH_SIZE,
                 )
                 _sync_document_batch(
-                    document_ids=[document.id for document in document_batch],
+                    document_ids=list(document_id_batch),
                     db_session=db_session,
                 )
                 if cursor is None:

@@ -301,7 +301,12 @@ def get_index_attempts_for_cc_pair(
     cc_pair_identifier: ConnectorCredentialPairIdentifier,
     only_current: bool = True,
     disinclude_finished: bool = False,
+    limit: int | None = None,
 ) -> Sequence[IndexAttempt]:
+    # `limit` is optional and defaults to None (unbounded — unchanged behavior).
+    # IndexAttempt rows carry large Text columns (error_msg, full_exception_trace),
+    # so callers that only need existence or a recent slice should pass a limit
+    # rather than materialize a busy cc-pair's entire history.
     stmt = select(IndexAttempt).where(
         and_(
             IndexAttempt.connector_id == cc_pair_identifier.connector_id,
@@ -320,6 +325,8 @@ def get_index_attempts_for_cc_pair(
         )
 
     stmt = stmt.order_by(IndexAttempt.time_created.desc())
+    if limit is not None:
+        stmt = stmt.limit(limit)
     return db_session.execute(stmt).scalars().all()
 
 

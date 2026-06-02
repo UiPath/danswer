@@ -678,6 +678,9 @@ def connector_run_once(
             ),
             only_current=True,
             disinclude_finished=True,
+            # Used only for truthiness ("any unfinished attempt?"); one row is
+            # enough — don't materialize the full set just to test existence.
+            limit=1,
             db_session=db_session,
         )
     ]

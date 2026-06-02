@@ -47,6 +47,7 @@ def get_current_db_embedding_model(db_session: Session) -> EmbeddingModel:
         select(EmbeddingModel)
         .where(EmbeddingModel.status == IndexModelStatus.PRESENT)
         .order_by(EmbeddingModel.id.desc())
+        .limit(1)  # .scalars().first() doesn't add LIMIT; table is tiny, be explicit
     )
     result = db_session.execute(query)
     latest_model = result.scalars().first()
@@ -62,6 +63,7 @@ def get_secondary_db_embedding_model(db_session: Session) -> EmbeddingModel | No
         select(EmbeddingModel)
         .where(EmbeddingModel.status == IndexModelStatus.FUTURE)
         .order_by(EmbeddingModel.id.desc())
+        .limit(1)  # .scalars().first() doesn't add LIMIT; table is tiny, be explicit
     )
     result = db_session.execute(query)
     latest_model = result.scalars().first()
