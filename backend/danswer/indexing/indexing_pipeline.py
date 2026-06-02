@@ -159,6 +159,19 @@ def index_doc_batch(
     )
     updatable_ids = [doc.id for doc in updatable_docs]
 
+    # Visibility into the content-hash / timestamp skip: how many docs in this
+    # batch were unchanged and therefore skip the expensive embed + Vespa
+    # clear-and-rewrite. Aggregated across an attempt's batches this confirms,
+    # in prod logs, that a churny source (e.g. Salesforce LastModifiedDate)
+    # is no longer re-indexing unchanged records. Only logged when >0 to keep
+    # steady-state logs quiet.
+    num_skipped = len(documents) - len(updatable_docs)
+    if num_skipped:
+        logger.info(
+            f"Skipping {num_skipped}/{len(documents)} documents in batch "
+            "(unchanged since last successful index — no re-embed / re-index)."
+        )
+
     # Create records in the source of truth about these documents,
     # does not include doc_updated_at which is also used to indicate a successful update
     upsert_documents_in_db(
