@@ -43,20 +43,17 @@ spec:
         # No PVCs — the scheduler only polls Postgres + submits Dask futures;
         # the file store / dynamic config are Postgres-backed (see README).
         #
-        # The per-cycle spikes to ~7.5Gi were a query bug, NOT real work: the
-        # scheduler's get_last_attempt() ran an unbounded ORDER BY without
-        # LIMIT once per cc-pair, materializing each cc-pair's FULL
-        # index_attempt history (12k+ rows for active connectors) just to take
-        # the newest. Fixed with LIMIT 1 in db/index_attempt.py — steady-state
-        # is now ~700Mi.
-        #
-        # TEMP: 12Gi only while the PRE-FIX backend image is still running
-        # (it still spikes). Once an image WITH the LIMIT-1 fix is deployed,
-        # drop this to request 512Mi / limit 2Gi.
+        # Sized for the FIXED scheduler. The old ~7.5Gi/cycle spikes were a
+        # query bug, not real work: get_last_attempt() ran an unbounded
+        # ORDER BY (no LIMIT) once per cc-pair, materializing each cc-pair's
+        # FULL index_attempt history just to take the newest. Fixed with
+        # LIMIT 1 in db/index_attempt.py. Verified on the fixed image
+        # (vha-140): RSS sits FLAT at ~430Mi across update cycles, no spike.
+        # 512Mi request / 2Gi limit = comfortable headroom over that.
         resources:
           requests:
             cpu: 200m
-            memory: 4Gi
+            memory: 512Mi
           limits:
             cpu: 500m
-            memory: 12Gi
+            memory: 2Gi
