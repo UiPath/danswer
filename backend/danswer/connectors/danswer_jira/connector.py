@@ -1,4 +1,5 @@
 import os
+import re
 from collections.abc import Iterable
 from datetime import datetime
 from datetime import timezone
@@ -30,6 +31,36 @@ logger = setup_logger()
 
 JIRA_API_VERSION = os.environ.get("JIRA_API_VERSION") or "3"
 _JIRA_FULL_PAGE_SIZE = 50
+
+# Matches a top-level trailing ORDER BY clause (case-insensitive).
+_JQL_ORDER_BY_RE = re.compile(r"\border\s+by\b", re.IGNORECASE)
+
+
+def _add_time_window_to_jql(
+    jira_filter: str, start_date_str: str, end_date_str: str
+) -> str:
+    """Add the poll's `updated` time window to a user-supplied JQL filter.
+
+    JQL requires all WHERE conditions to come BEFORE any `ORDER BY`. Naively
+    appending `AND updated >= ...` to a filter that ends in `ORDER BY ...`
+    produces invalid JQL — Jira rejects it with HTTP 400 "Expecting ',' but got
+    'AND'". So if the filter has a trailing ORDER BY, inject the window in front
+    of it; otherwise just append.
+    """
+    window = f"updated >= '{start_date_str}' AND updated <= '{end_date_str}'"
+    jira_filter = jira_filter.strip()
+
+    match = _JQL_ORDER_BY_RE.search(jira_filter)
+    if match:
+        where_part = jira_filter[: match.start()].rstrip()
+        order_part = jira_filter[match.start() :].strip()
+        if where_part:
+            return f"{where_part} AND {window} {order_part}"
+        return f"{window} {order_part}"
+
+    if jira_filter:
+        return f"{jira_filter} AND {window}"
+    return window
 
 
 def _paginate_jql_search(
@@ -216,10 +247,8 @@ class JiraConnector(LoadConnector, PollConnector):
             "%Y-%m-%d %H:%M"
         )
 
-        jql = (
-            f"{self.jira_filter} AND "
-            f"updated >= '{start_date_str}' AND "
-            f"updated <= '{end_date_str}'"
+        jql = _add_time_window_to_jql(
+            self.jira_filter, start_date_str, end_date_str
         )
 
         document_batch = []
