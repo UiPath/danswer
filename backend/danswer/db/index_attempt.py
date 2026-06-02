@@ -238,6 +238,15 @@ def get_last_attempt(
     # Note, the below is using time_created instead of time_updated
     stmt = stmt.order_by(desc(IndexAttempt.time_created))
 
+    # LIMIT 1 in SQL — NOT just Result.first(). `execute(stmt).scalars().first()`
+    # does not add a LIMIT, so without this the DB returns the cc-pair's ENTIRE
+    # attempt history (psycopg2 buffers it all client-side, the ORM materializes
+    # every row) and we throw all but one away. The indexing scheduler calls this
+    # once per cc-pair every loop, so with a large index_attempt table that spiked
+    # the scheduler to multi-GB per cycle (OOMKilled). With LIMIT 1 the DB returns
+    # one row. See update.py::create_indexing_jobs.
+    stmt = stmt.limit(1)
+
     return db_session.execute(stmt).scalars().first()
 
 
