@@ -206,6 +206,15 @@ WEB_CONNECTOR_OAUTH_CLIENT_ID = os.environ.get("WEB_CONNECTOR_OAUTH_CLIENT_ID")
 WEB_CONNECTOR_OAUTH_CLIENT_SECRET = os.environ.get("WEB_CONNECTOR_OAUTH_CLIENT_SECRET")
 WEB_CONNECTOR_OAUTH_TOKEN_URL = os.environ.get("WEB_CONNECTOR_OAUTH_TOKEN_URL")
 WEB_CONNECTOR_VALIDATE_URLS = os.environ.get("WEB_CONNECTOR_VALIDATE_URLS")
+# Hard cap on pages visited in a single recursive web crawl. Bounds runtime so a
+# large site can't run for hours and get killed mid-run (which marked the whole
+# attempt FAILED). 0/empty = unlimited.
+WEB_CONNECTOR_MAX_PAGES = int(os.environ.get("WEB_CONNECTOR_MAX_PAGES") or 5000)
+# Per-page navigation timeout (ms) and retry count for transient fetch failures.
+WEB_CONNECTOR_PAGE_TIMEOUT_MS = int(
+    os.environ.get("WEB_CONNECTOR_PAGE_TIMEOUT_MS") or 30000
+)
+WEB_CONNECTOR_MAX_RETRIES = int(os.environ.get("WEB_CONNECTOR_MAX_RETRIES") or 3)
 
 HTML_BASED_CONNECTOR_TRANSFORM_LINKS_STRATEGY = os.environ.get(
     "HTML_BASED_CONNECTOR_TRANSFORM_LINKS_STRATEGY",
