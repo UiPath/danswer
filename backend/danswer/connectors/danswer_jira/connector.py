@@ -266,9 +266,7 @@ class JiraConnector(LoadConnector, PollConnector, IdConnector):
             "%Y-%m-%d %H:%M"
         )
 
-        jql = _add_time_window_to_jql(
-            self.jira_filter, start_date_str, end_date_str
-        )
+        jql = _add_time_window_to_jql(self.jira_filter, start_date_str, end_date_str)
 
         document_batch = []
         for doc in fetch_jira_issues_batch(

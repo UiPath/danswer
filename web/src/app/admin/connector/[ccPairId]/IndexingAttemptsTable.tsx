@@ -151,104 +151,104 @@ export function IndexingAttemptsTable({ ccPair }: { ccPair: CCPairFullInfo }) {
         </TableHead>
         <TableBody>
           {indexAttempts.map((indexAttempt) => {
-              const docsPerMinute =
-                getDocsProcessedPerMinute(indexAttempt)?.toFixed(2);
-              const priority = indexAttempt.indexing_priority ?? 0;
-              const isNotStarted = indexAttempt.status === "not_started";
-              const isUpdating = updatingPriorityId === indexAttempt.id;
-              return (
-                <TableRow key={indexAttempt.id}>
-                  <TableCell>
-                    {indexAttempt.time_started
-                      ? localizeAndPrettify(indexAttempt.time_started)
-                      : "-"}
-                  </TableCell>
-                  <TableCell>
-                    <IndexAttemptStatus
-                      status={indexAttempt.status || "not_started"}
-                      size="xs"
-                    />
-                    {docsPerMinute && (
-                      <div className="text-xs mt-1">
-                        {docsPerMinute} docs / min
-                      </div>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    {isNotStarted ? (
-                      <div className="flex items-center gap-1">
-                        <button
-                          className="px-1.5 py-0.5 border rounded text-xs hover:bg-hover-light disabled:opacity-50"
-                          disabled={isUpdating || priority <= 0}
-                          onClick={() =>
-                            bumpPriority(indexAttempt.id, priority - 10)
-                          }
-                          title="Decrease priority by 10"
-                        >
-                          −10
-                        </button>
-                        <span
-                          className={
-                            priority > 0
-                              ? "text-xs font-semibold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800"
-                              : "text-xs px-2 py-0.5 text-subtle"
-                          }
-                        >
-                          {priority}
-                        </span>
-                        <button
-                          className="px-1.5 py-0.5 border rounded text-xs hover:bg-hover-light disabled:opacity-50"
-                          disabled={isUpdating || priority >= 100}
-                          onClick={() =>
-                            bumpPriority(indexAttempt.id, priority + 10)
-                          }
-                          title="Increase priority by 10"
-                        >
-                          +10
-                        </button>
-                      </div>
-                    ) : priority > 0 ? (
-                      <span className="text-xs font-semibold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">
+            const docsPerMinute =
+              getDocsProcessedPerMinute(indexAttempt)?.toFixed(2);
+            const priority = indexAttempt.indexing_priority ?? 0;
+            const isNotStarted = indexAttempt.status === "not_started";
+            const isUpdating = updatingPriorityId === indexAttempt.id;
+            return (
+              <TableRow key={indexAttempt.id}>
+                <TableCell>
+                  {indexAttempt.time_started
+                    ? localizeAndPrettify(indexAttempt.time_started)
+                    : "-"}
+                </TableCell>
+                <TableCell>
+                  <IndexAttemptStatus
+                    status={indexAttempt.status || "not_started"}
+                    size="xs"
+                  />
+                  {docsPerMinute && (
+                    <div className="text-xs mt-1">
+                      {docsPerMinute} docs / min
+                    </div>
+                  )}
+                </TableCell>
+                <TableCell>
+                  {isNotStarted ? (
+                    <div className="flex items-center gap-1">
+                      <button
+                        className="px-1.5 py-0.5 border rounded text-xs hover:bg-hover-light disabled:opacity-50"
+                        disabled={isUpdating || priority <= 0}
+                        onClick={() =>
+                          bumpPriority(indexAttempt.id, priority - 10)
+                        }
+                        title="Decrease priority by 10"
+                      >
+                        −10
+                      </button>
+                      <span
+                        className={
+                          priority > 0
+                            ? "text-xs font-semibold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800"
+                            : "text-xs px-2 py-0.5 text-subtle"
+                        }
+                      >
                         {priority}
                       </span>
-                    ) : (
-                      <span className="text-xs text-subtle">-</span>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex">
-                      <div className="text-right">
-                        <div>{indexAttempt.new_docs_indexed}</div>
-                        {indexAttempt.docs_removed_from_index > 0 && (
-                          <div className="text-xs w-52 text-wrap flex italic overflow-hidden whitespace-normal px-1">
-                            (also removed {indexAttempt.docs_removed_from_index}{" "}
-                            docs that were detected as deleted in the source)
-                          </div>
-                        )}
-                      </div>
+                      <button
+                        className="px-1.5 py-0.5 border rounded text-xs hover:bg-hover-light disabled:opacity-50"
+                        disabled={isUpdating || priority >= 100}
+                        onClick={() =>
+                          bumpPriority(indexAttempt.id, priority + 10)
+                        }
+                        title="Increase priority by 10"
+                      >
+                        +10
+                      </button>
                     </div>
-                  </TableCell>
-                  <TableCell>{indexAttempt.total_docs_indexed}</TableCell>
-                  <TableCell>
-                    <div>
-                      <Text className="flex flex-wrap whitespace-normal">
-                        {indexAttempt.error_msg || "-"}
-                      </Text>
-                      {indexAttempt.full_exception_trace && (
-                        <div
-                          onClick={() => {
-                            setIndexAttemptTracePopupId(indexAttempt.id);
-                          }}
-                          className="mt-2 text-link cursor-pointer select-none"
-                        >
-                          View Full Trace
+                  ) : priority > 0 ? (
+                    <span className="text-xs font-semibold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">
+                      {priority}
+                    </span>
+                  ) : (
+                    <span className="text-xs text-subtle">-</span>
+                  )}
+                </TableCell>
+                <TableCell>
+                  <div className="flex">
+                    <div className="text-right">
+                      <div>{indexAttempt.new_docs_indexed}</div>
+                      {indexAttempt.docs_removed_from_index > 0 && (
+                        <div className="text-xs w-52 text-wrap flex italic overflow-hidden whitespace-normal px-1">
+                          (also removed {indexAttempt.docs_removed_from_index}{" "}
+                          docs that were detected as deleted in the source)
                         </div>
                       )}
                     </div>
-                  </TableCell>
-                </TableRow>
-              );
-            })}
+                  </div>
+                </TableCell>
+                <TableCell>{indexAttempt.total_docs_indexed}</TableCell>
+                <TableCell>
+                  <div>
+                    <Text className="flex flex-wrap whitespace-normal">
+                      {indexAttempt.error_msg || "-"}
+                    </Text>
+                    {indexAttempt.full_exception_trace && (
+                      <div
+                        onClick={() => {
+                          setIndexAttemptTracePopupId(indexAttempt.id);
+                        }}
+                        className="mt-2 text-link cursor-pointer select-none"
+                      >
+                        View Full Trace
+                      </div>
+                    )}
+                  </div>
+                </TableCell>
+              </TableRow>
+            );
+          })}
         </TableBody>
       </Table>
       {totalPages > 1 && (

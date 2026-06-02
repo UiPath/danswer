@@ -6,8 +6,8 @@ from sqlalchemy import delete
 from sqlalchemy import desc
 from sqlalchemy import func
 from sqlalchemy import or_
-from sqlalchemy import select
 from sqlalchemy import Select
+from sqlalchemy import select
 from sqlalchemy import text
 from sqlalchemy import update
 from sqlalchemy.orm import joinedload

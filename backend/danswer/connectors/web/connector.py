@@ -21,10 +21,10 @@ from playwright.sync_api import sync_playwright
 from requests_oauthlib import OAuth2Session  # type:ignore
 
 from danswer.configs.app_configs import INDEX_BATCH_SIZE
-from danswer.configs.app_configs import WEB_CONNECTOR_OAUTH_CLIENT_ID
-from danswer.configs.app_configs import WEB_CONNECTOR_OAUTH_CLIENT_SECRET
 from danswer.configs.app_configs import WEB_CONNECTOR_MAX_PAGES
 from danswer.configs.app_configs import WEB_CONNECTOR_MAX_RETRIES
+from danswer.configs.app_configs import WEB_CONNECTOR_OAUTH_CLIENT_ID
+from danswer.configs.app_configs import WEB_CONNECTOR_OAUTH_CLIENT_SECRET
 from danswer.configs.app_configs import WEB_CONNECTOR_OAUTH_TOKEN_URL
 from danswer.configs.app_configs import WEB_CONNECTOR_PAGE_TIMEOUT_MS
 from danswer.configs.app_configs import WEB_CONNECTOR_VALIDATE_URLS
@@ -56,7 +56,12 @@ def _is_browser_dead(exc: Exception) -> bool:
     msg = str(exc).lower()
     return any(
         marker in msg
-        for marker in ("browser has been closed", "browser closed", "crash", "target closed")
+        for marker in (
+            "browser has been closed",
+            "browser closed",
+            "crash",
+            "target closed",
+        )
     )
 
 
@@ -426,9 +431,7 @@ class WebConnector(LoadConnector, PollConnector):
                         soup = BeautifulSoup(content, "html.parser")
 
                         if self.recursive and not is_polling:
-                            for link in get_internal_links(
-                                base_url, current_url, soup
-                            ):
+                            for link in get_internal_links(base_url, current_url, soup):
                                 if link not in visited_links:
                                     to_visit.append(link)
 
@@ -447,9 +450,7 @@ class WebConnector(LoadConnector, PollConnector):
                         page_doc = Document(
                             id=current_url,
                             sections=[
-                                Section(
-                                    link=current_url, text=parsed_html.cleaned_text
-                                )
+                                Section(link=current_url, text=parsed_html.cleaned_text)
                             ],
                             source=DocumentSource.WEB,
                             semantic_identifier=parsed_html.title or current_url,
