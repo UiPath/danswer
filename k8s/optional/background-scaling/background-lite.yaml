@@ -110,13 +110,18 @@ spec:
             name: env-configmap
         - secretRef:
             name: danswer-secrets
+        # beat is light at runtime, but `celery -A ... beat` still imports the
+        # whole danswer app (langchain/llama-index/tokenizers), which alone
+        # exceeds 256Mi → OOMKilled on startup. Stable at a 1Gi limit; request
+        # doubled (256Mi→512Mi) for a guaranteed floor and limit lifted to 2Gi
+        # for headroom.
         resources:
           requests:
             cpu: 50m
-            memory: 128Mi
+            memory: 512Mi
           limits:
             cpu: 200m
-            memory: 256Mi
+            memory: 2Gi
       # --- slack bot listener ---
       - name: slack-listener
         image: danswer-backend

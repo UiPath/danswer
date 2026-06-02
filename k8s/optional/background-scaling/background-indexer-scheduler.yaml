@@ -42,10 +42,19 @@ spec:
             name: danswer-secrets
         # No PVCs — the scheduler only polls Postgres + submits Dask futures;
         # the file store / dynamic config are Postgres-backed (see README).
+        # The update.py loop imports the full app, warms the embedding model,
+        # holds a Dask client, and pulls connector/index state into memory each
+        # cycle — observed to SPIKE from ~300Mi baseline to >4Gi within a
+        # single "Running update" pass. OOMKilled (137) at 1Gi, 2Gi AND 4Gi
+        # limits (~every 2 min). The old combined `background` pod reserved
+        # 10Gi and absorbed this; the split scheduler needs comparable room.
+        # 8Gi limit / 4Gi request gives headroom for the spike. If it STILL
+        # OOMs at 8Gi, that's a memory-growth bug in the update loop to
+        # investigate in code — not a sizing problem.
         resources:
           requests:
             cpu: 200m
-            memory: 512Mi
+            memory: 4Gi
           limits:
             cpu: 500m
-            memory: 1Gi
+            memory: 8Gi
