@@ -7,6 +7,7 @@ from sqlalchemy import desc
 from sqlalchemy import func
 from sqlalchemy import or_
 from sqlalchemy import select
+from sqlalchemy import Select
 from sqlalchemy import text
 from sqlalchemy import update
 from sqlalchemy.orm import joinedload
@@ -327,6 +328,50 @@ def get_index_attempts_for_cc_pair(
     stmt = stmt.order_by(IndexAttempt.time_created.desc())
     if limit is not None:
         stmt = stmt.limit(limit)
+    return db_session.execute(stmt).scalars().all()
+
+
+def _cc_pair_index_attempts_base_stmt(
+    cc_pair_identifier: ConnectorCredentialPairIdentifier,
+    only_current: bool,
+) -> Select:
+    """Shared WHERE/JOIN for the cc-pair index-attempt queries (count +
+    paginated fetch) so they always agree on what counts as 'in scope'."""
+    stmt = select(IndexAttempt).where(
+        and_(
+            IndexAttempt.connector_id == cc_pair_identifier.connector_id,
+            IndexAttempt.credential_id == cc_pair_identifier.credential_id,
+        )
+    )
+    if only_current:
+        stmt = stmt.join(EmbeddingModel).where(
+            EmbeddingModel.status == IndexModelStatus.PRESENT
+        )
+    return stmt
+
+
+def count_index_attempts_for_cc_pair(
+    db_session: Session,
+    cc_pair_identifier: ConnectorCredentialPairIdentifier,
+    only_current: bool = True,
+) -> int:
+    base = _cc_pair_index_attempts_base_stmt(cc_pair_identifier, only_current)
+    count_stmt = select(func.count()).select_from(base.subquery())
+    return db_session.execute(count_stmt).scalar_one()
+
+
+def get_paginated_index_attempts_for_cc_pair(
+    db_session: Session,
+    cc_pair_identifier: ConnectorCredentialPairIdentifier,
+    page: int,
+    page_size: int,
+    only_current: bool = True,
+) -> Sequence[IndexAttempt]:
+    """One page of a cc-pair's index attempts, newest first. `page` is 0-based.
+    Server-side LIMIT/OFFSET so the API never materializes the full history."""
+    stmt = _cc_pair_index_attempts_base_stmt(cc_pair_identifier, only_current)
+    stmt = stmt.order_by(IndexAttempt.time_created.desc())
+    stmt = stmt.limit(page_size).offset(max(page, 0) * page_size)
     return db_session.execute(stmt).scalars().all()
 
 

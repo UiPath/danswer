@@ -12,7 +12,7 @@ import {
   Divider,
 } from "@tremor/react";
 import { IndexAttemptStatus } from "@/components/Status";
-import { CCPairFullInfo } from "./types";
+import { CCPairFullInfo, PaginatedIndexAttempts } from "./types";
 import { useState } from "react";
 import { PageSelector } from "@/components/PageSelector";
 import { localizeAndPrettify } from "@/lib/time";
@@ -20,18 +20,39 @@ import { getDocsProcessedPerMinute } from "@/lib/indexAttempt";
 import { Modal } from "@/components/Modal";
 import { CheckmarkIcon, CopyIcon } from "@/components/icons/icons";
 import { updateIndexAttemptPriority } from "@/lib/connector";
-import { mutate } from "swr";
-import { buildCCPairInfoUrl } from "./lib";
+import useSWR, { mutate } from "swr";
+import { errorHandlingFetcher } from "@/lib/fetcher";
+import { buildCCPairInfoUrl, buildIndexAttemptsUrl } from "./lib";
 import { usePopup } from "@/components/admin/connectors/Popup";
+import { ThreeDotsLoader } from "@/components/Loading";
+import { ErrorCallout } from "@/components/ErrorCallout";
 
 const NUM_IN_PAGE = 8;
 
 export function IndexingAttemptsTable({ ccPair }: { ccPair: CCPairFullInfo }) {
   const [page, setPage] = useState(1);
+  // Server-side pagination: fetch one page at a time (page is 0-based on the
+  // API). Changing `page` re-keys the SWR fetch. Avoids loading a busy
+  // cc-pair's entire attempt history (thousands of rows w/ full tracebacks).
+  const indexAttemptsUrl = buildIndexAttemptsUrl(
+    ccPair.id,
+    page - 1,
+    NUM_IN_PAGE
+  );
+  const {
+    data: indexAttemptsData,
+    isLoading,
+    error,
+    mutate: mutateIndexAttempts,
+  } = useSWR<PaginatedIndexAttempts>(indexAttemptsUrl, errorHandlingFetcher);
+
+  const indexAttempts = indexAttemptsData?.index_attempts ?? [];
+  const totalPages = indexAttemptsData?.total_pages ?? 1;
+
   const [indexAttemptTracePopupId, setIndexAttemptTracePopupId] = useState<
     number | null
   >(null);
-  const indexAttemptToDisplayTraceFor = ccPair.index_attempts.find(
+  const indexAttemptToDisplayTraceFor = indexAttempts.find(
     (indexAttempt) => indexAttempt.id === indexAttemptTracePopupId
   );
   const [copyClicked, setCopyClicked] = useState(false);
@@ -56,7 +77,22 @@ export function IndexingAttemptsTable({ ccPair }: { ccPair: CCPairFullInfo }) {
       });
     }
     setTimeout(() => setPopup(null), 3000);
+    // Refresh the current page of attempts + the detail (latest attempt).
+    mutateIndexAttempts();
     mutate(buildCCPairInfoUrl(ccPair.id));
+  }
+
+  if (error) {
+    return (
+      <ErrorCallout
+        errorTitle="Failed to fetch indexing attempts"
+        errorMsg={error?.info?.detail || error.toString()}
+      />
+    );
+  }
+
+  if (!indexAttemptsData && isLoading) {
+    return <ThreeDotsLoader />;
   }
 
   return (
@@ -114,9 +150,7 @@ export function IndexingAttemptsTable({ ccPair }: { ccPair: CCPairFullInfo }) {
           </TableRow>
         </TableHead>
         <TableBody>
-          {ccPair.index_attempts
-            .slice(NUM_IN_PAGE * (page - 1), NUM_IN_PAGE * page)
-            .map((indexAttempt) => {
+          {indexAttempts.map((indexAttempt) => {
               const docsPerMinute =
                 getDocsProcessedPerMinute(indexAttempt)?.toFixed(2);
               const priority = indexAttempt.indexing_priority ?? 0;
@@ -217,11 +251,11 @@ export function IndexingAttemptsTable({ ccPair }: { ccPair: CCPairFullInfo }) {
             })}
         </TableBody>
       </Table>
-      {ccPair.index_attempts.length > NUM_IN_PAGE && (
+      {totalPages > 1 && (
         <div className="mt-3 flex">
           <div className="mx-auto">
             <PageSelector
-              totalPages={Math.ceil(ccPair.index_attempts.length / NUM_IN_PAGE)}
+              totalPages={totalPages}
               currentPage={page}
               onPageChange={(newPage) => {
                 setPage(newPage);
