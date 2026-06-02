@@ -22,9 +22,7 @@ depends_on: None = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "file_store", sa.Column("object_key", sa.String(), nullable=True)
-    )
+    op.add_column("file_store", sa.Column("object_key", sa.String(), nullable=True))
     op.alter_column("file_store", "lobj_oid", existing_type=sa.Integer(), nullable=True)
 
 

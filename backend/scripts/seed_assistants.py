@@ -38,7 +38,7 @@ import argparse
 import os
 import random
 import sys
-from typing import Sequence
+from collections.abc import Sequence
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -85,22 +85,66 @@ def _abort_if_pointed_at_prod() -> None:
 
 # 60 distinct names so we can cover the requested ~50 without dup.
 _NAMES: list[str] = [
-    "Research Pal", "Code Reviewer", "SQL Helper", "Email Drafter",
-    "Bug Triage", "API Documenter", "Test Writer", "Meeting Summarizer",
-    "Slack Digest", "Stand-up Buddy", "Customer Insights", "Onboarding Guide",
-    "Roadmap Reviewer", "Incident Reporter", "Refactor Assistant",
-    "Release Notes", "Spec Reader", "RFC Writer", "PR Summarizer",
-    "Postmortem Helper", "Design Critic", "Architecture Sketch",
-    "Security Reviewer", "Threat Modeler", "Compliance Auditor",
-    "Pricing Analyst", "Sales Enabler", "Renewal Scout", "Churn Predictor",
-    "Marketing Riff", "Blog Draftsman", "Tweet Polisher", "Tagline Brewer",
-    "FAQ Generator", "Support Tier-1", "Escalation Helper", "Runbook Walker",
-    "Migration Planner", "Schema Diff Reader", "Index Tuner", "Query Explainer",
-    "Log Whisperer", "Metric Hunter", "Alert Wrangler", "Dashboard Builder",
-    "Hire Brief", "Interview Scribe", "Skill Mapper", "Doc Search", "Wiki Pal",
-    "Note Taker", "Action-Items Finder", "Standup Cliff-Notes", "Investor FAQ",
-    "Roadblock Spotter", "OKR Reviewer", "Quarterly Recap", "Pitch Sharpener",
-    "Customer-Reply Drafter", "Demo Outline",
+    "Research Pal",
+    "Code Reviewer",
+    "SQL Helper",
+    "Email Drafter",
+    "Bug Triage",
+    "API Documenter",
+    "Test Writer",
+    "Meeting Summarizer",
+    "Slack Digest",
+    "Stand-up Buddy",
+    "Customer Insights",
+    "Onboarding Guide",
+    "Roadmap Reviewer",
+    "Incident Reporter",
+    "Refactor Assistant",
+    "Release Notes",
+    "Spec Reader",
+    "RFC Writer",
+    "PR Summarizer",
+    "Postmortem Helper",
+    "Design Critic",
+    "Architecture Sketch",
+    "Security Reviewer",
+    "Threat Modeler",
+    "Compliance Auditor",
+    "Pricing Analyst",
+    "Sales Enabler",
+    "Renewal Scout",
+    "Churn Predictor",
+    "Marketing Riff",
+    "Blog Draftsman",
+    "Tweet Polisher",
+    "Tagline Brewer",
+    "FAQ Generator",
+    "Support Tier-1",
+    "Escalation Helper",
+    "Runbook Walker",
+    "Migration Planner",
+    "Schema Diff Reader",
+    "Index Tuner",
+    "Query Explainer",
+    "Log Whisperer",
+    "Metric Hunter",
+    "Alert Wrangler",
+    "Dashboard Builder",
+    "Hire Brief",
+    "Interview Scribe",
+    "Skill Mapper",
+    "Doc Search",
+    "Wiki Pal",
+    "Note Taker",
+    "Action-Items Finder",
+    "Standup Cliff-Notes",
+    "Investor FAQ",
+    "Roadblock Spotter",
+    "OKR Reviewer",
+    "Quarterly Recap",
+    "Pitch Sharpener",
+    "Customer-Reply Drafter",
+    "Demo Outline",
 ]
 
 # 30 description templates — varied tones / scopes so the cards don't all
@@ -163,9 +207,7 @@ def _resolve_target_user(session: Session, email: str | None) -> User | None:
             print(f"No user with email {email!r} found.", file=sys.stderr)
         return user
     # No email given — prefer an admin user, fall back to any user.
-    admin = session.scalar(
-        select(User).where(User.role == UserRole.ADMIN).limit(1)
-    )
+    admin = session.scalar(select(User).where(User.role == UserRole.ADMIN).limit(1))
     if admin is not None:
         return admin
     return session.scalar(select(User).limit(1))
@@ -173,9 +215,7 @@ def _resolve_target_user(session: Session, email: str | None) -> User | None:
 
 def _pick_other_user(session: Session, target_user_id) -> User | None:
     """Find a user other than the target to own the "shared with you" rows."""
-    return session.scalar(
-        select(User).where(User.id != target_user_id).limit(1)
-    )
+    return session.scalar(select(User).where(User.id != target_user_id).limit(1))
 
 
 def _clear(session: Session, prefix: str) -> int:
@@ -316,9 +356,7 @@ def main() -> None:
             session.flush()  # populate persona.id
 
             if shared_target is not None:
-                session.add(
-                    Persona__User(persona_id=persona.id, user_id=shared_target)
-                )
+                session.add(Persona__User(persona_id=persona.id, user_id=shared_target))
 
             # Half of "Yours" auto-land in the picker; the other half are
             # available-to-add. Featured rows never auto-add (the user can

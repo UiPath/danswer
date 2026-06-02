@@ -56,6 +56,9 @@ from danswer.llm.utils import get_max_input_tokens
 from danswer.secondary_llm_flows.chat_session_naming import (
     get_renamed_conversation_name,
 )
+from danswer.server.middleware.request_rate_limit import (
+    check_message_request_rate_limit,
+)
 from danswer.server.query_and_chat.models import ChatFeedbackRequest
 from danswer.server.query_and_chat.models import ChatMessageIdentifier
 from danswer.server.query_and_chat.models import ChatRenameRequest
@@ -71,9 +74,6 @@ from danswer.server.query_and_chat.models import PromptOverride
 from danswer.server.query_and_chat.models import RenameChatSessionResponse
 from danswer.server.query_and_chat.models import SearchFeedbackRequest
 from danswer.server.query_and_chat.models import UpdateChatSessionThreadRequest
-from danswer.server.middleware.request_rate_limit import (
-    check_message_request_rate_limit,
-)
 from danswer.server.query_and_chat.token_limit import check_token_rate_limits
 from danswer.utils.logger import setup_logger
 

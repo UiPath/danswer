@@ -43,10 +43,10 @@ import socket
 import subprocess
 import sys
 import time
+from collections.abc import Iterator
 from contextlib import closing
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator
 
 from dask.distributed import Client
 
@@ -263,7 +263,9 @@ def phase_parallelism(client: Client, num_workers: int) -> bool:
     upper_bound = expected_parallel_time + 5.0
 
     start = time.monotonic()
-    futures = [client.submit(_sleep_task, per_task, pure=False) for _ in range(num_tasks)]
+    futures = [
+        client.submit(_sleep_task, per_task, pure=False) for _ in range(num_tasks)
+    ]
     # gather() blocks until all are done; raises if any failed.
     try:
         results = client.gather(futures)

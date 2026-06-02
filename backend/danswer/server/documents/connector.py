@@ -74,6 +74,8 @@ from danswer.db.models import User
 from danswer.db.tasks import get_latest_tasks_by_names
 from danswer.dynamic_configs.interface import ConfigNotFoundError
 from danswer.file_store.file_store import get_default_file_store
+from danswer.redis.redis_pool import DANSWER_REDIS_KEY_PREFIX
+from danswer.redis.redis_pool import get_redis_client
 from danswer.server.documents.models import AuthStatus
 from danswer.server.documents.models import AuthUrl
 from danswer.server.documents.models import ConnectorBase
@@ -93,8 +95,6 @@ from danswer.server.documents.models import ObjectCreationIdResponse
 from danswer.server.documents.models import RunConnectorRequest
 from danswer.server.documents.models import UpdateIndexAttemptPriorityRequest
 from danswer.server.models import StatusResponse
-from danswer.redis.redis_pool import DANSWER_REDIS_KEY_PREFIX
-from danswer.redis.redis_pool import get_redis_client
 from danswer.utils.logger import setup_logger
 
 _GMAIL_CREDENTIAL_ID_COOKIE_NAME = "gmail_credential_id"

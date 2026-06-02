@@ -326,11 +326,11 @@ class TestRedisCachedDynamicConfigStore(unittest.TestCase):
         self.assertEqual(result, "ok")
         inner.load.assert_called_once_with("k")
         # Wrapper repopulated Redis with the good value.
-        self.assertEqual(
-            json.loads(redis._storage[_EXPECTED_PREFIX + "k"]), "ok"
-        )
+        self.assertEqual(json.loads(redis._storage[_EXPECTED_PREFIX + "k"]), "ok")
 
-    def test_non_json_serialisable_value_skips_cache_but_inner_still_written(self) -> None:
+    def test_non_json_serialisable_value_skips_cache_but_inner_still_written(
+        self,
+    ) -> None:
         """If a caller hands us a Python object json can't serialise
         (sets, complex numbers, etc.), the inner store still gets it —
         Redis just silently skips the cache write. The inner is the

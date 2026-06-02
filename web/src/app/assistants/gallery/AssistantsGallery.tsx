@@ -137,13 +137,7 @@ interface CardProps {
   onRemove: (a: Persona) => void;
 }
 
-function GalleryCard({
-  assistant,
-  user,
-  isAdded,
-  onAdd,
-  onRemove,
-}: CardProps) {
+function GalleryCard({ assistant, user, isAdded, onAdd, onRemove }: CardProps) {
   // Tool-related UI was intentionally removed from this page (filter
   // chips + per-card counts) — the gallery is for browsing assistants,
   // and tool execution isn't reliable enough to advertise.
@@ -205,18 +199,16 @@ function GalleryCard({
           were removed entirely (see card-level comment). */}
       {assistant.document_sets && assistant.document_sets.length > 0 && (
         <div className="flex flex-wrap gap-1.5 mb-3 text-xs">
-          {assistant.document_sets
-            .slice(0, MAX_VISIBLE_DOC_SETS)
-            .map((ds) => (
-              <Bubble key={ds.id} isSelected={false} notSelectable>
-                <div className="flex items-center gap-1 max-w-[180px]">
-                  <FiBookmark size={12} className="flex-shrink-0" />
-                  <span className="truncate" title={ds.name}>
-                    {ds.name}
-                  </span>
-                </div>
-              </Bubble>
-            ))}
+          {assistant.document_sets.slice(0, MAX_VISIBLE_DOC_SETS).map((ds) => (
+            <Bubble key={ds.id} isSelected={false} notSelectable>
+              <div className="flex items-center gap-1 max-w-[180px]">
+                <FiBookmark size={12} className="flex-shrink-0" />
+                <span className="truncate" title={ds.name}>
+                  {ds.name}
+                </span>
+              </div>
+            </Bubble>
+          ))}
           {assistant.document_sets.length > MAX_VISIBLE_DOC_SETS && (
             <Bubble isSelected={false} notSelectable>
               <span
@@ -468,7 +460,8 @@ export function AssistantsGallery({
     }
 
     const out: SectionDef[] = [];
-    if (yours.length > 0) out.push({ key: "yours", label: "Yours", assistants: yours });
+    if (yours.length > 0)
+      out.push({ key: "yours", label: "Yours", assistants: yours });
     if (shared.length > 0)
       out.push({ key: "shared", label: "Shared with you", assistants: shared });
     if (featured.length > 0)
@@ -628,8 +621,8 @@ export function AssistantsGallery({
           <div className="min-w-0">
             <AssistantsPageTitle>Assistant Gallery</AssistantsPageTitle>
             <p className="text-subtle">
-              Browse every assistant available to you. Add the ones you want
-              to your chat picker.
+              Browse every assistant available to you. Add the ones you want to
+              your chat picker.
             </p>
           </div>
           <Link

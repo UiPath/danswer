@@ -264,65 +264,70 @@ function RowContent({
 
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1">
-            <h2 className="text-base font-semibold truncate">{assistant.name}</h2>
-          {isDefault && (
-            <span
-              className="
+            <h2 className="text-base font-semibold truncate">
+              {assistant.name}
+            </h2>
+            {isDefault && (
+              <span
+                className="
                 text-xs px-2 py-0.5 rounded-full
                 bg-accent/15 text-accent font-medium
               "
-            >
-              Default
-            </span>
-          )}
-        </div>
-
-        {/* Description bumped — used to be text-sm with no weight; now
-            it's the primary signal of what the assistant is for. */}
-        {assistant.description && (
-          <div className="text-sm text-default leading-snug">
-            {assistant.description}
+              >
+                Default
+              </span>
+            )}
           </div>
-        )}
 
-        {/* Sharing status, e.g. "Shared with 3 people". */}
-        <div className="mt-1">
-          <AssistantSharedStatusDisplay assistant={assistant} user={user} />
-        </div>
+          {/* Description bumped — used to be text-sm with no weight; now
+            it's the primary signal of what the assistant is for. */}
+          {assistant.description && (
+            <div className="text-sm text-default leading-snug">
+              {assistant.description}
+            </div>
+          )}
 
-        {/* Knowledge-scope chips — show which document sets the
+          {/* Sharing status, e.g. "Shared with 3 people". */}
+          <div className="mt-1">
+            <AssistantSharedStatusDisplay assistant={assistant} user={user} />
+          </div>
+
+          {/* Knowledge-scope chips — show which document sets the
             assistant points at, not just the count. With many sets,
             show the first few and a "+N more" with the rest in a
             tooltip so the row stays scannable. Tools chip was
             intentionally removed: tool execution isn't reliable yet
             and surfacing tool counts misleads users into picking an
             assistant for a capability that may not work in practice. */}
-        {assistant.document_sets && assistant.document_sets.length > 0 && (
-          <div className="flex flex-wrap gap-2 mt-2 text-xs text-subtle">
-            {assistant.document_sets.slice(0, MAX_VISIBLE_DOC_SETS).map((ds) => (
-              <Bubble key={ds.id} isSelected={false}>
-                <div className="flex items-center gap-1 max-w-[220px]">
-                  <FiBookmark size={12} className="flex-shrink-0" />
-                  <span className="truncate" title={ds.name}>
-                    {ds.name}
+          {assistant.document_sets && assistant.document_sets.length > 0 && (
+            <div className="flex flex-wrap gap-2 mt-2 text-xs text-subtle">
+              {assistant.document_sets
+                .slice(0, MAX_VISIBLE_DOC_SETS)
+                .map((ds) => (
+                  <Bubble key={ds.id} isSelected={false}>
+                    <div className="flex items-center gap-1 max-w-[220px]">
+                      <FiBookmark size={12} className="flex-shrink-0" />
+                      <span className="truncate" title={ds.name}>
+                        {ds.name}
+                      </span>
+                    </div>
+                  </Bubble>
+                ))}
+              {assistant.document_sets.length > MAX_VISIBLE_DOC_SETS && (
+                <Bubble isSelected={false}>
+                  <span
+                    title={assistant.document_sets
+                      .slice(MAX_VISIBLE_DOC_SETS)
+                      .map((d) => d.name)
+                      .join(", ")}
+                  >
+                    +{assistant.document_sets.length - MAX_VISIBLE_DOC_SETS}{" "}
+                    more
                   </span>
-                </div>
-              </Bubble>
-            ))}
-            {assistant.document_sets.length > MAX_VISIBLE_DOC_SETS && (
-              <Bubble isSelected={false}>
-                <span
-                  title={assistant.document_sets
-                    .slice(MAX_VISIBLE_DOC_SETS)
-                    .map((d) => d.name)
-                    .join(", ")}
-                >
-                  +{assistant.document_sets.length - MAX_VISIBLE_DOC_SETS} more
-                </span>
-              </Bubble>
-            )}
-          </div>
-        )}
+                </Bubble>
+              )}
+            </div>
+          )}
         </div>
       </div>
       {/* End CONTENT ZONE. Actions below sit OUTSIDE the opacity
@@ -363,10 +368,7 @@ function RowContent({
             `}
             title={isDefault ? "Default assistant" : "Set as default"}
           >
-            <FiStar
-              size={16}
-              className={isDefault ? "fill-current" : ""}
-            />
+            <FiStar size={16} className={isDefault ? "fill-current" : ""} />
           </button>
         )}
 
@@ -476,9 +478,7 @@ function BulkActionsBar({
         flex items-center gap-3 p-3
       "
     >
-      <span className="text-sm font-medium">
-        {selectedCount} selected
-      </span>
+      <span className="text-sm font-medium">{selectedCount} selected</span>
       <button
         type="button"
         onClick={onShow}
@@ -793,7 +793,7 @@ export function AssistantsList({ user, assistants }: AssistantsListProps) {
 
   const sharingAssistant =
     sharingAssistantId != null
-      ? assistantsById.get(sharingAssistantId) ?? null
+      ? (assistantsById.get(sharingAssistantId) ?? null)
       : null;
 
   return (

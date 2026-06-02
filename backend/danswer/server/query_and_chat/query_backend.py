@@ -24,6 +24,9 @@ from danswer.search.preprocessing.danswer_helper import recommend_search_flow
 from danswer.search.utils import chunks_or_sections_to_search_docs
 from danswer.secondary_llm_flows.query_validation import get_query_answerability
 from danswer.secondary_llm_flows.query_validation import stream_query_answerability
+from danswer.server.middleware.request_rate_limit import (
+    check_message_request_rate_limit,
+)
 from danswer.server.query_and_chat.models import AdminSearchRequest
 from danswer.server.query_and_chat.models import AdminSearchResponse
 from danswer.server.query_and_chat.models import HelperResponse
@@ -31,9 +34,6 @@ from danswer.server.query_and_chat.models import QueryValidationResponse
 from danswer.server.query_and_chat.models import SimpleQueryRequest
 from danswer.server.query_and_chat.models import SourceTag
 from danswer.server.query_and_chat.models import TagResponse
-from danswer.server.middleware.request_rate_limit import (
-    check_message_request_rate_limit,
-)
 from danswer.server.query_and_chat.token_limit import check_token_rate_limits
 from danswer.utils.logger import setup_logger
 

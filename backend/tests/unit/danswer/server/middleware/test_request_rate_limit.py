@@ -105,7 +105,9 @@ class _FakeRedis:
         return pipe
 
 
-def _make_request(headers: dict[str, str] | None = None, peer_host: str | None = None) -> MagicMock:
+def _make_request(
+    headers: dict[str, str] | None = None, peer_host: str | None = None
+) -> MagicMock:
     """Minimal Starlette Request stand-in."""
     req = MagicMock()
     req.headers = headers or {}
@@ -194,9 +196,7 @@ class TestRequestRateLimitEnforcement(unittest.TestCase):
             with self.assertRaises(HTTPException) as ctx:
                 rrl.check_message_request_rate_limit(request=request, user=user)
         self.assertEqual(ctx.exception.status_code, 429)
-        retry_after = ctx.exception.headers and ctx.exception.headers.get(
-            "Retry-After"
-        )
+        retry_after = ctx.exception.headers and ctx.exception.headers.get("Retry-After")
         self.assertIsNotNone(retry_after)
         self.assertTrue(retry_after.isdigit())  # type: ignore[union-attr]
         # 0 < retry_after <= window. (Equal to window iff time landed
@@ -263,7 +263,9 @@ class TestRequestRateLimitEnforcement(unittest.TestCase):
         # All EXPIRE calls used nx=True. (At least one happened.)
         self.assertGreater(len(fake.expire_calls), 0)
         for _key, _seconds, nx in fake.expire_calls:
-            self.assertTrue(nx, "EXPIRE must use NX so TTL isn't extended on every INCR")
+            self.assertTrue(
+                nx, "EXPIRE must use NX so TTL isn't extended on every INCR"
+            )
 
     def test_anonymous_user_keyed_by_xff_first_hop(self) -> None:
         """Anonymous traffic keys on the first XFF hop (the real client

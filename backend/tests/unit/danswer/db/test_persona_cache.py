@@ -35,7 +35,6 @@ Redis is stubbed with a tiny in-memory fake; the inner DB function and
 """
 from __future__ import annotations
 
-import json
 import unittest
 import uuid
 from typing import Any
@@ -133,7 +132,10 @@ class TestFilterParityVsSqlOrBlock(unittest.TestCase):
         is the most-traveled path and must stay correct even when the
         user has no direct or group grant."""
         p = _FakePersonaSnapshot(
-            persona_id=1, is_public=True, user_ids_with_access=[], group_ids_with_access=[]
+            persona_id=1,
+            is_public=True,
+            user_ids_with_access=[],
+            group_ids_with_access=[],
         )
         result = pc._filter_personas_for_user([p], self.user_id, self.user_group_ids)
         self.assertEqual([x.id for x in result], [1])
@@ -183,19 +185,26 @@ class TestFilterParityVsSqlOrBlock(unittest.TestCase):
         items in the list."""
         personas = [
             _FakePersonaSnapshot(
-                persona_id=1, is_public=True, user_ids_with_access=[],
+                persona_id=1,
+                is_public=True,
+                user_ids_with_access=[],
                 group_ids_with_access=[],
             ),
             _FakePersonaSnapshot(
-                persona_id=2, is_public=False,
-                user_ids_with_access=[self.user_id], group_ids_with_access=[],
+                persona_id=2,
+                is_public=False,
+                user_ids_with_access=[self.user_id],
+                group_ids_with_access=[],
             ),
             _FakePersonaSnapshot(
-                persona_id=3, is_public=False, user_ids_with_access=[],
+                persona_id=3,
+                is_public=False,
+                user_ids_with_access=[],
                 group_ids_with_access=[10],
             ),
             _FakePersonaSnapshot(
-                persona_id=4, is_public=False,
+                persona_id=4,
+                is_public=False,
                 user_ids_with_access=[self.other_user_id],
                 group_ids_with_access=[888],
             ),
@@ -211,16 +220,22 @@ class TestFilterParityVsSqlOrBlock(unittest.TestCase):
         work — otherwise zero-group users get a broken assistant list."""
         personas = [
             _FakePersonaSnapshot(
-                persona_id=1, is_public=True,
-                user_ids_with_access=[], group_ids_with_access=[],
+                persona_id=1,
+                is_public=True,
+                user_ids_with_access=[],
+                group_ids_with_access=[],
             ),
             _FakePersonaSnapshot(
-                persona_id=2, is_public=False,
-                user_ids_with_access=[self.user_id], group_ids_with_access=[],
+                persona_id=2,
+                is_public=False,
+                user_ids_with_access=[self.user_id],
+                group_ids_with_access=[],
             ),
             _FakePersonaSnapshot(
-                persona_id=3, is_public=False,
-                user_ids_with_access=[], group_ids_with_access=[10],
+                persona_id=3,
+                is_public=False,
+                user_ids_with_access=[],
+                group_ids_with_access=[10],
             ),
         ]
         result = pc._filter_personas_for_user(personas, self.user_id, [])
@@ -295,7 +310,9 @@ class TestGetPersonasForUserCached(unittest.TestCase):
             "danswer.db.persona.get_personas", return_value=[MagicMock()]
         ) as mock_get_personas, patch(
             "danswer.db.persona_cache.PersonaSnapshot.from_model", return_value=snap
-        ), patch.object(pc, "get_redis_client") as mock_client:
+        ), patch.object(
+            pc, "get_redis_client"
+        ) as mock_client:
             result = pc.get_personas_for_user_cached(
                 user_id=uuid.uuid4(), db_session=db_session
             )
@@ -314,7 +331,9 @@ class TestGetPersonasForUserCached(unittest.TestCase):
             "danswer.db.persona.get_personas", return_value=[]
         ) as mock_get_personas, patch(
             "danswer.db.persona_cache.PersonaSnapshot.from_model"
-        ), patch.object(pc, "get_redis_client") as mock_client:
+        ), patch.object(
+            pc, "get_redis_client"
+        ) as mock_client:
             pc.get_personas_for_user_cached(
                 user_id=uuid.uuid4(),
                 db_session=db_session,
@@ -431,11 +450,11 @@ class TestFailOpenOnRedisRead(unittest.TestCase):
 
         with patch.object(pc, "PERSONA_CACHE_ENABLED", True), patch.object(
             pc, "get_redis_client", return_value=bad
-        ), patch(
-            "danswer.db.persona.get_personas", return_value=[MagicMock()]
-        ), patch(
+        ), patch("danswer.db.persona.get_personas", return_value=[MagicMock()]), patch(
             "danswer.db.persona_cache.PersonaSnapshot.from_model", return_value=snap
-        ), patch.object(pc, "_safe_set"):
+        ), patch.object(
+            pc, "_safe_set"
+        ):
             # Must not raise; must return the DB result.
             result = pc._get_all_personas_cached(db_session)
 
@@ -457,11 +476,11 @@ class TestFailOpenOnRedisRead(unittest.TestCase):
 
         with patch.object(pc, "PERSONA_CACHE_ENABLED", True), patch.object(
             pc, "get_redis_client", return_value=fake
-        ), patch(
-            "danswer.db.persona.get_personas", return_value=[MagicMock()]
-        ), patch(
+        ), patch("danswer.db.persona.get_personas", return_value=[MagicMock()]), patch(
             "danswer.db.persona_cache.PersonaSnapshot.from_model", return_value=snap
-        ), patch.object(pc, "_safe_set"):
+        ), patch.object(
+            pc, "_safe_set"
+        ):
             result = pc._get_all_personas_cached(db_session)
 
         self.assertEqual(result, [snap])
