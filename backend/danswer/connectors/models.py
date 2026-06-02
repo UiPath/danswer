@@ -1,3 +1,4 @@
+import hashlib
 from datetime import datetime
 from enum import Enum
 from typing import Any
@@ -130,6 +131,36 @@ class DocumentBase(BaseModel):
             else:
                 attributes.append(k + INDEX_SEPARATOR + v)
         return attributes
+
+    def get_content_hash(self) -> str:
+        """Stable hash of the fields that determine this document's INDEXED
+        representation: section text/links, title, semantic identifier,
+        metadata, and owners.
+
+        Used by the indexing pipeline to skip re-indexing a document whose
+        content is unchanged even though its `doc_updated_at` advanced — e.g.
+        a Salesforce automation bumps LastModifiedDate on records whose indexed
+        fields didn't actually change, which otherwise forces a full (and
+        expensive) Vespa clear-and-rewrite of every record on every poll.
+
+        Deliberately EXCLUDES doc_updated_at: a newer timestamp alone must not
+        force a re-index. Uses \\x1f (unit separator) as the field delimiter so
+        adjacent fields can't collide. Order within metadata/owners is made
+        deterministic so the hash is stable across runs.
+        """
+        parts: list[str] = [self.semantic_identifier or "", self.title or ""]
+        for section in self.sections:
+            parts.append(section.link or "")
+            parts.append(section.text)
+        for key in sorted(self.metadata or {}):
+            value = self.metadata[key]
+            if isinstance(value, list):
+                parts.append(f"{key}={'|'.join(value)}")
+            else:
+                parts.append(f"{key}={value}")
+        for owner in (self.primary_owners or []) + (self.secondary_owners or []):
+            parts.append(f"{owner.display_name or ''}<{owner.email or ''}>")
+        return hashlib.sha256("\x1f".join(parts).encode("utf-8")).hexdigest()
 
 
 class Document(DocumentBase):

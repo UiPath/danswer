@@ -328,6 +328,13 @@ class Document(Base):
     doc_updated_at: Mapped[datetime.datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # sha256 of the document's INDEXED content (sections/title/metadata/owners,
+    # NOT doc_updated_at) as of the last SUCCESSFUL index into Vespa. Lets the
+    # indexing pipeline skip the expensive Vespa clear-and-rewrite when a
+    # connector re-emits a document whose timestamp advanced but whose content
+    # is identical (e.g. Salesforce LastModifiedDate churn). Nullable: rows
+    # indexed before this column existed fall back to the doc_updated_at skip.
+    indexed_content_hash: Mapped[str | None] = mapped_column(String, nullable=True)
     # The following are not attached to User because the account/email may not be known
     # within Danswer
     # Something like the document creator

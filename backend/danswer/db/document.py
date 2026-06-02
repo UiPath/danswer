@@ -246,14 +246,28 @@ def upsert_document_by_connector_credential_pair(
 def update_docs_updated_at(
     ids_to_new_updated_at: dict[str, datetime],
     db_session: Session,
+    ids_to_new_content_hash: dict[str, str] | None = None,
 ) -> None:
-    doc_ids = list(ids_to_new_updated_at.keys())
+    """Record post-successful-index state on the document rows.
+
+    `ids_to_new_content_hash` (optional) stores the sha256 of the indexed
+    content so a later run can skip re-indexing unchanged docs. Default None
+    keeps the original updated-at-only behavior for any other caller.
+    """
+    ids_to_new_content_hash = ids_to_new_content_hash or {}
+    doc_ids = list(set(ids_to_new_updated_at) | set(ids_to_new_content_hash))
+    if not doc_ids:
+        return
+
     documents_to_update = (
         db_session.query(DbDocument).filter(DbDocument.id.in_(doc_ids)).all()
     )
 
     for document in documents_to_update:
-        document.doc_updated_at = ids_to_new_updated_at[document.id]
+        if document.id in ids_to_new_updated_at:
+            document.doc_updated_at = ids_to_new_updated_at[document.id]
+        if document.id in ids_to_new_content_hash:
+            document.indexed_content_hash = ids_to_new_content_hash[document.id]
 
     db_session.commit()
 
