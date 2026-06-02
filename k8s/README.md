@@ -378,8 +378,11 @@ Cutover (graceful — un-migrated files keep reading from their lobj):
 # 1. The image must include azure-storage-blob (it's in requirements now) —
 #    rebuild/redeploy the backend image.
 # 2. alembic upgrade head   (adds file_store.object_key, makes lobj_oid nullable)
-# 3. Put the storage-account connection string in secrets.env:
+# 3. Put the ACCOUNT-KEY connection string in secrets.env (Storage account →
+#    Access keys → Connection string — the one with AccountName + AccountKey):
 #    AZURE_BLOB_CONNECTION_STRING=...      (see secrets.env.example)
+#    Direct upload needs the account KEY so the server can mint scoped
+#    per-blob SAS (see below); a SAS-token connection string is rejected.
 # 4. Flip the backend in env.properties:
 #    FILE_STORE_TYPE=AzureBlobFileStore
 #    AZURE_BLOB_CONTAINER=danswer-files
@@ -397,6 +400,15 @@ Notes:
   unless `FILE_STORE_TYPE=AzureBlobFileStore` is set, so the dep/flag are
   decoupled.
 - Default (`PostgresBackedFileStore`) is unchanged; this is fully opt-in.
+- **Setting the connection string in a shell?** Single-quote it:
+  `export AZURE_BLOB_CONNECTION_STRING='...AccountKey=...==;...'`. The `;`
+  separators are shell command separators — unquoted, the value is silently
+  truncated at the first `;` (you'll see `KeyError: 'AccountName'` /
+  "Connection string missing required connection details"). Verify with
+  `python -c "import os;print(repr(os.environ.get('AZURE_BLOB_CONNECTION_STRING')))"`.
+- The account key is the storage account's **master credential** — keep it
+  in `secrets.env` / `danswer-secrets` only (never `env.properties` or git),
+  and **rotate it** if it's ever exposed (Access keys → Rotate).
 
 #### Direct-to-Blob chat uploads (requires Storage CORS)
 
@@ -406,19 +418,45 @@ browser `PUT` → `POST /chat/file/confirm`), bypassing the api-server — much
 faster and it shows a real progress bar. On the Postgres backend the client
 auto-falls-back to the two-hop server upload.
 
+The api-server mints the SAS from the **account key** in the connection
+string: a per-blob, write+create-only, 30-minute token. The master key never
+leaves the server; the browser only ever sees a token scoped to one blob.
+This is why step 3 above requires the account-key connection string — a
+SAS-token connection string has no key to sign with and is rejected with a
+clear error.
+
 For the browser `PUT` to succeed, the storage account needs **CORS rules**
-allowing the web origin (one-time, per account):
+allowing each web origin (one-time, per account). Add a rule for **every**
+origin that will upload — prod *and* local dev if you test against this
+account:
 
 ```bash
 az storage cors add --services b \
   --methods PUT OPTIONS GET \
-  --origins https://darwin.westeurope.cloudapp.azure.com \
+  --origins https://darwin.westeurope.cloudapp.azure.com http://localhost:3000 \
   --allowed-headers '*' --exposed-headers '*' --max-age 3600 \
   --account-name <account> --account-key <key>
 ```
 
-Without the CORS rule the browser blocks the PUT (preflight fails) and
-uploads error — that's the first thing to check if direct uploads fail.
+Troubleshooting direct uploads:
+- **"network error during upload"** in the browser = missing/incorrect CORS
+  rule (the preflight `OPTIONS` fails). First thing to check. The two-hop
+  server path doesn't need CORS, so this only bites the Blob backend.
+- The target container is **auto-created** on first use (the account key has
+  create permission), so you don't have to pre-create it.
+
+#### Chat upload limits
+
+Chat-attached files are stuffed **whole** into the LLM prompt (the search
+tool is disabled when files are attached), so they're bounded by two env
+gates — enforced on the backend and pre-checked in the browser:
+
+- `CHAT_FILE_MAX_SIZE_MB` (default `25`) — hard byte cap; oversize uploads
+  are rejected with a message. Surfaced to the web client as
+  `Settings.chat_file_max_size_mb` so it can reject before uploading.
+- `CHAT_FILE_MAX_TOKEN_FRACTION` (default `0.5`) — after text extraction, a
+  file whose token count exceeds this fraction of the model's input window
+  is rejected (it would crowd out the actual conversation).
 
 ### Apply an optional component (split-background + Dask)
 
@@ -501,10 +539,14 @@ source of truth:
 
 ```yaml
 replicas:
-  - name: background-lite-deployment            { count: 1 }  # singleton — beat + slack; never >1
-  - name: background-indexer-scheduler-deployment { count: 1 } # singleton — the update.py loop
-  - name: dask-scheduler-deployment             { count: 1 }  # singleton
-  - name: dask-worker-deployment                { count: 2 }  # ← THE indexing-throughput knob
+  - name: background-lite-deployment              # singleton — beat + slack; never >1
+    count: 1
+  - name: background-indexer-scheduler-deployment # singleton — the update.py loop
+    count: 1
+  - name: dask-scheduler-deployment               # singleton
+    count: 1
+  - name: dask-worker-deployment                  # ← THE indexing-throughput knob
+    count: 2
 ```
 
 The `replicas: N` you see inside each deployment YAML is just a manifest
