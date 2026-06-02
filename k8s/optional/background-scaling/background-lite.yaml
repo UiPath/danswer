@@ -54,7 +54,12 @@ spec:
         - danswer.background.celery.celery_run:celery_app
         - worker
         - --pool=threads
-        - --autoscale=3,10
+        # Fixed thread count, NOT --autoscale. Autoscale calls pool.grow()/shrink()
+        # which the threads TaskPool doesn't implement -> on the first task burst
+        # the worker dies with "AttributeError: 'TaskPool' object has no attribute
+        # 'grow'" and CrashLoopBackOffs. Autoscale is prefork-only. These
+        # maintenance tasks are I/O-bound, so a fixed pool of threads is fine.
+        - --concurrency=10
         - --loglevel=INFO
         env:
         - name: POSTGRES_USER
