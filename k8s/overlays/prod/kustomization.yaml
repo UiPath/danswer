@@ -14,6 +14,9 @@ kind: Kustomization
 resources:
   - ../../base
 
+components:
+  - ../../optional/background-scaling
+
 namespace: darwin
 
 # Image refs are logical names in base/. Kustomize rewrites them to the
@@ -66,15 +69,23 @@ images:
 
 replicas:
   - name: api-server-deployment
-    count: 1
+    count: 2
   - name: background-deployment
-    count: 1
+    count: 0
   - name: web-server-deployment
     count: 1
   - name: nginx-deployment
     count: 1
   - name: inference-model-server-deployment
     count: 1
+  - name: background-lite-deployment              # singleton — beat + slack; never >1
+    count: 1
+  - name: background-indexer-scheduler-deployment # singleton — the update.py loop
+    count: 1
+  - name: dask-scheduler-deployment               # singleton
+    count: 1
+  - name: dask-worker-deployment                  # ← THE indexing-throughput knob
+    count: 2
 
 # env-configmap: regenerated from env.properties. `behavior: create` because
 # base doesn't ship a ConfigMap with this name — the overlay owns it.

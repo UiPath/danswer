@@ -66,6 +66,12 @@ else:
     celery_broker_url = f"sqla+{connection_string}"
     celery_backend_url = f"db+{connection_string}"
 celery_app = Celery(__name__, broker=celery_broker_url, backend=celery_backend_url)
+# Retry the broker connection during worker startup instead of crashing if the
+# broker isn't reachable yet. Matters now that Redis can be the broker (a hard
+# dependency) — the worker may boot before Redis is ready. Also silences the
+# Celery 5.3 CPendingDeprecationWarning about this becoming the explicit
+# default in 6.0.
+celery_app.conf.broker_connection_retry_on_startup = True
 
 
 _SYNC_BATCH_SIZE = 100

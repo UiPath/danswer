@@ -40,7 +40,7 @@ spec:
   # (distinct active source types × INDEXING_PER_SOURCE_CAP), so there's
   # no point setting this far above your number of source types.
   maxReplicaCount: 4
-  pollingInterval: 30      # how often the query runs (seconds)
+  pollingInterval: 60      # how often the query runs (seconds)
   cooldownPeriod: 300      # wait 5m after metric hits 0 before scaling to 0
   advanced:
     horizontalPodAutoscalerConfig:
