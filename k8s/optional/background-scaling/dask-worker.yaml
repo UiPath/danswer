@@ -49,8 +49,8 @@ spec:
         # off the RWO dynamic-pvc, which can't multi-attach. See README.
         resources:
           requests:
-            cpu: 500m
-            memory: 2Gi
+            cpu: "1"
+            memory: 4Gi
           limits:
             cpu: '2'
-            memory: 4Gi
+            memory: 8Gi
