@@ -32,6 +32,7 @@ export interface Persona {
   num_chunks?: number;
   llm_relevance_filter?: boolean;
   llm_filter_extraction?: boolean;
+  rerank_enabled?: boolean;
   llm_model_provider_override?: string;
   llm_model_version_override?: string;
   starter_messages: StarterMessage[] | null;

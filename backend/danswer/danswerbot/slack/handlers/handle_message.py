@@ -69,7 +69,6 @@ from danswer.search.models import BaseFilters
 from danswer.search.models import OptionalSearchSetting
 from danswer.search.models import RetrievalDetails
 from danswer.utils.logger import setup_logger
-from shared_configs.configs import ENABLE_RERANKING_ASYNC_FLOW
 
 logger_base = setup_logger()
 
@@ -659,7 +658,10 @@ def handle_message(
                 persona_id=persona.id if persona is not None else 0,
                 retrieval_options=retrieval_details,
                 chain_of_thought=not disable_cot,
-                skip_rerank=not ENABLE_RERANKING_ASYNC_FLOW,
+                # Leave None so retrieval_preprocessing resolves reranking from
+                # the global RERANK_ENABLED switch + the assistant's
+                # rerank_enabled flag — same logic as the chat flow.
+                skip_rerank=None,
             )
         )
     except Exception as e:

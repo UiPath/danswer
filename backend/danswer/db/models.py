@@ -1014,6 +1014,13 @@ class Persona(Base):
     recency_bias: Mapped[RecencyBiasSetting] = mapped_column(
         Enum(RecencyBiasSetting, native_enum=False)
     )
+    # Per-assistant opt-in for cross-encoder reranking (beta). Only takes effect
+    # when reranking is globally available (RERANK_ENABLED + a GPU-backed model
+    # server); see search/preprocessing/preprocessing.py. Default off so existing
+    # assistants and the GPU-free local setup are unchanged until toggled.
+    rerank_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false"
+    )
     # Allows the Persona to specify a different LLM version than is controlled
     # globablly via env variables. For flexibility, validity is not currently enforced
     # NOTE: only is applied on the actual response generation - is not used for things like

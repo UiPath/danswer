@@ -298,9 +298,15 @@ class HybridCapable(abc.ABC):
         num_to_retrieve: int,
         offset: int = 0,
         hybrid_alpha: float | None = None,
+        prioritize_sources: bool = True,
     ) -> list[InferenceChunk]:
         """
         Run hybrid search and return a list of inference chunks.
+
+        prioritize_sources: when True (default) the implementation may apply its
+        source-prioritization behavior. The reranking path passes False so a
+        single, comparably-scored result set is returned for the cross-encoder
+        to reorder.
 
         NOTE: the query passed in here is the unprocessed plain text query. Preprocessing is
         expected to be handled by this function as it may depend on the index implementation.

@@ -154,6 +154,12 @@ def doc_index_retrieval(
                 num_to_retrieve=query.num_hits,
                 offset=query.offset,
                 hybrid_alpha=hybrid_alpha,
+                # When reranking is on (skip_rerank=False) we skip source
+                # prioritization: its two-query flow normalizes a narrow
+                # source-filtered set independently, inflating those scores and
+                # polluting the rerank candidate window. When reranking is off,
+                # keep the existing prioritized behavior unchanged.
+                prioritize_sources=query.skip_rerank,
             )
 
         else:

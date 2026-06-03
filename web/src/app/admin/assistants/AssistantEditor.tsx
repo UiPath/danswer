@@ -178,6 +178,7 @@ export function AssistantEditor({
     num_chunks: existingPersona?.num_chunks ?? null,
     include_citations: existingPersona?.prompts[0]?.include_citations ?? true,
     llm_relevance_filter: existingPersona?.llm_relevance_filter ?? false,
+    rerank_enabled: existingPersona?.rerank_enabled ?? false,
     llm_model_provider_override:
       existingPersona?.llm_model_provider_override ?? null,
     llm_model_version_override:
@@ -213,6 +214,7 @@ export function AssistantEditor({
             num_chunks: Yup.number().nullable(),
             include_citations: Yup.boolean().required(),
             llm_relevance_filter: Yup.boolean().required(),
+            rerank_enabled: Yup.boolean().required(),
             llm_model_version_override: Yup.string().nullable(),
             llm_model_provider_override: Yup.string().nullable(),
             starter_messages: Yup.array().of(
@@ -577,6 +579,14 @@ export function AssistantEditor({
                                     label="Apply LLM Relevance Filter"
                                     subtext={
                                       "If enabled, the LLM will filter out chunks that are not relevant to the user query."
+                                    }
+                                  />
+
+                                  <BooleanFormField
+                                    name="rerank_enabled"
+                                    label="Rerank results (beta)"
+                                    subtext={
+                                      "If enabled, retrieved results are reordered by a cross-encoder reranking model before being passed to the LLM, which usually improves answer quality. Only takes effect when reranking is enabled globally (a GPU-backed model server is deployed); otherwise this setting is ignored."
                                     }
                                   />
 

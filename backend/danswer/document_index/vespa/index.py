@@ -702,7 +702,10 @@ def query_vespa_helper(params):
 
 
 @retry(tries=3, delay=1, backoff=2)
-def _query_vespa(query_params: Mapping[str, str | int | float]) -> list[InferenceChunk]:
+def _query_vespa(
+    query_params: Mapping[str, str | int | float],
+    prioritize_sources: bool = True,
+) -> list[InferenceChunk]:
     if "query" in query_params and not cast(str, query_params["query"]).strip():
         raise ValueError("No/empty query received")
 
@@ -714,6 +717,18 @@ def _query_vespa(query_params: Mapping[str, str | int | float]) -> list[Inferenc
         if LOG_VESPA_TIMING_INFORMATION
         else {},
     )
+
+    if not prioritize_sources:
+        # Single, all-sources query. Used on the reranking path: every chunk is
+        # scored on ONE comparable normalize_linear scale and the cross-encoder
+        # reorders the top chunks afterwards. The two-query prioritized flow
+        # below normalizes a narrow source-filtered set INDEPENDENTLY, which
+        # inflates those scores (normalize_linear is relative to each query's
+        # own candidate set) and would pollute the rerank candidate window.
+        # Honors the caller's `hits` (num_to_retrieve) rather than hardcoding it.
+        hits = query_vespa_helper(params)
+        chunks = [_vespa_hit_to_inference_chunk(hit) for hit in hits]
+        return sorted(chunks, key=lambda chunk: chunk.score or 0, reverse=True)
 
     # Get prioritized sources from filters, default to web and sfkbarticles if none
     prioritized_sources = query_params.get("prioritized_sources") or [
@@ -1181,6 +1196,7 @@ class VespaIndex(DocumentIndex):
         title_content_ratio: float | None = TITLE_CONTENT_RATIO,
         distance_cutoff: float | None = SEARCH_DISTANCE_CUTOFF,
         edit_keyword_query: bool = EDIT_KEYWORD_QUERY,
+        prioritize_sources: bool = True,
     ) -> list[InferenceChunk]:
         vespa_where_clauses = _build_vespa_filters(filters)
         # Needs to be at least as much as the value set in Vespa schema config
@@ -1218,7 +1234,7 @@ class VespaIndex(DocumentIndex):
             "prioritized_sources": filters.prioritized_sources,  # Use the non-None value
         }
 
-        return _query_vespa(params)
+        return _query_vespa(params, prioritize_sources=prioritize_sources)
 
     def admin_retrieval(
         self,

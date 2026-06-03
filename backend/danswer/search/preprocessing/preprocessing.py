@@ -5,6 +5,7 @@ from danswer.configs.chat_configs import DISABLE_LLM_CHUNK_FILTER
 from danswer.configs.chat_configs import DISABLE_LLM_FILTER_EXTRACTION
 from danswer.configs.chat_configs import FAVOR_RECENT_DECAY_MULTIPLIER
 from danswer.configs.chat_configs import NUM_RETURNED_HITS
+from danswer.db.models import Persona
 from danswer.db.models import User
 from danswer.llm.interfaces import LLM
 from danswer.search.enums import QueryFlow
@@ -23,9 +24,32 @@ from danswer.utils.threadpool_concurrency import FunctionCall
 from danswer.utils.threadpool_concurrency import run_functions_in_parallel
 from danswer.utils.timing import log_function_time
 from shared_configs.configs import ENABLE_RERANKING_REAL_TIME_FLOW
+from shared_configs.configs import RERANK_ENABLED
 
 
 logger = setup_logger()
+
+
+def _resolve_skip_rerank(
+    explicit_skip_rerank: bool | None,
+    persona: Persona | None,
+) -> bool:
+    """Single source of truth for whether to skip cross-encoder reranking,
+    used by both the chat and Slack flows.
+
+    Reranking runs only when the global master switch (RERANK_ENABLED — i.e. a
+    GPU-backed model server is deployed) AND the per-assistant opt-in
+    (Persona.rerank_enabled) are both on. If a caller set skip_rerank explicitly
+    we honor it. With RERANK_ENABLED off (the local / GPU-free default)
+    reranking never runs regardless of the per-assistant flag, so no GPU is
+    required. The legacy ENABLE_RERANKING_REAL_TIME_FLOW env flag is retained
+    only as a fallback for callers that haven't adopted the per-assistant model.
+    """
+    if explicit_skip_rerank is not None:
+        return explicit_skip_rerank
+    persona_opts_in = bool(persona and persona.rerank_enabled)
+    rerank = (RERANK_ENABLED and persona_opts_in) or ENABLE_RERANKING_REAL_TIME_FLOW
+    return not rerank
 
 
 @log_function_time(print_only=True)
@@ -168,9 +192,7 @@ def retrieval_preprocessing(
             )
         llm_chunk_filter = False
 
-    skip_rerank = search_request.skip_rerank
-    if skip_rerank is None:
-        skip_rerank = not ENABLE_RERANKING_REAL_TIME_FLOW
+    skip_rerank = _resolve_skip_rerank(search_request.skip_rerank, persona)
 
     # Decays at 1 / (1 + (multiplier * num years))
     if persona and persona.recency_bias == RecencyBiasSetting.NO_DECAY:

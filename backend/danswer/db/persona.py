@@ -74,6 +74,7 @@ def create_update_persona(
             llm_relevance_filter=create_persona_request.llm_relevance_filter,
             llm_filter_extraction=create_persona_request.llm_filter_extraction,
             recency_bias=create_persona_request.recency_bias,
+            rerank_enabled=create_persona_request.rerank_enabled,
             prompt_ids=create_persona_request.prompt_ids,
             tool_ids=create_persona_request.tool_ids,
             document_set_ids=create_persona_request.document_set_ids,
@@ -342,6 +343,7 @@ def upsert_persona(
     starter_messages: list[StarterMessage] | None,
     is_public: bool,
     db_session: Session,
+    rerank_enabled: bool = False,
     prompt_ids: list[int] | None = None,
     document_set_ids: list[int] | None = None,
     tool_ids: list[int] | None = None,
@@ -393,6 +395,7 @@ def upsert_persona(
         persona.llm_relevance_filter = llm_relevance_filter
         persona.llm_filter_extraction = llm_filter_extraction
         persona.recency_bias = recency_bias
+        persona.rerank_enabled = rerank_enabled
         persona.default_persona = default_persona
         persona.llm_model_provider_override = llm_model_provider_override
         persona.llm_model_version_override = llm_model_version_override
@@ -424,6 +427,7 @@ def upsert_persona(
             llm_relevance_filter=llm_relevance_filter,
             llm_filter_extraction=llm_filter_extraction,
             recency_bias=recency_bias,
+            rerank_enabled=rerank_enabled,
             default_persona=default_persona,
             prompts=prompts or [],
             document_sets=document_sets or [],
