@@ -64,6 +64,15 @@ def identify_connector_class(
         DocumentSource.SLACK: {
             InputType.LOAD_STATE: SlackLoadConnector,
             InputType.POLL: SlackPollConnector,
+            # Slack is the only dict-mapped source, so unlike single-class
+            # connectors it needs an explicit PRUNE entry — without it the
+            # prune task fails with "Connector not found for source=SLACK" on
+            # every run. Use the POLL connector (NOT SlackLoadConnector, which
+            # requires an `export_path_str` and reads a Slack export file —
+            # incompatible with an API connector's config). For pruning,
+            # extract_ids_from_runnable_connector calls poll_source(epoch, now)
+            # to enumerate every current message id (no cheaper Slack listing).
+            InputType.PRUNE: SlackPollConnector,
         },
         DocumentSource.GITHUB: GithubConnector,
         DocumentSource.GITHUB_FILES: GithubFilesConnector,
