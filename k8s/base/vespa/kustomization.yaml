@@ -1,0 +1,24 @@
+# Vespa search-index cluster — grouped into its own kustomization because it
+# is a distinct stateful subsystem with a lifecycle unlike the rest of base:
+#   - the image version is PINNED and must never float (:latest took prod
+#     down once — see AGENTS.md "Critical facts §10");
+#   - upgrades must step minor versions within Vespa's allowed hop AND roll
+#     the StatefulSets in a specific order. That ordering can't live in
+#     declarative manifests — it's in k8s/scripts/vespa-upgrade.sh.
+#
+# Each StatefulSet uses a PER-ROLE logical image name (vespa-configserver,
+# vespa-admin, vespa-content, vespa-feed, vespa-query) rather than one shared
+# `vespa` name. They all resolve to vespaengine/vespa at the same pinned tag
+# via the overlay `images:` block, but the per-role split is what lets the
+# upgrade script move one role's version at a time.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - vespa-config.yaml
+  - vespa-internal-service.yaml
+  - vespa-configserver.yaml
+  - vespa-admin.yaml
+  - vespa-content.yaml
+  - vespa-feed.yaml
+  - vespa-query.yaml

@@ -1,0 +1,30 @@
+# KEDA operator install — cluster-scoped infrastructure (CRDs + RBAC +
+# the operator/metrics-apiserver Deployments). Installed ONCE per cluster,
+# independent of the danswer overlays — this is NOT a kustomize Component
+# pulled into prod/local; apply it on its own.
+#
+# No Helm (per repo preference). We just reference KEDA's official release
+# bundle, PINNED to an exact version. GitHub release assets are immutable,
+# so the URL is effectively a content pin — never use a moving ref
+# (same lesson as the Vespa :latest incident; see AGENTS.md §10).
+#
+# KEDA's bundle creates and installs into its OWN namespace `keda`
+# (the resources carry `namespace: keda` internally) — do NOT add a
+# `namespace:` here, that would try to re-namespace the cluster-scoped
+# CRDs and break the install.
+#
+# Install / upgrade:
+#   kubectl apply --server-side -k k8s/optional/keda
+#   # --server-side: KEDA's CRDs are large and exceed the client-side
+#   # last-applied-configuration annotation size limit.
+#
+# Verify:
+#   kubectl get pods -n keda
+#   kubectl get crd | grep keda.sh    # scaledobjects, triggerauthentications, ...
+#
+# To bump KEDA: change the version in the URL below, re-apply --server-side.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - https://github.com/kedacore/keda/releases/download/v2.14.0/keda-2.14.0.yaml

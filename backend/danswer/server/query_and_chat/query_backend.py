@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 from fastapi import Depends
 from fastapi import HTTPException
+from fastapi import Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -23,6 +24,9 @@ from danswer.search.preprocessing.danswer_helper import recommend_search_flow
 from danswer.search.utils import chunks_or_sections_to_search_docs
 from danswer.secondary_llm_flows.query_validation import get_query_answerability
 from danswer.secondary_llm_flows.query_validation import stream_query_answerability
+from danswer.server.middleware.request_rate_limit import (
+    check_message_request_rate_limit,
+)
 from danswer.server.query_and_chat.models import AdminSearchRequest
 from danswer.server.query_and_chat.models import AdminSearchResponse
 from danswer.server.query_and_chat.models import HelperResponse
@@ -89,6 +93,9 @@ def get_tags(
     # If this is empty or None, then tags for all sources are considered
     sources: list[DocumentSource] | None = None,
     allow_prefix: bool = True,  # This is currently the only option
+    # Optional cap on tags returned. Default None preserves the existing
+    # unbounded behavior; a client can pass a limit to bound the response.
+    limit: int | None = None,
     _: User = Depends(current_user),
     db_session: Session = Depends(get_session),
 ) -> TagResponse:
@@ -98,6 +105,7 @@ def get_tags(
     db_tags = get_tags_by_value_prefix_for_source_types(
         tag_value_prefix=match_pattern,
         sources=sources,
+        limit=limit,
         db_session=db_session,
     )
     server_tags = [
@@ -150,7 +158,11 @@ def stream_query_validation(
 @basic_router.post("/stream-answer-with-quote")
 def get_answer_with_quote(
     query_request: DirectQARequest,
+    request: Request,
     user: User = Depends(current_user),
+    # Mirrors /chat/send-message: request-rate cap first (cheap when
+    # off), token-budget check second.
+    _rate_limit: None = Depends(check_message_request_rate_limit),
     _: None = Depends(check_token_rate_limits),
 ) -> StreamingResponse:
     query = query_request.messages[0].message

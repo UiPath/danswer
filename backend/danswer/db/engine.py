@@ -16,6 +16,8 @@ from sqlalchemy.orm import sessionmaker
 from danswer.configs.app_configs import POSTGRES_DB
 from danswer.configs.app_configs import POSTGRES_HOST
 from danswer.configs.app_configs import POSTGRES_PASSWORD
+from danswer.configs.app_configs import POSTGRES_POOL_OVERFLOW
+from danswer.configs.app_configs import POSTGRES_POOL_SIZE
 from danswer.configs.app_configs import POSTGRES_PORT
 from danswer.configs.app_configs import POSTGRES_USER
 from danswer.utils.logger import setup_logger
@@ -69,8 +71,8 @@ def get_sqlalchemy_engine() -> Engine:
 
         _SYNC_ENGINE = create_engine(
             connection_string,
-            pool_size=40,
-            max_overflow=10,
+            pool_size=POSTGRES_POOL_SIZE,
+            max_overflow=POSTGRES_POOL_OVERFLOW,
             pool_pre_ping=True,
             connect_args=keepalive_kwargs,
         )
@@ -82,7 +84,9 @@ def get_sqlalchemy_async_engine() -> AsyncEngine:
     if _ASYNC_ENGINE is None:
         connection_string = build_connection_string()
         _ASYNC_ENGINE = create_async_engine(
-            connection_string, pool_size=40, max_overflow=10
+            connection_string,
+            pool_size=POSTGRES_POOL_SIZE,
+            max_overflow=POSTGRES_POOL_OVERFLOW,
         )
     return _ASYNC_ENGINE
 

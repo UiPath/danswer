@@ -102,8 +102,10 @@ def delete_lobj_by_name(
         logger.info(f"no file with name {lobj_name} found")
         return
 
-    pg_conn = get_pg_conn_from_session(db_session)
-    pg_conn.lobject(pgfilestore.lobj_oid).unlink()
+    # Only unlink a Postgres large object; object-store rows have no lobj.
+    if pgfilestore.lobj_oid is not None:
+        pg_conn = get_pg_conn_from_session(db_session)
+        pg_conn.lobject(pgfilestore.lobj_oid).unlink()
 
     delete_pgfilestore_by_file_name(lobj_name, db_session)
     db_session.commit()
@@ -114,25 +116,35 @@ def upsert_pgfilestore(
     display_name: str | None,
     file_origin: FileOrigin,
     file_type: str,
-    lobj_oid: int,
     db_session: Session,
+    lobj_oid: int | None = None,
+    object_key: str | None = None,
     commit: bool = False,
     file_metadata: dict | None = None,
 ) -> PGFileStore:
+    """Upsert a file_store metadata row. The bytes live in EITHER a Postgres
+    large object (``lobj_oid``) or an object-storage blob (``object_key``);
+    pass exactly one. Both backends share this metadata row."""
     pgfilestore = db_session.query(PGFileStore).filter_by(file_name=file_name).first()
 
     if pgfilestore:
-        try:
-            # This should not happen in normal execution
-            delete_lobj_by_id(lobj_oid=pgfilestore.lobj_oid, db_session=db_session)
-        except Exception:
-            # If the delete fails as well, the large object doesn't exist anyway and even if it
-            # fails to delete, it's not too terrible as most files sizes are insignificant
-            logger.error(
-                f"Failed to delete large object with oid {pgfilestore.lobj_oid}"
-            )
+        # Clean up the previous backing bytes only if it was a Postgres lobj
+        # (object-store blobs are managed by the AzureBlobFileStore itself).
+        if pgfilestore.lobj_oid is not None:
+            try:
+                delete_lobj_by_id(lobj_oid=pgfilestore.lobj_oid, db_session=db_session)
+            except Exception:
+                # Best-effort — if the lobj is already gone that's fine.
+                logger.error(
+                    f"Failed to delete large object with oid {pgfilestore.lobj_oid}"
+                )
 
         pgfilestore.lobj_oid = lobj_oid
+        pgfilestore.object_key = object_key
+        pgfilestore.display_name = display_name or file_name
+        pgfilestore.file_origin = file_origin
+        pgfilestore.file_type = file_type
+        pgfilestore.file_metadata = file_metadata
     else:
         pgfilestore = PGFileStore(
             file_name=file_name,
@@ -141,6 +153,7 @@ def upsert_pgfilestore(
             file_type=file_type,
             file_metadata=file_metadata,
             lobj_oid=lobj_oid,
+            object_key=object_key,
         )
         db_session.add(pgfilestore)
 

@@ -45,6 +45,29 @@ def get_documents_for_connector_credential_pair(
     return db_session.scalars(stmt).all()
 
 
+def get_document_ids_for_connector_credential_pair(
+    db_session: Session, connector_id: int, credential_id: int
+) -> list[str]:
+    """Same document set as get_documents_for_connector_credential_pair, but
+    selects ONLY the id column.
+
+    Callers that just need the set of indexed document ids (e.g. the prune task,
+    which diffs them against the connector's current docs) were materializing
+    full DbDocument ORM rows for the connector's ENTIRE corpus just to read
+    `.id` — hundreds of MB on large connectors. Same WHERE + DISTINCT, so the
+    returned id set is identical."""
+    initial_doc_ids_stmt = select(DocumentByConnectorCredentialPair.id).where(
+        and_(
+            DocumentByConnectorCredentialPair.connector_id == connector_id,
+            DocumentByConnectorCredentialPair.credential_id == credential_id,
+        )
+    )
+    stmt = (
+        select(DbDocument.id).where(DbDocument.id.in_(initial_doc_ids_stmt)).distinct()
+    )
+    return list(db_session.scalars(stmt).all())
+
+
 def get_documents_by_ids(
     document_ids: list[str],
     db_session: Session,
@@ -223,14 +246,28 @@ def upsert_document_by_connector_credential_pair(
 def update_docs_updated_at(
     ids_to_new_updated_at: dict[str, datetime],
     db_session: Session,
+    ids_to_new_content_hash: dict[str, str] | None = None,
 ) -> None:
-    doc_ids = list(ids_to_new_updated_at.keys())
+    """Record post-successful-index state on the document rows.
+
+    `ids_to_new_content_hash` (optional) stores the sha256 of the indexed
+    content so a later run can skip re-indexing unchanged docs. Default None
+    keeps the original updated-at-only behavior for any other caller.
+    """
+    ids_to_new_content_hash = ids_to_new_content_hash or {}
+    doc_ids = list(set(ids_to_new_updated_at) | set(ids_to_new_content_hash))
+    if not doc_ids:
+        return
+
     documents_to_update = (
         db_session.query(DbDocument).filter(DbDocument.id.in_(doc_ids)).all()
     )
 
     for document in documents_to_update:
-        document.doc_updated_at = ids_to_new_updated_at[document.id]
+        if document.id in ids_to_new_updated_at:
+            document.doc_updated_at = ids_to_new_updated_at[document.id]
+        if document.id in ids_to_new_content_hash:
+            document.indexed_content_hash = ids_to_new_content_hash[document.id]
 
     db_session.commit()
 

@@ -1,0 +1,96 @@
+# Opt-in compose overlay that simulates the production
+# Dask-Distributed indexing topology locally.
+#
+# Why use this:
+#   - Reproduce a production-mode bug without going to K8s.
+#   - Watch the Dask scheduler dashboard at http://localhost:8787
+#     while triggering re-indexes from the admin UI.
+#   - Verify that scaling `dask-worker` replicas actually parallelizes
+#     indexing across pods.
+#
+# Why NOT use this for daily dev work:
+#   - The default docker-compose.dev.yml already runs `update.py` in
+#     a single container's LocalCluster — fast, simple, all you need
+#     for connector-code work.
+#
+# Usage:
+#   docker compose \
+#     -f deployment/docker_compose/docker-compose.dev.yml \
+#     -f deployment/docker_compose/docker-compose.dask-distributed.yml \
+#     up
+#
+#   # scale workers up/down at any time:
+#   docker compose ... up -d --scale dask-worker=5
+
+services:
+  dask-scheduler:
+    image: danswer/danswer-backend:latest
+    build:
+      context: ../../backend
+      dockerfile: Dockerfile
+    command:
+      - dask
+      - scheduler
+      - --host=0.0.0.0
+      - --port=8786
+      - --dashboard-address=:8787
+    ports:
+      - "8786:8786"   # scheduler RPC — Client connects here
+      - "8787:8787"   # web dashboard — visit http://localhost:8787
+    restart: always
+
+  dask-worker:
+    image: danswer/danswer-backend:latest
+    build:
+      context: ../../backend
+      dockerfile: Dockerfile
+    # `--nworkers 1 --nthreads 1` per pod, matching the K8s
+    # manifest. Scale this service's `replicas` (or `--scale` flag)
+    # to add concurrent indexing capacity.
+    command:
+      - dask
+      - worker
+      - tcp://dask-scheduler:8786
+      - --nworkers=1
+      - --nthreads=1
+      - --memory-limit=4GB
+    depends_on:
+      - dask-scheduler
+      - relational_db
+      - index
+      - indexing_model_server
+    deploy:
+      replicas: 2
+    restart: always
+    environment:
+      # PYTHONPATH so the worker can import danswer.* when
+      # deserializing the run_indexing_entrypoint callable.
+      - PYTHONPATH=/app
+      - CURRENT_PROCESS_IS_AN_INDEXING_JOB=true
+      # Inherit everything the existing `background` service uses so
+      # connector credentials, model-server endpoints, Vespa hosts,
+      # GenAI keys, etc. all work identically inside dask-worker.
+      - POSTGRES_HOST=relational_db
+      - VESPA_HOST=index
+      - VESPA_PORT=8081
+      - INDEXING_MODEL_SERVER_HOST=indexing_model_server
+      - INDEXING_MODEL_SERVER_PORT=9000
+      - MODEL_SERVER_HOST=inference_model_server
+      - MODEL_SERVER_PORT=9000
+      - GEN_AI_MODEL_PROVIDER=${GEN_AI_MODEL_PROVIDER:-}
+      - GEN_AI_API_KEY=${GEN_AI_API_KEY:-}
+      - GEN_AI_API_ENDPOINT=${GEN_AI_API_ENDPOINT:-}
+      - GEN_AI_IDENTITY_ENDPOINT=${GEN_AI_IDENTITY_ENDPOINT:-}
+      - GEN_AI_CLIENT_ID=${GEN_AI_CLIENT_ID:-}
+      - GEN_AI_CLIENT_SECRET=${GEN_AI_CLIENT_SECRET:-}
+
+  # Override the existing `background` service to point its
+  # update.py loop at the remote scheduler instead of an in-process
+  # LocalCluster. Everything else about the service stays the same
+  # (supervisord, celery beat, celery worker still run in this
+  # container — only the indexing dispatch path is rerouted).
+  background:
+    environment:
+      - DASK_SCHEDULER_ADDRESS=tcp://dask-scheduler:8786
+    depends_on:
+      - dask-scheduler

@@ -131,14 +131,20 @@ class CCPairFullInfo(BaseModel):
     num_docs_indexed: int
     connector: ConnectorSnapshot
     credential: CredentialSnapshot
-    index_attempts: list[IndexAttemptSnapshot]
+    # The full index-attempt history is paginated via a dedicated endpoint
+    # (GET /admin/cc-pair/{id}/index-attempts) — embedding it here loaded a
+    # busy cc-pair's entire history (thousands of rows w/ full tracebacks) on
+    # every page view. The detail page only needs the latest attempt + a count.
+    latest_index_attempt: IndexAttemptSnapshot | None
+    num_index_attempts: int
     latest_deletion_attempt: DeletionAttemptSnapshot | None
 
     @classmethod
     def from_models(
         cls,
         cc_pair_model: ConnectorCredentialPair,
-        index_attempt_models: list[IndexAttempt],
+        latest_index_attempt: IndexAttempt | None,
+        num_index_attempts: int,
         latest_deletion_attempt: DeletionAttemptSnapshot | None,
         num_docs_indexed: int,  # not ideal, but this must be computed separately
     ) -> "CCPairFullInfo":
@@ -152,11 +158,38 @@ class CCPairFullInfo(BaseModel):
             credential=CredentialSnapshot.from_credential_db_model(
                 cc_pair_model.credential
             ),
-            index_attempts=[
-                IndexAttemptSnapshot.from_index_attempt_db_model(index_attempt_model)
-                for index_attempt_model in index_attempt_models
-            ],
+            latest_index_attempt=(
+                IndexAttemptSnapshot.from_index_attempt_db_model(latest_index_attempt)
+                if latest_index_attempt is not None
+                else None
+            ),
+            num_index_attempts=num_index_attempts,
             latest_deletion_attempt=latest_deletion_attempt,
+        )
+
+
+class PaginatedIndexAttempts(BaseModel):
+    index_attempts: list[IndexAttemptSnapshot]
+    page: int
+    total_pages: int
+    total_count: int
+
+    @classmethod
+    def from_models(
+        cls,
+        index_attempt_models: list[IndexAttempt],
+        page: int,
+        total_pages: int,
+        total_count: int,
+    ) -> "PaginatedIndexAttempts":
+        return cls(
+            index_attempts=[
+                IndexAttemptSnapshot.from_index_attempt_db_model(m)
+                for m in index_attempt_models
+            ],
+            page=page,
+            total_pages=total_pages,
+            total_count=total_count,
         )
 
 

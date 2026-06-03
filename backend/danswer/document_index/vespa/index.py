@@ -248,16 +248,33 @@ def _delete_vespa_doc_chunks(
     doc_chunk_ids = _get_vespa_chunk_ids_by_document_id(
         document_id=document_id, index_name=index_name
     )
+    if not doc_chunk_ids:
+        return
 
-    for chunk_id in doc_chunk_ids:
-        try:
-            res = http_client.delete(
-                f"{DOCUMENT_ID_ENDPOINT.format(index_name=index_name)}/{chunk_id}"
-            )
-            res.raise_for_status()
-        except httpx.HTTPStatusError as e:
-            logger.error(f"Failed to delete chunk, details: {e.response.text}")
-            raise
+    def _delete_chunk(chunk_id: str) -> None:
+        res = http_client.delete(
+            f"{DOCUMENT_ID_ENDPOINT.format(index_name=index_name)}/{chunk_id}"
+        )
+        res.raise_for_status()
+
+    # Delete a document's chunks concurrently rather than one blocking HTTP
+    # round-trip at a time — sequential per-chunk DELETEs were a large part of
+    # the per-document re-index cost for multi-chunk docs. Bounded local pool
+    # (capped low so that, combined with the per-document executor in
+    # _delete_vespa_docs, total in-flight requests stay reasonable); a fresh
+    # ThreadPoolExecutor here can't deadlock against that outer pool since its
+    # threads are independent. httpx.Client is safe for concurrent use. The
+    # @retry on this function still covers transient failures.
+    with concurrent.futures.ThreadPoolExecutor(
+        max_workers=min(len(doc_chunk_ids), 8)
+    ) as executor:
+        futures = [executor.submit(_delete_chunk, cid) for cid in doc_chunk_ids]
+        for future in concurrent.futures.as_completed(futures):
+            try:
+                future.result()
+            except httpx.HTTPStatusError as e:
+                logger.error(f"Failed to delete chunk, details: {e.response.text}")
+                raise
 
 
 def _delete_vespa_docs(

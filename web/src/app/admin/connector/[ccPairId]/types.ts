@@ -11,6 +11,16 @@ export interface CCPairFullInfo {
   num_docs_indexed: number;
   connector: Connector<any>;
   credential: Credential<any>;
-  index_attempts: IndexAttemptSnapshot[];
+  // Full attempt history is fetched (paginated) separately; the detail page
+  // only needs the most-recent attempt + a total count.
+  latest_index_attempt: IndexAttemptSnapshot | null;
+  num_index_attempts: number;
   latest_deletion_attempt: DeletionAttemptSnapshot | null;
+}
+
+export interface PaginatedIndexAttempts {
+  index_attempts: IndexAttemptSnapshot[];
+  page: number;
+  total_pages: number;
+  total_count: number;
 }

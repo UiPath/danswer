@@ -18,6 +18,10 @@ class Settings(BaseModel):
     # stored value wins, so flip it in Admin → Settings on existing deployments.
     default_page: PageType = PageType.CHAT
     maximum_chat_retention_days: int | None = None
+    # Env-driven (CHAT_FILE_MAX_SIZE_MB), injected in load_settings — surfaced
+    # here so the chat UI pre-checks against the SAME value the backend enforces
+    # instead of a hardcoded duplicate.
+    chat_file_max_size_mb: int = 25
 
     def check_validity(self) -> None:
         chat_page_enabled = self.chat_page_enabled

@@ -12,8 +12,12 @@ export async function createFolder(folderName: string): Promise<number> {
   if (!response.ok) {
     throw new Error("Failed to create folder");
   }
-  const data = await response.json();
-  return data.folder_id;
+  // The backend endpoint (POST /folder) returns the new folder id as a
+  // bare integer, not an object — so parse it directly. (`data.folder_id`
+  // was always undefined; harmless until the create handler started using
+  // the returned id for optimistic insertion.)
+  const folderId = await response.json();
+  return folderId;
 }
 
 // Function to add a chat session to a folder

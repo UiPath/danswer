@@ -1,3 +1,4 @@
+import json
 import os
 import uuid
 from typing import cast
@@ -15,6 +16,8 @@ from danswer.auth.api_key import validate_api_key
 from danswer.auth.users import current_admin_user
 from danswer.auth.users import current_user
 from danswer.background.task_utils import name_cc_cleanup_task
+from danswer.configs.app_configs import CC_PAIR_INFO_CACHE_ENABLED
+from danswer.configs.app_configs import CC_PAIR_INFO_CACHE_TTL_SECONDS
 from danswer.configs.app_configs import ENABLED_CONNECTOR_TYPES
 from danswer.configs.constants import DocumentSource
 from danswer.configs.constants import FileOrigin
@@ -71,6 +74,8 @@ from danswer.db.models import User
 from danswer.db.tasks import get_latest_tasks_by_names
 from danswer.dynamic_configs.interface import ConfigNotFoundError
 from danswer.file_store.file_store import get_default_file_store
+from danswer.redis.redis_pool import DANSWER_REDIS_KEY_PREFIX
+from danswer.redis.redis_pool import get_redis_client
 from danswer.server.documents.models import AuthStatus
 from danswer.server.documents.models import AuthUrl
 from danswer.server.documents.models import ConnectorBase
@@ -90,10 +95,13 @@ from danswer.server.documents.models import ObjectCreationIdResponse
 from danswer.server.documents.models import RunConnectorRequest
 from danswer.server.documents.models import UpdateIndexAttemptPriorityRequest
 from danswer.server.models import StatusResponse
+from danswer.utils.logger import setup_logger
 
 _GMAIL_CREDENTIAL_ID_COOKIE_NAME = "gmail_credential_id"
 _GOOGLE_DRIVE_CREDENTIAL_ID_COOKIE_NAME = "google_drive_credential_id"
 
+
+logger = setup_logger()
 
 router = APIRouter(prefix="/manage", dependencies=[Depends(validate_api_key)])
 
@@ -670,6 +678,9 @@ def connector_run_once(
             ),
             only_current=True,
             disinclude_finished=True,
+            # Used only for truthiness ("any unfinished attempt?"); one row is
+            # enough — don't materialize the full set just to test existence.
+            limit=1,
             db_session=db_session,
         )
     ]
@@ -869,12 +880,16 @@ class BasicCCPairInfo(BaseModel):
     source: DocumentSource
 
 
-@router.get("/indexing-status")
-def get_basic_connector_indexing_status(
-    _: User = Depends(current_user),
-    db_session: Session = Depends(get_session),
-) -> list[BasicCCPairInfo]:
-    cc_pairs = get_connector_credential_pairs(db_session)
+_CC_PAIR_INFO_CACHE_KEY = DANSWER_REDIS_KEY_PREFIX + "cc_pair_basic_info"
+
+
+def _build_basic_cc_pair_info(db_session: Session) -> list[BasicCCPairInfo]:
+    # eager_load_connector: the return comprehension reads
+    # `cc_pair.connector.source` for every cc-pair. Without eager loading
+    # that's an N+1 (one query per cc-pair) — at ~hundreds of cc-pairs
+    # against a remote Postgres that was seconds; eager loading collapses
+    # it to a couple of queries.
+    cc_pairs = get_connector_credential_pairs(db_session, eager_load_connector=True)
     cc_pair_identifiers = [
         ConnectorCredentialPairIdentifier(
             connector_id=cc_pair.connector_id, credential_id=cc_pair.credential_id
@@ -901,3 +916,43 @@ def get_basic_connector_indexing_status(
         for cc_pair in cc_pairs
         if cc_pair.connector.source != DocumentSource.INGESTION_API
     ]
+
+
+@router.get("/indexing-status")
+def get_basic_connector_indexing_status(
+    _: User = Depends(current_user),
+    db_session: Session = Depends(get_session),
+) -> list[BasicCCPairInfo]:
+    # This is the chat page's slowest fan-out call: the per-cc-pair
+    # document-count aggregation in _build_basic_cc_pair_info measured
+    # ~300ms on the live DB and runs on every chat page load. The result
+    # is identical for all users and changes slowly (only when connectors
+    # are added/removed or an indexing run completes), so we front it with
+    # a short-TTL global Redis cache. Fail-open: any Redis error falls
+    # straight through to a direct DB build. Default OFF
+    # (CC_PAIR_INFO_CACHE_ENABLED).
+    if not CC_PAIR_INFO_CACHE_ENABLED:
+        return _build_basic_cc_pair_info(db_session)
+
+    try:
+        # decode_responses=False on the pool → bytes | None. The cast just
+        # collapses redis-py's sync/async overload union for mypy.
+        raw = cast("bytes | None", get_redis_client().get(_CC_PAIR_INFO_CACHE_KEY))
+    except Exception as e:
+        logger.warning("cc-pair-info cache GET failed, using DB: %s", e)
+        raw = None
+    if raw is not None:
+        try:
+            return [BasicCCPairInfo(**d) for d in json.loads(raw)]
+        except Exception as e:
+            logger.warning("cc-pair-info cache entry corrupt, rebuilding: %s", e)
+
+    result = _build_basic_cc_pair_info(db_session)
+    try:
+        payload = json.dumps([json.loads(item.json()) for item in result])
+        get_redis_client().set(
+            _CC_PAIR_INFO_CACHE_KEY, payload, ex=CC_PAIR_INFO_CACHE_TTL_SECONDS
+        )
+    except Exception as e:
+        logger.warning("cc-pair-info cache SET failed (DB result still served): %s", e)
+    return result

@@ -95,6 +95,14 @@ export function ChatSessionDisplay({
         scroll={false}
         draggable="true"
         onDragStart={(event) => {
+          // This row is a <Link> (an <a href>), so the browser treats the
+          // drag as a *link* drag and auto-attaches the URL (text/uri-list).
+          // That's what makes some browsers (Arc/Edge/Safari) offer "open in
+          // split view" when you drag toward the edge. Clear that default
+          // link payload and mark this as a move so only our folder DnD
+          // applies.
+          event.dataTransfer.clearData();
+          event.dataTransfer.effectAllowed = "move";
           event.dataTransfer.setData(
             CHAT_SESSION_ID_KEY,
             chatSession.id.toString()
@@ -103,6 +111,36 @@ export function ChatSessionDisplay({
             FOLDER_ID_KEY,
             chatSession.folder_id?.toString() || ""
           );
+
+          // Replace the browser's default drag image (a translucent clone
+          // of this full-width row, which trails awkwardly across the
+          // sidebar) with a compact chip showing the chat name. Built
+          // off-screen, snapshotted by setDragImage, then removed.
+          const chip = document.createElement("div");
+          chip.textContent = chatName || `Chat ${chatSession.id}`;
+          Object.assign(chip.style, {
+            position: "fixed",
+            top: "-1000px",
+            left: "-1000px",
+            maxWidth: "200px",
+            overflow: "hidden",
+            whiteSpace: "nowrap",
+            textOverflow: "ellipsis",
+            padding: "4px 10px",
+            borderRadius: "6px",
+            fontSize: "12px",
+            fontWeight: "500",
+            color: "#fff",
+            background: "rgba(30, 30, 30, 0.92)",
+            boxShadow: "0 2px 6px rgba(0, 0, 0, 0.25)",
+            pointerEvents: "none",
+          });
+          document.body.appendChild(chip);
+          event.dataTransfer.setDragImage(chip, 12, 12);
+          // Remove once the browser has snapshotted it for the drag.
+          setTimeout(() => {
+            if (chip.parentNode) chip.parentNode.removeChild(chip);
+          }, 0);
         }}
       >
         <BasicSelectable fullWidth selected={isSelected}>

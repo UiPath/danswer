@@ -91,20 +91,39 @@ def upsert_documents_in_db(
 def get_doc_ids_to_update(
     documents: list[Document], db_docs: list[DBDocument]
 ) -> list[Document]:
-    """Figures out which documents actually need to be updated. If a document is already present
-    and the `updated_at` hasn't changed, we shouldn't need to do anything with it."""
-    id_update_time_map = {
-        doc.id: doc.doc_updated_at for doc in db_docs if doc.doc_updated_at
-    }
+    """Figures out which documents actually need to be (re)indexed.
+
+    Two skip conditions, checked per already-present document:
+
+    1. Content-hash match: if the stored `indexed_content_hash` equals the
+       document's current content hash, the indexed representation is identical
+       and we skip — even if `doc_updated_at` advanced. This is the important
+       one for sources that bump their modified-timestamp without changing
+       content (e.g. Salesforce LastModifiedDate churn re-pulling the whole
+       corpus every poll). Benefits ALL connectors, not just Salesforce.
+    2. Timestamp fallback: for rows with no stored hash yet (indexed before
+       this existed), keep the original behavior — skip if `doc_updated_at`
+       isn't newer than what's stored.
+    """
+    id_to_db_doc = {doc.id: doc for doc in db_docs}
 
     updatable_docs: list[Document] = []
     for doc in documents:
-        if (
-            doc.id in id_update_time_map
-            and doc.doc_updated_at
-            and doc.doc_updated_at <= id_update_time_map[doc.id]
-        ):
-            continue
+        db_doc = id_to_db_doc.get(doc.id)
+        if db_doc is not None:
+            # (1) content unchanged — skip regardless of timestamp
+            if (
+                db_doc.indexed_content_hash is not None
+                and db_doc.indexed_content_hash == doc.get_content_hash()
+            ):
+                continue
+            # (2) fallback: no newer content per the source timestamp
+            if (
+                doc.doc_updated_at is not None
+                and db_doc.doc_updated_at is not None
+                and doc.doc_updated_at <= db_doc.doc_updated_at
+            ):
+                continue
         updatable_docs.append(doc)
 
     return updatable_docs
@@ -139,6 +158,19 @@ def index_doc_batch(
         else documents
     )
     updatable_ids = [doc.id for doc in updatable_docs]
+
+    # Visibility into the content-hash / timestamp skip: how many docs in this
+    # batch were unchanged and therefore skip the expensive embed + Vespa
+    # clear-and-rewrite. Aggregated across an attempt's batches this confirms,
+    # in prod logs, that a churny source (e.g. Salesforce LastModifiedDate)
+    # is no longer re-indexing unchanged records. Only logged when >0 to keep
+    # steady-state logs quiet.
+    num_skipped = len(documents) - len(updatable_docs)
+    if num_skipped:
+        logger.info(
+            f"Skipping {num_skipped}/{len(documents)} documents in batch "
+            "(unchanged since last successful index — no re-embed / re-index)."
+        )
 
     # Create records in the source of truth about these documents,
     # does not include doc_updated_at which is also used to indicate a successful update
@@ -203,15 +235,25 @@ def index_doc_batch(
             doc for doc in updatable_docs if doc.id in successful_doc_ids
         ]
 
-        # Update the time of latest version of the doc successfully indexed
+        # Record post-success state: the latest updated-at (skip docs that
+        # don't carry one) AND the content hash (for every successful doc, so a
+        # later run can skip re-indexing it if its content is unchanged). The
+        # hash is stored only here — after a confirmed Vespa write — so it
+        # always reflects what's actually in the index.
         ids_to_new_updated_at = {}
         for doc in successful_docs:
             if doc.doc_updated_at is None:
                 continue
             ids_to_new_updated_at[doc.id] = doc.doc_updated_at
 
+        ids_to_new_content_hash = {
+            doc.id: doc.get_content_hash() for doc in successful_docs
+        }
+
         update_docs_updated_at(
-            ids_to_new_updated_at=ids_to_new_updated_at, db_session=db_session
+            ids_to_new_updated_at=ids_to_new_updated_at,
+            ids_to_new_content_hash=ids_to_new_content_hash,
+            db_session=db_session,
         )
 
     return len([r for r in insertion_records if r.already_existed is False]), len(

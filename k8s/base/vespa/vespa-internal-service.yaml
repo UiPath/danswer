@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    name: vespa-internal
+  name: vespa-internal
+spec:
+  clusterIP: None
+  clusterIPs:
+  - None
+  # Peer discovery (VESPA_CONFIGSERVERS, stable pod DNS like
+  # vespa-content-0.vespa-internal...) MUST NOT be gated by pod readiness:
+  # nodes need to resolve each other to *become* ready, and the content/admin
+  # readiness probes added for rollout-gating would otherwise drop a slow or
+  # booting node from this headless service's DNS and disrupt the cluster.
+  # Publishing not-ready addresses decouples discovery from readiness.
+  publishNotReadyAddresses: true
+  selector:
+    name: vespa-internal
+  type: ClusterIP

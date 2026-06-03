@@ -1,0 +1,112 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-server-deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: api-server
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: api-server
+    spec:
+      containers:
+      - command:
+        - /bin/sh
+        - -c
+        - 'alembic upgrade heads &&
+
+          echo "Starting Danswer Api Server" &&
+
+          uvicorn danswer.main:app --host 0.0.0.0 --port 8080
+
+          '
+        env:
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              key: postgres_user
+              name: danswer-secrets
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: postgres_password
+              name: danswer-secrets
+        - name: OAUTH_CLIENT_ID
+          valueFrom:
+            secretKeyRef:
+              key: oauth_client_id
+              name: danswer-secrets
+        - name: OAUTH_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              key: oauth_client_secret
+              name: danswer-secrets
+        - name: USER_AUTH_SECRET
+          valueFrom:
+            secretKeyRef:
+              key: user_auth_secret
+              name: danswer-secrets
+        envFrom:
+        - configMapRef:
+            name: env-configmap
+        - secretRef:
+            name: danswer-secrets
+        image: danswer-backend
+        imagePullPolicy: IfNotPresent
+        name: api-server
+        ports:
+        - containerPort: 8080
+          protocol: TCP
+        # startupProbe: the container runs `alembic upgrade heads` BEFORE
+        # uvicorn, so /health isn't up until migrations finish. This gives
+        # migrations + boot up to ~5 min (30 × 10s) before readiness/
+        # liveness start counting. It also transitively gates on Postgres:
+        # no migrations → no HTTP → never passes startup → pod isn't Ready.
+        startupProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          periodSeconds: 10
+          failureThreshold: 30
+          timeoutSeconds: 5
+        # readinessProbe: gates the api-server Service so it never routes
+        # to a pod still booting. Checks the app's OWN /health — NOT Vespa
+        # or Redis (those are partial/optional deps; coupling the API's
+        # availability to them would amplify outages — see the Vespa
+        # incident). No liveness probe by design: an aggressive liveness on
+        # a slow-starting api-server could kill it mid-migration.
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        resources: {}
+        # No volumes: the file store (uploads) and dynamic config are
+        # Postgres-backed (or Azure Blob for files) — nothing reads
+        # /home/storage or /home/file_connector_storage (grep the code: zero
+        # references). The dynamic-pvc / file-connector-pvc claims still exist
+        # in persistent-volumes.yaml; they're just no longer mounted here.
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-server-service
+spec:
+  ports:
+  - name: api-server-port
+    port: 80
+    protocol: TCP
+    targetPort: 8080
+  selector:
+    app: api-server
+  type: ClusterIP

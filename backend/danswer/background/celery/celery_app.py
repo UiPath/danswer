@@ -14,7 +14,13 @@ from danswer.background.task_utils import build_celery_task_wrapper
 from danswer.background.task_utils import name_cc_cleanup_task
 from danswer.background.task_utils import name_cc_prune_task
 from danswer.background.task_utils import name_document_set_sync_task
+from danswer.configs.app_configs import CELERY_BROKER_REDIS_ENABLED
+from danswer.configs.app_configs import CELERY_REDIS_DB_NUMBER
 from danswer.configs.app_configs import JOB_TIMEOUT
+from danswer.configs.app_configs import REDIS_HOST
+from danswer.configs.app_configs import REDIS_PASSWORD
+from danswer.configs.app_configs import REDIS_PORT
+from danswer.configs.app_configs import REDIS_SSL
 from danswer.connectors.factory import instantiate_connector
 from danswer.connectors.models import InputType
 from danswer.db.connector_credential_pair import get_connector_credential_pair
@@ -22,7 +28,7 @@ from danswer.db.connector_credential_pair import get_connector_credential_pairs
 from danswer.db.connector_credential_pair import release_deletion_lock
 from danswer.db.connector_credential_pair import try_acquire_deletion_lock
 from danswer.db.deletion_attempt import check_deletion_attempt_is_allowed
-from danswer.db.document import get_documents_for_connector_credential_pair
+from danswer.db.document import get_document_ids_for_connector_credential_pair
 from danswer.db.document import prepare_to_modify_documents
 from danswer.db.document_set import delete_document_set
 from danswer.db.document_set import fetch_document_sets
@@ -41,10 +47,31 @@ from danswer.utils.logger import setup_logger
 
 logger = setup_logger()
 
-connection_string = build_connection_string(db_api=SYNC_DB_API)
-celery_broker_url = f"sqla+{connection_string}"
-celery_backend_url = f"db+{connection_string}"
+if CELERY_BROKER_REDIS_ENABLED:
+    # Redis broker + result backend. Removes Celery's queue traffic from
+    # Postgres (the default sqla+/db+ transport polls and writes the DB).
+    # A dedicated logical DB (CELERY_REDIS_DB_NUMBER) keeps Celery's keys
+    # off the cache/rate-limit DB. Task status is tracked in our own
+    # task_queue_jobs table, not this backend, so it's safe to relocate.
+    _redis_scheme = "rediss" if REDIS_SSL else "redis"
+    _redis_auth = f":{REDIS_PASSWORD}@" if REDIS_PASSWORD else ""
+    _redis_url = (
+        f"{_redis_scheme}://{_redis_auth}{REDIS_HOST}:{REDIS_PORT}"
+        f"/{CELERY_REDIS_DB_NUMBER}"
+    )
+    celery_broker_url = _redis_url
+    celery_backend_url = _redis_url
+else:
+    connection_string = build_connection_string(db_api=SYNC_DB_API)
+    celery_broker_url = f"sqla+{connection_string}"
+    celery_backend_url = f"db+{connection_string}"
 celery_app = Celery(__name__, broker=celery_broker_url, backend=celery_backend_url)
+# Retry the broker connection during worker startup instead of crashing if the
+# broker isn't reachable yet. Matters now that Redis can be the broker (a hard
+# dependency) — the worker may boot before Redis is ready. Also silences the
+# Celery 5.3 CPendingDeprecationWarning about this becoming the explicit
+# default in 6.0.
+celery_app.conf.broker_connection_retry_on_startup = True
 
 
 _SYNC_BATCH_SIZE = 100
@@ -171,14 +198,13 @@ def prune_documents_task(connector_id: int, credential_id: int) -> None:
                 runnable_connector
             )
 
-            all_indexed_document_ids = {
-                doc.id
-                for doc in get_documents_for_connector_credential_pair(
+            all_indexed_document_ids = set(
+                get_document_ids_for_connector_credential_pair(
                     db_session=db_session,
                     connector_id=connector_id,
                     credential_id=credential_id,
                 )
-            }
+            )
 
             doc_ids_to_remove = list(all_indexed_document_ids - all_connector_doc_ids)
 
@@ -248,7 +274,7 @@ def sync_document_set_task(document_set_id: int) -> None:
         try:
             cursor = None
             while True:
-                document_batch, cursor = fetch_documents_for_document_set_paginated(
+                document_id_batch, cursor = fetch_documents_for_document_set_paginated(
                     document_set_id=document_set_id,
                     db_session=db_session,
                     current_only=False,
@@ -256,7 +282,7 @@ def sync_document_set_task(document_set_id: int) -> None:
                     limit=_SYNC_BATCH_SIZE,
                 )
                 _sync_document_batch(
-                    document_ids=[document.id for document in document_batch],
+                    document_ids=list(document_id_batch),
                     db_session=db_session,
                 )
                 if cursor is None:

@@ -1,0 +1,36 @@
+# Vespa apply target for LOCAL dev — deliberately SEPARATE from the app
+# overlay (Vespa was removed from base/, so `kubectl apply -k
+# k8s/overlays/local` no longer touches it). Apply Vespa with:
+#
+#     kubectl apply -k k8s/overlays/local-vespa     # context: local cluster
+#
+# Vespa is resource-heavy; skip this on machines where you point at a remote
+# Vespa or don't need search locally.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base/vespa
+
+namespace: default
+
+# Pinned, same as prod — never :latest for Vespa (see prod-vespa overlay note).
+images:
+  - name: vespa-configserver
+    newName: vespaengine/vespa
+    newTag: "8.600.35"
+  - name: vespa-admin
+    newName: vespaengine/vespa
+    newTag: "8.600.35"
+  - name: vespa-content
+    newName: vespaengine/vespa
+    newTag: "8.600.35"
+  - name: vespa-feed
+    newName: vespaengine/vespa
+    newTag: "8.600.35"
+  - name: vespa-query
+    newName: vespaengine/vespa
+    newTag: "8.600.35"
+  - name: busybox
+    newName: busybox
+    newTag: "1.36.1"

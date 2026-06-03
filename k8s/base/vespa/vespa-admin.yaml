@@ -1,0 +1,53 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: vespa-admin
+spec:
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Retain
+    whenScaled: Retain
+  podManagementPolicy: OrderedReady
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vespa-admin
+      name: vespa-internal
+  serviceName: vespa-internal
+  template:
+    metadata:
+      labels:
+        app: vespa-admin
+        name: vespa-internal
+    spec:
+      containers:
+      - args:
+        - services
+        envFrom:
+        - configMapRef:
+            name: vespa-config
+        # Per-role logical image name — see vespa-configserver.yaml.
+        image: vespa-admin
+        imagePullPolicy: Always
+        name: vespa-admin
+        # Readiness on the metrics proxy's /state/v1/health (port 19092 —
+        # node-agnostic, same as content). Gates rollout; readiness-only (no
+        # liveness). See the content-node note re: publishNotReadyAddresses.
+        readinessProbe:
+          httpGet:
+            path: /state/v1/health
+            port: 19092
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 6
+        resources:
+          limits:
+            memory: 2G
+          requests:
+            memory: 1G
+        securityContext:
+          runAsUser: 1000
+  updateStrategy:
+    rollingUpdate:
+      partition: 0
+    type: RollingUpdate

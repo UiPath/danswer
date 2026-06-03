@@ -14,6 +14,7 @@ from danswer.db.models import User
 from danswer.db.models import User__UserGroup
 from danswer.db.models import UserGroup
 from danswer.db.models import UserGroup__ConnectorCredentialPair
+from danswer.db.persona_cache import invalidate_user_groups
 from danswer.server.documents.models import ConnectorCredentialPairIdentifier
 from ee.danswer.server.user_group.models import UserGroupCreate
 from ee.danswer.server.user_group.models import UserGroupUpdate
@@ -180,6 +181,10 @@ def insert_user_group(db_session: Session, user_group: UserGroupCreate) -> UserG
     )
 
     db_session.commit()
+    # New User__UserGroup rows for these users — bust their cached group lists
+    # so the next persona-list call sees the new group's persona grants.
+    for affected_user_id in user_group.user_ids:
+        invalidate_user_groups(affected_user_id)
     return db_user_group
 
 
@@ -221,9 +226,10 @@ def update_user_group(
     cc_pairs_updated = set([cc_pair.id for cc_pair in existing_cc_pairs]) != set(
         user_group.cc_pair_ids
     )
-    users_updated = set([user.id for user in db_user_group.users]) != set(
-        user_group.user_ids
-    )
+    # Snapshot existing members BEFORE the cleanup mutation, so we know
+    # which users to invalidate. The new member set is on the request.
+    existing_user_ids = {user.id for user in db_user_group.users}
+    users_updated = existing_user_ids != set(user_group.user_ids)
 
     if users_updated:
         _cleanup_user__user_group_relationships__no_commit(
@@ -249,6 +255,12 @@ def update_user_group(
         db_user_group.is_up_to_date = False
 
     db_session.commit()
+    if users_updated:
+        # Bust both removed (existing - new) and added (new - existing) users.
+        # Symmetric difference would be enough, but unioning both sides is
+        # cheap and avoids missing edge cases when membership reshuffles.
+        for affected_user_id in existing_user_ids | set(user_group.user_ids):
+            invalidate_user_groups(affected_user_id)
     return db_user_group
 
 
@@ -275,6 +287,11 @@ def prepare_user_group_for_deletion(db_session: Session, user_group_id: int) -> 
 
     _check_user_group_is_modifiable(db_user_group)
 
+    # Snapshot current members before cleanup so we can bust their caches
+    # after commit. The cleanup helper deletes the User__UserGroup rows,
+    # so reading after cleanup would give an empty set.
+    affected_user_ids = [user.id for user in db_user_group.users]
+
     _cleanup_user__user_group_relationships__no_commit(
         db_session=db_session, user_group_id=user_group_id
     )
@@ -288,6 +305,8 @@ def prepare_user_group_for_deletion(db_session: Session, user_group_id: int) -> 
     db_user_group.is_up_to_date = False
     db_user_group.is_up_for_deletion = True
     db_session.commit()
+    for affected_user_id in affected_user_ids:
+        invalidate_user_groups(affected_user_id)
 
 
 def _cleanup_user_group__cc_pair_relationships__no_commit(

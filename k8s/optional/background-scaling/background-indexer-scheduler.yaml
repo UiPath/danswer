@@ -1,0 +1,59 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: background-indexer-scheduler-deployment
+spec:
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: background-indexer-scheduler
+  template:
+    metadata:
+      labels:
+        app: background-indexer-scheduler
+    spec:
+      containers:
+      - name: indexer-scheduler
+        image: danswer-backend
+        imagePullPolicy: IfNotPresent
+        command:
+        - python
+        - danswer/background/update.py
+        env:
+        - name: DASK_SCHEDULER_ADDRESS
+          value: tcp://dask-scheduler-service:8786
+        - name: CURRENT_PROCESS_IS_AN_INDEXING_JOB
+          value: 'true'
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              key: postgres_user
+              name: danswer-secrets
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: postgres_password
+              name: danswer-secrets
+        envFrom:
+        - configMapRef:
+            name: env-configmap
+        - secretRef:
+            name: danswer-secrets
+        # No PVCs — the scheduler only polls Postgres + submits Dask futures;
+        # the file store / dynamic config are Postgres-backed (see README).
+        #
+        # Sized for the FIXED scheduler. The old ~7.5Gi/cycle spikes were a
+        # query bug, not real work: get_last_attempt() ran an unbounded
+        # ORDER BY (no LIMIT) once per cc-pair, materializing each cc-pair's
+        # FULL index_attempt history just to take the newest. Fixed with
+        # LIMIT 1 in db/index_attempt.py. Verified on the fixed image
+        # (vha-140): RSS sits FLAT at ~430Mi across update cycles, no spike.
+        # 512Mi request / 2Gi limit = comfortable headroom over that.
+        resources:
+          requests:
+            cpu: 200m
+            memory: 512Mi
+          limits:
+            cpu: 500m
+            memory: 2Gi

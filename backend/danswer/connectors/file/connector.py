@@ -42,7 +42,12 @@ def _read_files_and_metadata(
     metadata: dict[str, Any] = {}
     directory_path = os.path.dirname(file_name)
 
-    file_content = get_default_file_store(db_session).read_file(file_name, mode="b")
+    # use_tempfile=True: stream the file into a SpooledTemporaryFile (spills to
+    # disk past 30MB) instead of BytesIO(read())-ing the whole thing into RAM.
+    # Without this, a large uploaded file OOM-crashes the indexing process.
+    file_content = get_default_file_store(db_session).read_file(
+        file_name, mode="b", use_tempfile=True
+    )
 
     if extension == ".zip":
         for file_info, file, metadata in load_files_from_zip(

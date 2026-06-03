@@ -1,0 +1,152 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: vespa-configserver
+spec:
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Retain
+    whenScaled: Retain
+  podManagementPolicy: OrderedReady
+  replicas: 3
+  selector:
+    matchLabels:
+      app: vespa-configserver
+      name: vespa-internal
+  serviceName: vespa-internal
+  template:
+    metadata:
+      labels:
+        app: vespa-configserver
+        name: vespa-internal
+    spec:
+      containers:
+      - args:
+        - configserver,services
+        envFrom:
+        - configMapRef:
+            name: vespa-config
+        # Per-role logical image name (overlay images: resolves it to
+        # vespaengine/vespa:<tag>). Split per role so the upgrade script can
+        # move one StatefulSet's version at a time — see vespa-upgrade.sh.
+        image: vespa-configserver
+        imagePullPolicy: Always
+        name: vespa-configserver
+        # Gates the vespa-configserver Service so consumers (api-server's
+        # ensure_indices_exist, other Vespa nodes) only route here once the
+        # config server actually serves — not the instant the container
+        # starts. Readiness-only: a slow/booting config server is pulled
+        # from rotation but never restarted (an aggressive liveness probe
+        # could kill a healthy-but-slow node and cause a restart loop).
+        # initialDelay is generous because config-server bootstrap (ZK +
+        # app load) takes 1-2 min.
+        readinessProbe:
+          httpGet:
+            path: /state/v1/health
+            port: 19071
+          initialDelaySeconds: 45
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 6
+        resources:
+          limits:
+            memory: 4096M
+          requests:
+            memory: 4096M
+        securityContext:
+          runAsUser: 1000
+        volumeMounts:
+        - mountPath: /opt/vespa/var
+          name: vespa-var1
+        - mountPath: /opt/vespa/logs
+          name: vespa-logs1
+        - mountPath: /workspace
+          name: vespa-workspace1
+      initContainers:
+      - command:
+        - sh
+        - -c
+        - chown -R 1000 /opt/vespa/var
+        image: busybox
+        imagePullPolicy: Always
+        name: chown-var
+        resources: {}
+        securityContext:
+          runAsUser: 0
+        volumeMounts:
+        - mountPath: /opt/vespa/var
+          name: vespa-var1
+      - command:
+        - sh
+        - -c
+        - chown -R 1000 /opt/vespa/logs
+        image: busybox
+        imagePullPolicy: Always
+        name: chown-logs
+        resources: {}
+        securityContext:
+          runAsUser: 0
+        volumeMounts:
+        - mountPath: /opt/vespa/logs
+          name: vespa-logs1
+  updateStrategy:
+    rollingUpdate:
+      partition: 0
+    type: RollingUpdate
+  volumeClaimTemplates:
+  - apiVersion: v1
+    kind: PersistentVolumeClaim
+    metadata:
+      creationTimestamp: null
+      name: vespa-var1
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      resources:
+        requests:
+          storage: 5Gi
+      volumeMode: Filesystem
+    status:
+      phase: Pending
+  - apiVersion: v1
+    kind: PersistentVolumeClaim
+    metadata:
+      creationTimestamp: null
+      name: vespa-logs1
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      resources:
+        requests:
+          storage: 5Gi
+      volumeMode: Filesystem
+    status:
+      phase: Pending
+  - apiVersion: v1
+    kind: PersistentVolumeClaim
+    metadata:
+      creationTimestamp: null
+      name: vespa-workspace1
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      resources:
+        requests:
+          storage: 1Gi
+      volumeMode: Filesystem
+    status:
+      phase: Pending
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vespa-configserver
+spec:
+  ports:
+  - name: vespa-tenant-port
+    nodePort: 31439
+    port: 19071
+    protocol: TCP
+    targetPort: 19071
+  selector:
+    app: vespa-configserver
+  type: NodePort

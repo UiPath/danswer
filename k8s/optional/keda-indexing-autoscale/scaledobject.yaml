@@ -1,0 +1,86 @@
+# KEDA autoscaler for the Dask indexing workers.
+#
+# Scales dask-worker-deployment 0..N based on how much indexing work is
+# actually runnable right now, read straight from Postgres.
+#
+# PREREQUISITES (see README "KEDA indexing autoscale"):
+#   1. KEDA operator installed cluster-wide.
+#   2. The background-scaling component is opted in (dask-worker exists).
+#   3. dask-worker is NOT also pinned by a static replicas: entry — KEDA
+#      owns its replica count (remove it from the background-scaling
+#      kustomization replicas: block, or they fight).
+#
+# Password comes from danswer-secrets via TriggerAuthentication; the
+# host/user/db below are the Darwin prod Postgres coordinates and must
+# match the overlay's POSTGRES_* (this is a prod-scaling feature).
+---
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: keda-indexing-pg-auth
+spec:
+  secretTargetRef:
+    - parameter: password
+      name: danswer-secrets
+      key: postgres_password
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: dask-worker-indexing
+spec:
+  scaleTargetRef:
+    name: dask-worker-deployment
+  # Scale to zero when nothing is indexing — saves the idle 4Gi/worker.
+  # Cold-start cost on the first index after idle is ~30s-2min (pod start
+  # + Dask worker connect); fine for background indexing. Set to 1 if you
+  # want a worker always warm.
+  minReplicaCount: 0
+  # Ceiling on burst. Useful concurrency is bounded by
+  # (distinct active source types × INDEXING_PER_SOURCE_CAP), so there's
+  # no point setting this far above your number of source types.
+  maxReplicaCount: 4
+  pollingInterval: 60      # how often the query runs (seconds)
+  cooldownPeriod: 300      # wait 5m after metric hits 0 before scaling to 0
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleDown:
+          # Damp scale-down so finishing jobs don't cause thrash.
+          stabilizationWindowSeconds: 300
+  triggers:
+    - type: postgresql
+      authenticationRef:
+        name: keda-indexing-pg-auth
+      metadata:
+        host: darwin-postgres.postgres.database.azure.com
+        port: "5432"
+        userName: postgres
+        dbName: postgres
+        sslmode: require
+        # Desired replicas = ceil(query_result / targetQueryValue).
+        targetQueryValue: "1"
+        # The metric = number of indexing attempts that can run CONCURRENTLY
+        # right now, respecting PER_SOURCE_CAP (default 1 → one per source).
+        # NOT a raw pending count: 10 queued attempts of the same source
+        # still only run 1 at a time, so we must not spin up 10 workers.
+        #
+        # Includes IN_PROGRESS on purpose: that keeps replicas >= running
+        # jobs, so KEDA never scales a busy worker away — scale-to-0 only
+        # happens when there is genuinely no work.
+        #
+        # Status is stored UPPERCASE (Enum(..., native_enum=False) stores
+        # the member NAME, not its value) — verified against the live DB.
+        # IndexAttempt links directly to connector (this fork has
+        # connector_id on index_attempt, not connector_credential_pair_id).
+        #
+        # If you raise INDEXING_PER_SOURCE_CAP above 1, change LEAST(1,...)
+        # to LEAST(<cap>,...) to match.
+        query: >-
+          SELECT COALESCE(SUM(LEAST(1, cnt)), 0) FROM (
+            SELECT con.source, COUNT(*) AS cnt
+            FROM index_attempt ia
+            JOIN connector con ON ia.connector_id = con.id
+            WHERE ia.status IN ('NOT_STARTED', 'IN_PROGRESS')
+            GROUP BY con.source
+          ) s

@@ -48,6 +48,7 @@ from sqlalchemy import case
 from sqlalchemy import cast
 from sqlalchemy import Date
 from sqlalchemy import func
+from sqlalchemy import literal
 from sqlalchemy import or_
 from sqlalchemy import select
 from sqlalchemy import text
@@ -57,6 +58,9 @@ from sqlalchemy.orm import Session
 from danswer.configs.constants import MessageType
 from danswer.db.engine import get_sqlalchemy_engine
 from danswer.db.models import AnalyticsDailyRollup
+from danswer.db.models import AnalyticsPersonaDailyStats
+from danswer.db.models import AnalyticsUserDailyStats
+from danswer.db.models import AnalyticsUserFirstSeen
 from danswer.db.models import ChatMessage
 from danswer.db.models import ChatMessageFeedback
 from danswer.db.models import ChatSession
@@ -309,6 +313,176 @@ def upsert_rollup_for_date(
     return metrics
 
 
+def capture_first_seen_for_date(
+    db_session: Session, target_date: datetime.date
+) -> None:
+    """Record ``first_seen_date`` for every user active on ``target_date``
+    who isn't already in ``analytics_user_first_seen``.
+
+    INSERT … SELECT … ON CONFLICT (user_id) DO NOTHING: a user already
+    present keeps their stored date, so first-seen never moves forward.
+    Because :func:`run_rollup` walks dates ascending, the earliest date in
+    the processed window on which a user appears is the one recorded — and
+    for the full backfill that's their true first-ever day. Once written,
+    the row is immune to chat retention deletes (this is the whole point:
+    the adoption curve must outlive the raw chat_message rows)."""
+    start, end = _day_bounds(target_date)
+    active_user_ids = (
+        select(
+            ChatSession.user_id.label("user_id"),
+            literal(target_date, Date).label("first_seen_date"),
+        )
+        .select_from(ChatMessage)
+        .join(ChatSession, ChatSession.id == ChatMessage.chat_session_id)
+        .where(ChatMessage.time_sent >= start)
+        .where(ChatMessage.time_sent < end)
+        .where(ChatMessage.message_type == MessageType.ASSISTANT)
+        .where(ChatSession.user_id.is_not(None))
+        .distinct()
+    )
+    stmt = (
+        pg_insert(AnalyticsUserFirstSeen.__table__)
+        .from_select(["user_id", "first_seen_date"], active_user_ids)
+        .on_conflict_do_nothing(index_elements=[AnalyticsUserFirstSeen.user_id])
+    )
+    db_session.execute(stmt)
+    db_session.commit()
+
+
+def upsert_user_daily_stats_for_date(
+    db_session: Session, target_date: datetime.date
+) -> None:
+    """Upsert one row per active user for ``target_date`` into
+    ``analytics_user_daily_stats`` (message / like / dislike counts).
+
+    Single INSERT … SELECT … ON CONFLICT (user_id, date) DO UPDATE, so a
+    re-run over the sliding window recomputes that day's per-user counts
+    (reflecting late feedback). Once written the rows outlive the raw
+    chat_message rows that retention deletes — the leaderboard reads this
+    aggregate, so it spans full history rather than the last
+    RETENTION_DAYS_CHAT."""
+    start, end = _day_bounds(target_date)
+    per_user = (
+        select(
+            ChatSession.user_id.label("user_id"),
+            literal(target_date, Date).label("date"),
+            # distinct: the feedback outerjoin can fan out a message into
+            # multiple rows (a message may have >1 feedback row).
+            func.count(func.distinct(ChatMessage.id)).label("message_count"),
+            func.coalesce(
+                func.sum(case((ChatMessageFeedback.is_positive, 1), else_=0)), 0
+            ).label("like_count"),
+            func.coalesce(
+                func.sum(
+                    case(
+                        (ChatMessageFeedback.is_positive == False, 1),  # noqa: E712
+                        else_=0,
+                    )
+                ),
+                0,
+            ).label("dislike_count"),
+        )
+        .select_from(ChatMessage)
+        .join(ChatSession, ChatSession.id == ChatMessage.chat_session_id)
+        .outerjoin(
+            ChatMessageFeedback,
+            ChatMessageFeedback.chat_message_id == ChatMessage.id,
+        )
+        .where(ChatMessage.time_sent >= start)
+        .where(ChatMessage.time_sent < end)
+        .where(ChatMessage.message_type == MessageType.ASSISTANT)
+        .where(ChatSession.user_id.is_not(None))
+        .group_by(ChatSession.user_id)
+    )
+    stmt = pg_insert(AnalyticsUserDailyStats.__table__).from_select(
+        ["user_id", "date", "message_count", "like_count", "dislike_count"],
+        per_user,
+    )
+    stmt = stmt.on_conflict_do_update(
+        index_elements=[
+            AnalyticsUserDailyStats.user_id,
+            AnalyticsUserDailyStats.date,
+        ],
+        set_={
+            "message_count": stmt.excluded.message_count,
+            "like_count": stmt.excluded.like_count,
+            "dislike_count": stmt.excluded.dislike_count,
+            "rolled_up_at": func.now(),
+        },
+    )
+    db_session.execute(stmt)
+    db_session.commit()
+
+
+def upsert_persona_daily_stats_for_date(
+    db_session: Session, target_date: datetime.date
+) -> None:
+    """Upsert one row per assistant (persona) active on ``target_date`` into
+    ``analytics_persona_daily_stats``.
+
+    Same durable/idempotent contract as the per-user variant. ``persona_id``
+    lives on chat_session, so this is a clean group-by. ``message_count``
+    uses COUNT(DISTINCT message) because the feedback outerjoin can fan a
+    message into multiple rows."""
+    start, end = _day_bounds(target_date)
+    per_persona = (
+        select(
+            ChatSession.persona_id.label("persona_id"),
+            literal(target_date, Date).label("date"),
+            func.count(func.distinct(ChatSession.id)).label("session_count"),
+            func.count(func.distinct(ChatMessage.id)).label("message_count"),
+            func.coalesce(
+                func.sum(case((ChatMessageFeedback.is_positive, 1), else_=0)), 0
+            ).label("like_count"),
+            func.coalesce(
+                func.sum(
+                    case(
+                        (ChatMessageFeedback.is_positive == False, 1),  # noqa: E712
+                        else_=0,
+                    )
+                ),
+                0,
+            ).label("dislike_count"),
+        )
+        .select_from(ChatMessage)
+        .join(ChatSession, ChatSession.id == ChatMessage.chat_session_id)
+        .outerjoin(
+            ChatMessageFeedback,
+            ChatMessageFeedback.chat_message_id == ChatMessage.id,
+        )
+        .where(ChatMessage.time_sent >= start)
+        .where(ChatMessage.time_sent < end)
+        .where(ChatMessage.message_type == MessageType.ASSISTANT)
+        .group_by(ChatSession.persona_id)
+    )
+    stmt = pg_insert(AnalyticsPersonaDailyStats.__table__).from_select(
+        [
+            "persona_id",
+            "date",
+            "session_count",
+            "message_count",
+            "like_count",
+            "dislike_count",
+        ],
+        per_persona,
+    )
+    stmt = stmt.on_conflict_do_update(
+        index_elements=[
+            AnalyticsPersonaDailyStats.persona_id,
+            AnalyticsPersonaDailyStats.date,
+        ],
+        set_={
+            "session_count": stmt.excluded.session_count,
+            "message_count": stmt.excluded.message_count,
+            "like_count": stmt.excluded.like_count,
+            "dislike_count": stmt.excluded.dislike_count,
+            "rolled_up_at": func.now(),
+        },
+    )
+    db_session.execute(stmt)
+    db_session.commit()
+
+
 # ---------------------------------------------------------------------------
 # Batch operations — sliding window (daily task) + full backfill
 # ---------------------------------------------------------------------------
@@ -429,6 +603,12 @@ def run_rollup(today: datetime.date | None = None) -> int:
         current = start
         while current <= today:
             upsert_rollup_for_date(db_session, current)
+            # Capture first-seen + per-user daily stats in the same ascending
+            # pass, before retention can delete the day's chat rows (rollup
+            # runs 07:30, sweep 08:00).
+            capture_first_seen_for_date(db_session, current)
+            upsert_user_daily_stats_for_date(db_session, current)
+            upsert_persona_daily_stats_for_date(db_session, current)
             current += datetime.timedelta(days=1)
             n += 1
 
@@ -458,6 +638,11 @@ def backfill_all_rollups(start_date: datetime.date, end_date: datetime.date) -> 
         current = start_date
         while current <= end_date:
             upsert_rollup_for_date(db_session, current)
+            # Walk ascending so each user's first_seen_date is their true
+            # first-ever active day across all currently-available history.
+            capture_first_seen_for_date(db_session, current)
+            upsert_user_daily_stats_for_date(db_session, current)
+            upsert_persona_daily_stats_for_date(db_session, current)
             current += datetime.timedelta(days=1)
             n += 1
             if n % 30 == 0:

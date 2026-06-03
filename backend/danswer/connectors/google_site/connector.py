@@ -70,8 +70,10 @@ class GoogleSitesConnector(LoadConnector):
         documents: list[Document] = []
 
         with Session(get_sqlalchemy_engine()) as db_session:
+            # use_tempfile=True: stream the (potentially large) site zip to a
+            # temp file instead of loading it fully into memory (OOM risk).
             file_content_io = get_default_file_store(db_session).read_file(
-                self.zip_path, mode="b"
+                self.zip_path, mode="b", use_tempfile=True
             )
 
         # load the HTML files

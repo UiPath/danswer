@@ -52,7 +52,7 @@ function Main({ ccPairId }: { ccPairId: number }) {
     );
   }
 
-  const lastIndexAttempt = ccPair.index_attempts[0];
+  const lastIndexAttempt = ccPair.latest_index_attempt;
   const isDeleting = isCurrentlyDeleting(ccPair.latest_deletion_attempt);
 
   // figure out if we need to artificially deflate the number of docs indexed.
@@ -61,7 +61,7 @@ function Main({ ccPairId }: { ccPairId: number }) {
   // there is a mismatch between these two numbers which may confuse users.
   const totalDocsIndexed =
     lastIndexAttempt?.status === "in_progress" &&
-    ccPair.index_attempts.length === 1
+    ccPair.num_index_attempts === 1
       ? lastIndexAttempt.total_docs_indexed
       : ccPair.num_docs_indexed;
 

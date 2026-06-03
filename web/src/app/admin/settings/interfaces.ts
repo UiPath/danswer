@@ -3,6 +3,8 @@ export interface Settings {
   search_page_enabled: boolean;
   default_page: "search" | "chat";
   maximum_chat_retention_days: number | null;
+  // Byte cap for chat file uploads (mirrors backend CHAT_FILE_MAX_SIZE_MB).
+  chat_file_max_size_mb?: number;
 }
 
 export interface EnterpriseSettings {

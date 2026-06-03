@@ -1,0 +1,71 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: vespa-query-container
+spec:
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Retain
+    whenScaled: Retain
+  podManagementPolicy: OrderedReady
+  replicas: 2
+  selector:
+    matchLabels:
+      app: vespa-query-container
+      name: vespa-internal
+  serviceName: vespa-internal
+  template:
+    metadata:
+      labels:
+        app: vespa-query-container
+        name: vespa-internal
+    spec:
+      containers:
+      - args:
+        - services
+        envFrom:
+        - configMapRef:
+            name: vespa-config
+        # Per-role logical image name — see vespa-configserver.yaml.
+        image: vespa-query
+        imagePullPolicy: Always
+        name: vespa-query-container
+        # Gates the vespa-query Service — the path the app hits for search.
+        # This is the probe that directly prevents the "503 / connection
+        # refused" window: the Service won't route a query here until
+        # /state/v1/health is up. Readiness-only (no liveness — see the
+        # configserver note).
+        readinessProbe:
+          httpGet:
+            path: /state/v1/health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 6
+        resources:
+          limits:
+            memory: 4G
+          requests:
+            memory: 1500M
+        securityContext:
+          runAsUser: 1000
+  updateStrategy:
+    rollingUpdate:
+      partition: 0
+    type: RollingUpdate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: vespa
+  name: vespa-query
+spec:
+  ports:
+  - name: api
+    port: 8080
+    protocol: TCP
+    targetPort: 8080
+  selector:
+    app: vespa-query-container
+  type: ClusterIP

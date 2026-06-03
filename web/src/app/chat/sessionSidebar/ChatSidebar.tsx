@@ -1,7 +1,13 @@
 "use client";
 
-import { FiBook, FiEdit, FiFolderPlus, FiPlusSquare } from "react-icons/fi";
-import { useContext, useEffect, useRef, useState } from "react";
+import {
+  FiBook,
+  FiEdit,
+  FiFolderPlus,
+  FiLoader,
+  FiPlusSquare,
+} from "react-icons/fi";
+import { useContext, useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
@@ -38,6 +44,13 @@ export const ChatSidebar = ({
   const router = useRouter();
   const { popup, setPopup } = usePopup();
 
+  // Navigating to "Manage Assistants" awaits the heavy fetchChatData
+  // bundle server-side. useTransition keeps the *current* page (with this
+  // sidebar) mounted and visible throughout — so it reads as an in-app
+  // transition, not a blank reload — while isPending drives an inline
+  // spinner on the button so the click clearly registers.
+  const [isNavigatingAssistants, startAssistantsNav] = useTransition();
+
   const currentChatId = currentChatSession?.id;
 
   // prevent the NextJS Router cache from causing the chat sidebar to not
@@ -45,6 +58,15 @@ export const ChatSidebar = ({
   useEffect(() => {
     router.refresh();
   }, [currentChatId]);
+
+  // Local mirror of the server-provided folders so we can show a newly
+  // created folder instantly, without a full `router.refresh()` (which
+  // re-runs the entire heavy fetchChatData bundle just to add one empty
+  // folder). Re-synced whenever the server prop changes.
+  const [localFolders, setLocalFolders] = useState<Folder[]>(folders);
+  useEffect(() => {
+    setLocalFolders(folders);
+  }, [folders]);
 
   const combinedSettings = useContext(SettingsContext);
   if (!combinedSettings) {
@@ -118,8 +140,22 @@ export const ChatSidebar = ({
               onClick={() =>
                 createFolder("New Folder")
                   .then((folderId) => {
-                    console.log(`Folder created with ID: ${folderId}`);
-                    router.refresh();
+                    // Append the new (empty) folder to local state instead
+                    // of router.refresh() — instant, no full refetch. The
+                    // create POST itself is a single fast INSERT.
+                    setLocalFolders((prev) => [
+                      ...prev,
+                      {
+                        folder_id: folderId,
+                        folder_name: "New Folder",
+                        display_priority:
+                          prev.reduce(
+                            (max, f) => Math.max(max, f.display_priority),
+                            -1
+                          ) + 1,
+                        chat_sessions: [],
+                      },
+                    ]);
                   })
                   .catch((error) => {
                     console.error("Failed to create folder:", error);
@@ -137,20 +173,30 @@ export const ChatSidebar = ({
           </div>
         </div>
 
-        <Link href="/assistants/mine" className="mt-3 mb-1 mx-3">
-          <BasicClickable fullWidth>
+        <div className="mt-3 mb-1 mx-3">
+          <BasicClickable
+            fullWidth
+            onClick={() =>
+              startAssistantsNav(() => router.push("/assistants/mine"))
+            }
+          >
             <div className="flex items-center text-default font-medium">
-              <FaBrain className="ml-1 mr-2" /> Manage Assistants
+              {isNavigatingAssistants ? (
+                <FiLoader className="ml-1 mr-2 animate-spin" />
+              ) : (
+                <FaBrain className="ml-1 mr-2" />
+              )}
+              {isNavigatingAssistants ? "Loading…" : "Manage Assistants"}
             </div>
           </BasicClickable>
-        </Link>
+        </div>
 
         <div className="border-b border-border pb-4 mx-3" />
 
         <ChatTab
           existingChats={existingChats}
           currentChatId={currentChatId}
-          folders={folders}
+          folders={localFolders}
           openedFolders={openedFolders}
         />
       </div>

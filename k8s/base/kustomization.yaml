@@ -1,0 +1,32 @@
+# Base manifests — environment-neutral. Overlays under k8s/overlays/{prod,local}
+# layer on:
+#   - Image registry + tag (via `images:` in the overlay kustomization)
+#   - Replica counts (via `replicas:` in the overlay kustomization)
+#   - The env-configmap ConfigMap (via configMapGenerator from env.properties)
+#   - The danswer-secrets Secret (via secretGenerator from secrets.env — gitignored)
+#
+# Image refs in base use logical names (e.g. `danswer-backend` not
+# `sfbrdevhelmweacr.azurecr.io/danswer/danswer-backend:vha-138`). Kustomize
+# rewrites them via the overlay's `images:` block.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  # Core danswer app
+  - api-server.yaml
+  - background.yaml
+  - web-server.yaml
+  - nginx.yaml
+  - inference-model-server.yaml
+  - indexing-model-server.yaml
+  - persistent-volumes.yaml
+  - redis.yaml  # cache + rate limiting; both prod and local deploy it
+
+  # NOTE: Vespa is intentionally NOT part of base. It is a stateful subsystem
+  # with a PINNED version and an ordered, health-gated upgrade procedure, so
+  # re-applying it on every routine app rollout (`kubectl apply -k
+  # overlays/{prod,local}`) is dangerous — a drifted manifest could roll the
+  # StatefulSets. Vespa manifests live in base/vespa/ and are applied
+  # DELIBERATELY via their own overlay: `kubectl apply -k
+  # k8s/overlays/{prod,local}-vespa`. Version upgrades go through
+  # k8s/scripts/vespa-upgrade.sh. See k8s/README.md.

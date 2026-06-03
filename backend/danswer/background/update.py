@@ -1,4 +1,5 @@
 import logging
+import os
 import time
 from datetime import datetime
 from typing import Any
@@ -506,9 +507,35 @@ def update_loop(delay: int = 10, num_workers: int = NUM_INDEXING_WORKERS) -> Non
         model_server_port=MODEL_SERVER_PORT,
     )
 
+    # Pick the indexing-execution backend in priority order:
+    #
+    # 1. DASK_SCHEDULER_ADDRESS — production mode in K8s. Indexing
+    #    work is dispatched to a remote Dask scheduler service that
+    #    fans out to a horizontally-scalable pool of `dask-worker`
+    #    pods. This is the only mode that supports scaling indexing
+    #    concurrency by adding pods (vs the in-pod LocalCluster which
+    #    is bounded by the host's RAM).
+    # 2. DASK_JOB_CLIENT_ENABLED — legacy in-process Dask LocalCluster.
+    #    All workers in the same Python process. Used in dev and in
+    #    pre-distributed-mode prod deployments.
+    # 3. SimpleJobClient — bare ProcessPoolExecutor-style fallback.
+    #    Used by some local dev flows that don't want the Dask
+    #    overhead.
+    #
+    # The remote-scheduler path uses two named queues — `primary` for
+    # the active embedding model and `secondary` for the in-flight
+    # secondary index during model swaps — so a single dask-scheduler
+    # service serves both without code changes elsewhere.
     client_primary: Client | SimpleJobClient
     client_secondary: Client | SimpleJobClient
-    if DASK_JOB_CLIENT_ENABLED:
+    dask_scheduler_address = os.environ.get("DASK_SCHEDULER_ADDRESS")
+    if dask_scheduler_address:
+        logger.info("Connecting to remote Dask scheduler at %s", dask_scheduler_address)
+        client_primary = Client(dask_scheduler_address)
+        client_secondary = Client(dask_scheduler_address)
+        if LOG_LEVEL.lower() == "debug":
+            client_primary.register_worker_plugin(ResourceLogger())
+    elif DASK_JOB_CLIENT_ENABLED:
         cluster_primary = LocalCluster(
             n_workers=num_workers,
             threads_per_worker=1,

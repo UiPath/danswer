@@ -98,14 +98,18 @@ def delete_search_doc_message_relationship(
 
 
 def delete_orphaned_search_docs(db_session: Session) -> None:
-    orphaned_docs = (
-        db_session.query(SearchDoc)
+    # Delete SearchDoc rows no longer referenced by any chat_message__search_doc.
+    # Previously this fetched every orphan as a full ORM row (incl. blurb/
+    # content) just to delete it in a loop; a single bulk DELETE over the same
+    # set avoids materializing them. Orphans have no association rows by
+    # definition, so there is nothing for an ORM cascade to handle (matches the
+    # raw-SQL orphan cleanup in db/retention.py).
+    orphan_ids = (
+        select(SearchDoc.id)
         .outerjoin(ChatMessage__SearchDoc)
-        .filter(ChatMessage__SearchDoc.chat_message_id.is_(None))
-        .all()
+        .where(ChatMessage__SearchDoc.chat_message_id.is_(None))
     )
-    for doc in orphaned_docs:
-        db_session.delete(doc)
+    db_session.execute(delete(SearchDoc).where(SearchDoc.id.in_(orphan_ids)))
     db_session.commit()
 
 

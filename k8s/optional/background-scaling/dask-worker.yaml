@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dask-worker-deployment
+spec:
+  selector:
+    matchLabels:
+      app: dask-worker
+  template:
+    metadata:
+      labels:
+        app: dask-worker
+    spec:
+      containers:
+      - name: worker
+        image: danswer-backend
+        imagePullPolicy: IfNotPresent
+        # Wait for the Dask scheduler to accept connections before starting the
+        # worker, then exec it. A worker that boots before the scheduler is
+        # ready fails to register its Nanny and exits 1 -> CrashLoopBackOff
+        # until pod ordering happens to work out.
+        #
+        # This retry loop is environment-agnostic — plain TCP connect, no
+        # dependency on any mesh or platform feature; it behaves the same with
+        # or without istio. It lives in the MAIN container (not an
+        # initContainer) for exactly that portability: under istio,
+        # initContainers run before the sidecar proxy, so their traffic to a
+        # mesh Service is blackholed until envoy is up — an init-based wait
+        # would hang there. The main-container loop also naturally waits out
+        # envoy when istio IS present. `exec` hands PID to the worker so
+        # signals/termination propagate normally.
+        command:
+        - /bin/sh
+        - -c
+        - |
+          until python -c "import socket; socket.create_connection(('dask-scheduler-service', 8786), timeout=3)" 2>/dev/null; do
+            echo "waiting for dask-scheduler-service:8786..."
+            sleep 2
+          done
+          echo "dask-scheduler reachable; starting worker"
+          exec dask worker tcp://dask-scheduler-service:8786 --nworkers=1 --nthreads=1 --memory-limit=4GB
+        env:
+        - name: PYTHONPATH
+          value: /app
+        - name: CURRENT_PROCESS_IS_AN_INDEXING_JOB
+          value: 'true'
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              key: postgres_user
+              name: danswer-secrets
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: postgres_password
+              name: danswer-secrets
+        envFrom:
+        - configMapRef:
+            name: env-configmap
+        - secretRef:
+            name: danswer-secrets
+        # No PVCs — indexing reads File-connector uploads from PGFileStore
+        # (Postgres large objects), not /home/file_connector_storage; the
+        # dynamic config store is Postgres-backed too. Connector temp files
+        # (if any) go to the container's /tmp. This also keeps each worker
+        # off the RWO dynamic-pvc, which can't multi-attach. See README.
+        resources:
+          requests:
+            cpu: "1"
+            memory: 4Gi
+          limits:
+            cpu: '2'
+            memory: 8Gi

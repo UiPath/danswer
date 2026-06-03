@@ -11,6 +11,7 @@ from uuid import UUID
 from fastapi_users_db_sqlalchemy import SQLAlchemyBaseOAuthAccountTableUUID
 from fastapi_users_db_sqlalchemy import SQLAlchemyBaseUserTableUUID
 from fastapi_users_db_sqlalchemy.access_token import SQLAlchemyBaseAccessTokenTableUUID
+from fastapi_users_db_sqlalchemy.generics import GUID
 from sqlalchemy import Boolean
 from sqlalchemy import Date
 from sqlalchemy import DateTime
@@ -327,6 +328,13 @@ class Document(Base):
     doc_updated_at: Mapped[datetime.datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # sha256 of the document's INDEXED content (sections/title/metadata/owners,
+    # NOT doc_updated_at) as of the last SUCCESSFUL index into Vespa. Lets the
+    # indexing pipeline skip the expensive Vespa clear-and-rewrite when a
+    # connector re-emits a document whose timestamp advanced but whose content
+    # is identical (e.g. Salesforce LastModifiedDate churn). Nullable: rows
+    # indexed before this column existed fall back to the doc_updated_at skip.
+    indexed_content_hash: Mapped[str | None] = mapped_column(String, nullable=True)
     # The following are not attached to User because the account/email may not be known
     # within Danswer
     # Something like the document creator
@@ -1177,7 +1185,12 @@ class PGFileStore(Base):
     file_origin: Mapped[FileOrigin] = mapped_column(Enum(FileOrigin, native_enum=False))
     file_type: Mapped[str] = mapped_column(String, default="text/plain")
     file_metadata: Mapped[JSON_ro] = mapped_column(postgresql.JSONB(), nullable=True)
-    lobj_oid: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Exactly one of these locates the bytes:
+    #   lobj_oid    — Postgres large object (PostgresBackedFileStore)
+    #   object_key  — Blob/object key (AzureBlobFileStore); metadata stays here
+    # Both nullable so the two backends coexist during migration.
+    lobj_oid: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    object_key: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
 """
@@ -1453,7 +1466,7 @@ class AnalyticsDailyRollup(Base):
     retention deletes.
 
     `chat_message` / `chat_session` rows older than RETENTION_DAYS_CHAT
-    (default 30d) are purged by the daily retention sweep. The analytics
+    (default 90d) are purged by the daily retention sweep. The analytics
     endpoints used to read directly from those tables, so any date range
     older than ~30 days returned zeros. This rollup table is computed
     BEFORE the retention sweep each day (Celery beat at 07:30 UTC, sweep
@@ -1494,6 +1507,110 @@ class AnalyticsDailyRollup(Base):
         Integer, nullable=False, default=0, server_default="0"
     )
     slackbot_auto_resolved: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    rolled_up_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class AnalyticsUserFirstSeen(Base):
+    """Durable record of the first UTC date each user used chat (asked a
+    question). Powers the adoption curve ("how many distinct users have ever
+    tried chat") on the admin Analytics page.
+
+    Populated incrementally by the analytics rollup (BEFORE the retention
+    sweep), one row per user, ever — ``first_seen_date`` is written once and
+    never moves forward (INSERT ... ON CONFLICT DO NOTHING). This is what
+    makes adoption survive chat retention: once chat_message rows age out of
+    RETENTION_DAYS_CHAT they're deleted, so "first time we saw user X" can no
+    longer be recomputed from raw data — it must be captured here while the
+    data still exists.
+
+    Deliberately NO foreign key to ``user`` (mirrors AnalyticsDailyRollup's
+    no-FK stance): deleting a user must not erase the historical fact that
+    they once adopted chat, and must not cascade into this aggregate.
+    """
+
+    __tablename__ = "analytics_user_first_seen"
+
+    user_id: Mapped[UUID] = mapped_column(GUID(), primary_key=True)
+    first_seen_date: Mapped[datetime.date] = mapped_column(
+        Date, nullable=False, index=True
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class AnalyticsUserDailyStats(Base):
+    """Durable per-user-per-day chat activity counts. Powers the "top users
+    by activity" leaderboard on the admin Analytics page.
+
+    Same durability contract as AnalyticsDailyRollup / AnalyticsUserFirstSeen:
+    upserted daily by the rollup (one row per active user per UTC day) BEFORE
+    the retention sweep, then kept indefinitely. Reading the leaderboard from
+    this aggregate — instead of raw chat_message — means it spans the full
+    history regardless of RETENTION_DAYS_CHAT, not just the last window.
+
+    Idempotent: the rollup re-upserts the sliding recompute window with
+    ON CONFLICT (user_id, date) DO UPDATE, so late-arriving feedback is
+    reflected. No FK to `user` (see AnalyticsUserFirstSeen) — the email is
+    joined live at query time, so a deleted user simply drops off the
+    leaderboard without erasing the historical counts.
+    """
+
+    __tablename__ = "analytics_user_daily_stats"
+
+    user_id: Mapped[UUID] = mapped_column(GUID(), primary_key=True)
+    date: Mapped[datetime.date] = mapped_column(Date, primary_key=True)
+    message_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    like_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    dislike_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    rolled_up_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class AnalyticsPersonaDailyStats(Base):
+    """Durable per-assistant-per-day chat activity counts. Powers the
+    "most-used assistants" leaderboard, and (by joining persona__document_set
+    at query time) an approximate "datasets in use" view.
+
+    Same durability contract as the other analytics rollups: upserted daily
+    BEFORE the retention sweep, kept indefinitely, so usage spans the full
+    history regardless of RETENTION_DAYS_CHAT. No FK to `persona` — the name
+    is joined live, so a deleted assistant drops off the leaderboard without
+    erasing historical counts. ``session_count`` is distinct chat sessions
+    that had at least one assistant reply that day.
+    """
+
+    __tablename__ = "analytics_persona_daily_stats"
+
+    persona_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    date: Mapped[datetime.date] = mapped_column(Date, primary_key=True)
+    session_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    message_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    like_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    dislike_count: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default="0"
     )
     rolled_up_at: Mapped[datetime.datetime] = mapped_column(

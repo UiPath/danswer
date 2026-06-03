@@ -24,6 +24,7 @@ from danswer.db.models import StarterMessage
 from danswer.db.models import Tool
 from danswer.db.models import User
 from danswer.db.models import User__UserGroup
+from danswer.db.persona_cache import invalidate_personas_all
 from danswer.search.enums import RecencyBiasSetting
 from danswer.server.features.persona.models import CreatePersonaRequest
 from danswer.server.features.persona.models import PersonaSnapshot
@@ -48,6 +49,7 @@ def make_persona_private(
             db_session.add(Persona__User(persona_id=persona_id, user_id=user_uuid))
 
         db_session.commit()
+        invalidate_personas_all()  # Persona__User membership changed
 
     # May cause error if someone switches down to MIT from EE
     if group_ids:
@@ -218,6 +220,7 @@ def mark_persona_as_deleted(
         )
     persona.deleted = True
     db_session.commit()
+    invalidate_personas_all()
 
 
 def mark_persona_as_not_deleted(
@@ -231,6 +234,7 @@ def mark_persona_as_not_deleted(
     if persona.deleted:
         persona.deleted = False
         db_session.commit()
+        invalidate_personas_all()
     else:
         raise ValueError(f"Persona with ID {persona_id} is not deleted.")
 
@@ -246,6 +250,7 @@ def mark_delete_persona_by_name(
 
     db_session.execute(stmt)
     db_session.commit()
+    invalidate_personas_all()
 
 
 def update_all_personas_display_priority(
@@ -262,6 +267,7 @@ def update_all_personas_display_priority(
         persona.display_priority = display_priority_map[persona.id]
 
     db_session.commit()
+    invalidate_personas_all()
 
 
 def upsert_prompt(
@@ -430,9 +436,14 @@ def upsert_persona(
 
     if commit:
         db_session.commit()
+        invalidate_personas_all()
     else:
         # flush the session so that the persona has an ID
         db_session.flush()
+        # No bust here — caller hasn't committed. They are responsible for
+        # invalidating after their final commit, OR they're being called
+        # by a wrapper like create_update_persona whose subsequent steps
+        # (make_persona_private) will commit and bust.
 
     return persona
 
@@ -460,6 +471,7 @@ def delete_old_default_personas(
 
     db_session.execute(stmt)
     db_session.commit()
+    invalidate_personas_all()
 
 
 def update_persona_visibility(
@@ -470,6 +482,7 @@ def update_persona_visibility(
     persona = get_persona_by_id(persona_id=persona_id, user=None, db_session=db_session)
     persona.is_visible = is_visible
     db_session.commit()
+    invalidate_personas_all()
 
 
 def check_user_can_edit_persona(user: User | None, persona: Persona) -> None:
@@ -636,6 +649,7 @@ def delete_persona_by_name(
     db_session.execute(stmt)
 
     db_session.commit()
+    invalidate_personas_all()
 
 
 def get_persona_with_docset_and_prompts(

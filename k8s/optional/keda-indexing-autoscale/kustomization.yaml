@@ -1,0 +1,19 @@
+# Kustomize Component — KEDA autoscaling for the Dask indexing workers.
+#
+# Opt in from an overlay (after the background-scaling component, since it
+# scales that component's dask-worker-deployment):
+#
+#   # k8s/overlays/prod/kustomization.yaml
+#   components:
+#     - ../../optional/background-scaling
+#     - ../../optional/keda-indexing-autoscale
+#
+# AND remove dask-worker-deployment from the background-scaling component's
+# replicas: block — KEDA owns that count once this is active.
+#
+# Requires the KEDA operator installed cluster-wide (the keda.sh CRDs).
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+resources:
+  - scaledobject.yaml

@@ -142,6 +142,38 @@ POSTGRES_HOST = os.environ.get("POSTGRES_HOST") or "localhost"
 POSTGRES_PORT = os.environ.get("POSTGRES_PORT") or "5432"
 POSTGRES_DB = os.environ.get("POSTGRES_DB") or "postgres"
 
+# SQLAlchemy connection-pool sizing, PER PROCESS. Max connections a single
+# process can open to Postgres is POSTGRES_POOL_SIZE + POSTGRES_POOL_OVERFLOW.
+# The cluster-wide total is (that) × (replicas of every pod that imports the
+# engine: api-server, background, model servers if they touch the DB), and it
+# must stay under Postgres `max_connections` with headroom. Defaults preserve
+# the previous hardcoded 40+10; override DOWN per deployment as you scale
+# replicas (e.g. a small api-server pool when running many replicas).
+POSTGRES_POOL_SIZE = int(os.environ.get("POSTGRES_POOL_SIZE") or 40)
+POSTGRES_POOL_OVERFLOW = int(os.environ.get("POSTGRES_POOL_OVERFLOW") or 10)
+
+# File store backend — where uploaded files / chat attachments / connector
+# blobs live. Default "PostgresBackedFileStore" (Postgres large objects).
+# Set to "AzureBlobFileStore" to offload the BYTES to Azure Blob Storage
+# (metadata stays in the file_store table): keeps the DB/WAL/backups lean and
+# stops file reads from holding a Postgres connection for the whole stream.
+FILE_STORE_TYPE = os.environ.get("FILE_STORE_TYPE") or "PostgresBackedFileStore"
+# Only used when FILE_STORE_TYPE=AzureBlobFileStore (secret — set in
+# danswer-secrets). Container is auto-created on first use if absent.
+AZURE_BLOB_CONNECTION_STRING = os.environ.get("AZURE_BLOB_CONNECTION_STRING") or ""
+AZURE_BLOB_CONTAINER = os.environ.get("AZURE_BLOB_CONTAINER") or "danswer-files"
+
+# Chat file-upload limits. A chat-attached doc is stuffed WHOLE into the LLM
+# prompt (no retrieval), so it's bounded by the model context window. Two
+# guards: a cheap byte cap (all types), and a token cap on the extracted text
+# (the real protection — rejects docs that would overflow). The token budget
+# is CHAT_FILE_MAX_TOKEN_FRACTION of the model's max input tokens, leaving room
+# for the system prompt, history, and the response.
+CHAT_FILE_MAX_SIZE_MB = int(os.environ.get("CHAT_FILE_MAX_SIZE_MB") or 25)
+CHAT_FILE_MAX_TOKEN_FRACTION = float(
+    os.environ.get("CHAT_FILE_MAX_TOKEN_FRACTION") or 0.5
+)
+
 
 #####
 # Connector Configs
@@ -174,6 +206,15 @@ WEB_CONNECTOR_OAUTH_CLIENT_ID = os.environ.get("WEB_CONNECTOR_OAUTH_CLIENT_ID")
 WEB_CONNECTOR_OAUTH_CLIENT_SECRET = os.environ.get("WEB_CONNECTOR_OAUTH_CLIENT_SECRET")
 WEB_CONNECTOR_OAUTH_TOKEN_URL = os.environ.get("WEB_CONNECTOR_OAUTH_TOKEN_URL")
 WEB_CONNECTOR_VALIDATE_URLS = os.environ.get("WEB_CONNECTOR_VALIDATE_URLS")
+# Hard cap on pages visited in a single recursive web crawl. Bounds runtime so a
+# large site can't run for hours and get killed mid-run (which marked the whole
+# attempt FAILED). 0/empty = unlimited.
+WEB_CONNECTOR_MAX_PAGES = int(os.environ.get("WEB_CONNECTOR_MAX_PAGES") or 5000)
+# Per-page navigation timeout (ms) and retry count for transient fetch failures.
+WEB_CONNECTOR_PAGE_TIMEOUT_MS = int(
+    os.environ.get("WEB_CONNECTOR_PAGE_TIMEOUT_MS") or 30000
+)
+WEB_CONNECTOR_MAX_RETRIES = int(os.environ.get("WEB_CONNECTOR_MAX_RETRIES") or 3)
 
 HTML_BASED_CONNECTOR_TRANSFORM_LINKS_STRATEGY = os.environ.get(
     "HTML_BASED_CONNECTOR_TRANSFORM_LINKS_STRATEGY",
@@ -304,6 +345,95 @@ TOKEN_BUDGET_GLOBALLY_ENABLED = (
 # Format: list of strings
 CUSTOM_ANSWER_VALIDITY_CONDITIONS = json.loads(
     os.environ.get("CUSTOM_ANSWER_VALIDITY_CONDITIONS", "[]")
+)
+
+
+#####
+# Redis (cache + rate limiting)
+#####
+# Connection details. All env-driven; safe defaults for local dev.
+REDIS_HOST = os.environ.get("REDIS_HOST") or "localhost"
+REDIS_PORT = int(os.environ.get("REDIS_PORT") or 6379)
+REDIS_PASSWORD = os.environ.get("REDIS_PASSWORD") or ""
+REDIS_DB_NUMBER = int(os.environ.get("REDIS_DB_NUMBER") or 0)
+REDIS_SSL = os.environ.get("REDIS_SSL", "").lower() == "true"
+REDIS_POOL_MAX_CONNECTIONS = int(os.environ.get("REDIS_POOL_MAX_CONNECTIONS") or 50)
+REDIS_HEALTH_CHECK_INTERVAL = int(os.environ.get("REDIS_HEALTH_CHECK_INTERVAL") or 60)
+REDIS_SOCKET_TIMEOUT_SECONDS = int(os.environ.get("REDIS_SOCKET_TIMEOUT_SECONDS") or 3)
+
+# Celery broker + result backend on Redis (instead of the default
+# SQLAlchemy/Postgres transport). Default OFF so local dev without Redis
+# still boots on the Postgres broker. When ON, Celery stops polling/writing
+# Postgres for its queue, removing that load from the DB. Uses a SEPARATE
+# Redis logical DB from the cache (CELERY_REDIS_DB_NUMBER, default 1) so
+# Celery's keys never collide with cache/rate-limit keys on REDIS_DB_NUMBER.
+# Task STATUS is unaffected — this fork tracks it in its own task_queue_jobs
+# table, not Celery's result backend.
+CELERY_BROKER_REDIS_ENABLED = (
+    os.environ.get("CELERY_BROKER_REDIS_ENABLED", "").lower() == "true"
+)
+CELERY_REDIS_DB_NUMBER = int(os.environ.get("CELERY_REDIS_DB_NUMBER") or 1)
+
+# Read-through KV cache layered atop PostgresBackedDynamicConfigStore.
+# When false (default), the store behaves exactly as before; when true,
+# reads check Redis first and writes/deletes invalidate Redis. Fail-open:
+# Redis errors degrade to direct Postgres, never an outage.
+REDIS_KV_CACHE_ENABLED = os.environ.get("REDIS_KV_CACHE_ENABLED", "").lower() == "true"
+# TTL (seconds) for KV entries cached in Redis (1 day default).
+REDIS_KV_CACHE_TTL_SECONDS = int(os.environ.get("REDIS_KV_CACHE_TTL_SECONDS") or 86400)
+
+# Per-user request-rate limiter (Redis-backed). Default OFF — complements
+# the token-budget limiter in token_limit.py with a request-count cap that
+# is correct across api_server replicas.
+REQUEST_RATE_LIMIT_ENABLED = (
+    os.environ.get("REQUEST_RATE_LIMIT_ENABLED", "").lower() == "true"
+)
+# Per-minute and per-hour message-send caps per (user|ip). 0 disables that
+# window (so you can enforce only one of them if you prefer).
+REQUEST_RATE_LIMIT_PER_MINUTE = int(
+    os.environ.get("REQUEST_RATE_LIMIT_PER_MINUTE") or 0
+)
+REQUEST_RATE_LIMIT_PER_HOUR = int(os.environ.get("REQUEST_RATE_LIMIT_PER_HOUR") or 0)
+
+# Per-user persona ("assistant") list cache. Caches the global persona list
+# + per-user group memberships in Redis; permission filter runs in Python
+# at request time. Explicit write-through invalidation lives in the
+# db/persona.py and ee/.../user_group.py mutation paths — the TTL below is
+# only a long-tail safety net for missed busts. Default OFF.
+PERSONA_CACHE_ENABLED = os.environ.get("PERSONA_CACHE_ENABLED", "").lower() == "true"
+PERSONA_CACHE_TTL_SECONDS = int(
+    os.environ.get("PERSONA_CACHE_TTL_SECONDS") or 86400  # 24 h backstop
+)
+
+# Basic connector/cc-pair info cache (the /manage/indexing-status read the
+# chat page uses to derive available source types). That read does a
+# per-cc-pair document-count aggregation that measured ~300ms on the live
+# DB and runs on every chat page load — the page's slowest fan-out call.
+# Pure TTL cache, global (same for all users), fail-open. No explicit
+# invalidation: the data (which connectors exist + have indexed docs)
+# changes slowly and brief staleness is harmless (it only feeds the source-
+# filter list + the "sources incomplete" setup modal), so a short TTL is
+# the whole strategy. Default OFF.
+CC_PAIR_INFO_CACHE_ENABLED = (
+    os.environ.get("CC_PAIR_INFO_CACHE_ENABLED", "").lower() == "true"
+)
+CC_PAIR_INFO_CACHE_TTL_SECONDS = int(
+    os.environ.get("CC_PAIR_INFO_CACHE_TTL_SECONDS") or 60
+)
+
+# Global document-set list cache (the /document-set read on the chat-page
+# bundle). In Danswer MIT document sets aren't permission-filtered (every user
+# sees all), so one shared global list is correct — 200 concurrent first-loads
+# collapse to one DB query. MIT-scoped with no EE dependency: if a deployment
+# enables EE (per-user filtering), the cache bypasses to a direct DB read so it
+# can't leak sets across users. Write-through: every doc-set mutation busts the
+# key; the TTL is a short backstop (staleness is cosmetic — documents stay
+# permission-enforced at search time). Default OFF.
+DOCUMENT_SET_CACHE_ENABLED = (
+    os.environ.get("DOCUMENT_SET_CACHE_ENABLED", "").lower() == "true"
+)
+DOCUMENT_SET_CACHE_TTL_SECONDS = int(
+    os.environ.get("DOCUMENT_SET_CACHE_TTL_SECONDS") or 300
 )
 
 

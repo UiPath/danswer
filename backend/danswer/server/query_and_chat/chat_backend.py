@@ -1,5 +1,6 @@
 import io
 import uuid
+from typing import cast
 
 from fastapi import APIRouter
 from fastapi import Depends
@@ -15,6 +16,9 @@ from danswer.auth.api_key import validate_api_key
 from danswer.auth.users import current_user
 from danswer.chat.chat_utils import create_chat_chain
 from danswer.chat.process_message import stream_chat_message
+from danswer.configs.app_configs import CHAT_FILE_MAX_SIZE_MB
+from danswer.configs.app_configs import CHAT_FILE_MAX_TOKEN_FRACTION
+from danswer.configs.app_configs import FILE_STORE_TYPE
 from danswer.configs.app_configs import WEB_DOMAIN
 from danswer.configs.constants import FileOrigin
 from danswer.configs.constants import MessageType
@@ -37,6 +41,7 @@ from danswer.db.persona import get_persona_by_id
 from danswer.document_index.document_index_utils import get_both_index_names
 from danswer.document_index.factory import get_default_document_index
 from danswer.file_processing.extract_file_text import extract_file_text
+from danswer.file_store.file_store import AzureBlobFileStore
 from danswer.file_store.file_store import get_default_file_store
 from danswer.file_store.models import ChatFileType
 from danswer.file_store.models import FileDescriptor
@@ -47,8 +52,12 @@ from danswer.llm.exceptions import GenAIDisabledException
 from danswer.llm.factory import get_default_llms
 from danswer.llm.headers import get_litellm_additional_request_headers
 from danswer.llm.utils import get_default_llm_tokenizer
+from danswer.llm.utils import get_max_input_tokens
 from danswer.secondary_llm_flows.chat_session_naming import (
     get_renamed_conversation_name,
+)
+from danswer.server.middleware.request_rate_limit import (
+    check_message_request_rate_limit,
 )
 from danswer.server.query_and_chat.models import ChatFeedbackRequest
 from danswer.server.query_and_chat.models import ChatMessageIdentifier
@@ -72,6 +81,52 @@ logger = setup_logger()
 
 router = APIRouter(prefix="/chat", dependencies=[Depends(validate_api_key)])
 # api_router = APIRouter(prefix="/chat", dependencies=[Depends(validate_api_key)])
+
+
+# --- Chat file-upload limits ----------------------------------------------
+# A chat-attached doc is stuffed WHOLE into the LLM prompt (no retrieval), so
+# the real ceiling is the model context window. _reject_if_text_too_long is
+# the meaningful guard; the byte cap is a cheap pre-filter.
+def _max_chat_file_tokens() -> int:
+    """CHAT_FILE_MAX_TOKEN_FRACTION of the default LLM's max input tokens.
+    Falls back to a conservative default if the model map can't be resolved,
+    so a lookup failure never blocks uploads."""
+    try:
+        llm, _ = get_default_llms()
+        max_input = get_max_input_tokens(
+            model_name=llm.config.model_name,
+            model_provider=llm.config.model_provider,
+        )
+    except Exception:
+        max_input = 128_000
+    return int(max_input * CHAT_FILE_MAX_TOKEN_FRACTION)
+
+
+def _reject_if_file_too_large(size: int | None, filename: str | None) -> None:
+    if size and size > CHAT_FILE_MAX_SIZE_MB * 1024 * 1024:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"File '{filename or ''}' is {size // (1024 * 1024)}MB; the "
+                f"upload limit is {CHAT_FILE_MAX_SIZE_MB}MB."
+            ),
+        )
+
+
+def _reject_if_text_too_long(text: str, filename: str | None) -> None:
+    n_tokens = len(get_default_llm_tokenizer().encode(text))
+    budget = _max_chat_file_tokens()
+    if n_tokens > budget:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Document '{filename or ''}' is too large to chat with "
+                f"(~{n_tokens:,} tokens; limit {budget:,}). The whole document "
+                "is sent to the model, so it must fit the context window — "
+                "upload a smaller excerpt, or add it as a connector to search "
+                "over it instead."
+            ),
+        )
 
 
 @router.get("/get-user-chat-sessions")
@@ -278,6 +333,10 @@ def handle_new_chat_message(
     chat_message_req: CreateChatMessageRequest,
     request: Request,
     user: User | None = Depends(current_user),
+    # Request-rate cap (Redis-backed, default off) runs BEFORE the
+    # token-budget check — cheap fast-path means a 429'd caller never
+    # touches the DB-backed token-usage query.
+    _rate_limit: None = Depends(check_message_request_rate_limit),
     _: None = Depends(check_token_rate_limits),
 ) -> StreamingResponse:
     """This endpoint is both used for all the following purposes:
@@ -515,6 +574,10 @@ def upload_files_for_chat(
                 )
             raise HTTPException(status_code=400, detail=error_detail)
 
+        # Byte cap, all types (cheap pre-filter; the token gate below is the
+        # real protection for text/docs).
+        _reject_if_file_too_large(file.size, file.filename)
+
         if (
             file.content_type in image_content_types
             and file.size
@@ -550,6 +613,13 @@ def upload_files_for_chat(
         # to re-extract it every time we send a message
         if file_type == ChatFileType.DOC:
             extracted_text = extract_file_text(file_name=file.filename, file=file.file)
+            # Token gate: the extracted text gets stuffed whole into the prompt.
+            # Reject (and drop the just-stored raw file) if it can't fit.
+            try:
+                _reject_if_text_too_long(extracted_text, file.filename)
+            except HTTPException:
+                file_store.delete_file(file_id)
+                raise
             text_file_id = str(uuid.uuid4())
             file_store.save_file(
                 file_name=text_file_id,
@@ -563,12 +633,164 @@ def upload_files_for_chat(
             # message
             file_info.append((text_file_id, file.filename, ChatFileType.PLAIN_TEXT))
         else:
+            if file_type == ChatFileType.PLAIN_TEXT:
+                # Plain text is stuffed as-is — token-gate it too (read the
+                # just-stored copy back so we don't depend on stream position).
+                raw = file_store.read_file(file_id, mode="b", use_tempfile=True)
+                try:
+                    _reject_if_text_too_long(
+                        raw.read().decode("utf-8", errors="ignore"), file.filename
+                    )
+                except HTTPException:
+                    file_store.delete_file(file_id)
+                    raise
             file_info.append((file_id, file.filename, file_type))
 
     return {
         "files": [
             {"id": file_id, "type": file_type, "name": file_name}
             for file_id, file_name, file_type in file_info
+        ]
+    }
+
+
+# --- Direct-to-Blob upload (SAS) -------------------------------------------
+# Lets the browser PUT files straight to Azure Blob, bypassing the server
+# (faster + offloads api-server bandwidth). Two steps: mint a SAS URL, then
+# confirm so the server records metadata (+ extracts text for docs). Only
+# active when the Azure file store is configured; otherwise the client falls
+# back to the two-hop POST /chat/file above.
+
+_IMAGE_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp"}
+_DOCUMENT_CONTENT_TYPES = {
+    "application/pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "message/rfc822",
+    "application/epub+zip",
+}
+
+
+def _chat_file_type_for(content_type: str | None) -> ChatFileType:
+    if content_type in _IMAGE_CONTENT_TYPES:
+        return ChatFileType.IMAGE
+    if content_type in _DOCUMENT_CONTENT_TYPES:
+        return ChatFileType.DOC
+    return ChatFileType.PLAIN_TEXT
+
+
+class ChatFileUploadUrlItem(BaseModel):
+    name: str
+    content_type: str | None = None
+    # Client-reported size — byte-gated here; the authoritative content gate
+    # is the token check at /file/confirm (after extraction).
+    size: int | None = None
+
+
+class ChatFileUploadUrlRequest(BaseModel):
+    files: list[ChatFileUploadUrlItem]
+
+
+class ChatFileUploadUrlResponseItem(BaseModel):
+    file_id: str
+    upload_url: str
+    content_type: str | None = None
+
+
+class ChatFileUploadUrlResponse(BaseModel):
+    # False → the active file store can't do direct uploads (e.g. Postgres);
+    # the client should fall back to the two-hop POST /chat/file.
+    direct_upload: bool
+    files: list[ChatFileUploadUrlResponseItem] = []
+
+
+@router.post("/file/upload-url")
+def get_chat_file_upload_urls(
+    req: ChatFileUploadUrlRequest,
+    db_session: Session = Depends(get_session),
+    _: User | None = Depends(current_user),
+) -> ChatFileUploadUrlResponse:
+    """Mint short-lived SAS URLs so the client PUTs files DIRECTLY to Blob."""
+    if FILE_STORE_TYPE != AzureBlobFileStore.__name__:
+        return ChatFileUploadUrlResponse(direct_upload=False)
+    store = cast(AzureBlobFileStore, get_default_file_store(db_session))
+    items: list[ChatFileUploadUrlResponseItem] = []
+    for f in req.files:
+        _reject_if_file_too_large(f.size, f.name)
+        file_id = str(uuid.uuid4())
+        items.append(
+            ChatFileUploadUrlResponseItem(
+                file_id=file_id,
+                upload_url=store.generate_upload_sas_url(file_id),
+                content_type=f.content_type,
+            )
+        )
+    return ChatFileUploadUrlResponse(direct_upload=True, files=items)
+
+
+class ChatFileConfirmItem(BaseModel):
+    file_id: str
+    name: str | None = None
+    content_type: str | None = None
+
+
+class ChatFileConfirmRequest(BaseModel):
+    files: list[ChatFileConfirmItem]
+
+
+@router.post("/file/confirm")
+def confirm_chat_file_uploads(
+    req: ChatFileConfirmRequest,
+    db_session: Session = Depends(get_session),
+    _: User | None = Depends(current_user),
+) -> dict[str, list[FileDescriptor]]:
+    """After the client direct-uploads to Blob, record each file's metadata
+    row and (for docs) extract text server-side — mirrors the tail of
+    upload_files_for_chat. Returns the FileDescriptors to attach to a message."""
+    store = cast(AzureBlobFileStore, get_default_file_store(db_session))
+    file_info: list[tuple[str, str | None, ChatFileType]] = []
+    for f in req.files:
+        file_type = _chat_file_type_for(f.content_type)
+        store.register_object(
+            file_name=f.file_id,
+            display_name=f.name,
+            file_origin=FileOrigin.CHAT_UPLOAD,
+            file_type=f.content_type or file_type.value,
+        )
+        if file_type == ChatFileType.DOC:
+            raw = store.read_file(f.file_id, mode="b", use_tempfile=True)
+            extracted_text = extract_file_text(file_name=f.name, file=raw)
+            # Token gate (stuffed whole into the prompt). On reject, drop the
+            # orphan blob the client already uploaded.
+            try:
+                _reject_if_text_too_long(extracted_text, f.name)
+            except HTTPException:
+                store.delete_file(f.file_id)
+                raise
+            text_file_id = str(uuid.uuid4())
+            store.save_file(
+                file_name=text_file_id,
+                content=io.BytesIO(extracted_text.encode()),
+                display_name=f.name,
+                file_origin=FileOrigin.CHAT_UPLOAD,
+                file_type="text/plain",
+            )
+            file_info.append((text_file_id, f.name, ChatFileType.PLAIN_TEXT))
+        else:
+            if file_type == ChatFileType.PLAIN_TEXT:
+                raw = store.read_file(f.file_id, mode="b", use_tempfile=True)
+                try:
+                    _reject_if_text_too_long(
+                        raw.read().decode("utf-8", errors="ignore"), f.name
+                    )
+                except HTTPException:
+                    store.delete_file(f.file_id)
+                    raise
+            file_info.append((f.file_id, f.name, file_type))
+    return {
+        "files": [
+            {"id": fid, "type": ftype, "name": fname} for fid, fname, ftype in file_info
         ]
     }
 

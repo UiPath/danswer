@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: background-deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: background
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: background
+    spec:
+      containers:
+      - command:
+        - /usr/bin/supervisord
+        env:
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:
+              key: postgres_user
+              name: danswer-secrets
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: postgres_password
+              name: danswer-secrets
+        envFrom:
+        - configMapRef:
+            name: env-configmap
+        - secretRef:
+            name: danswer-secrets
+        image: danswer-backend
+        imagePullPolicy: IfNotPresent
+        name: background
+        resources:
+          requests:
+            cpu: '2'
+            memory: 10Gi
+        # No volumes — vestigial like the split deployments: the file store and
+        # dynamic config are Postgres-backed (files optionally Azure Blob), so
+        # nothing reads /home/storage or /home/file_connector_storage. The PVCs
+        # remain defined in persistent-volumes.yaml, just unmounted here.

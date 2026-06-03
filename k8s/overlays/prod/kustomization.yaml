@@ -1,0 +1,82 @@
+# Production overlay → Darwin AKS cluster (kubectl context: `darwin`).
+#
+# Single source of truth for the prod environment:
+#   - env.properties         non-secret config (committed)
+#   - secrets.env            real secrets (gitignored; copy from .example)
+#   - images: below          which image tags this env runs
+#   - replicas: below        deployment scaling
+#
+# Apply:    kubectl apply -k k8s/overlays/prod
+# Preview:  kubectl kustomize k8s/overlays/prod
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+components:
+  - ../../optional/background-scaling
+
+namespace: darwin
+
+# Image refs are logical names in base/. Kustomize rewrites them to the
+# concrete registry+tag below. Bump a `newTag` here to roll out a new
+# image; no manifest edits required.
+images:
+  - name: danswer-backend
+    newName: sfbrdevhelmweacr.azurecr.io/danswer/danswer-backend
+    newTag: vha-147
+  - name: danswer-web-server
+    newName: sfbrdevhelmweacr.azurecr.io/danswer/danswer-web-server
+    newTag: vha-77
+  - name: danswer-model-server
+    newName: danswer/danswer-model-server
+    newTag: v0.3.94
+  - name: nginx
+    newName: nginx
+    newTag: 1.23.4-alpine
+  # Vespa images live in the separate Vespa overlay (k8s/overlays/prod-vespa)
+  # now that Vespa is applied independently of the app — see that file and
+  # k8s/README.md.
+
+replicas:
+  - name: api-server-deployment
+    count: 2
+  - name: background-deployment
+    count: 0
+  - name: web-server-deployment
+    count: 1
+  - name: nginx-deployment
+    count: 1
+  - name: inference-model-server-deployment
+    count: 1
+  - name: background-lite-deployment              # singleton — beat + slack; never >1
+    count: 1
+  - name: background-indexer-scheduler-deployment # singleton — the update.py loop
+    count: 1
+  - name: dask-scheduler-deployment               # singleton
+    count: 1
+  - name: dask-worker-deployment                  # ← THE indexing-throughput knob
+    count: 2
+
+# env-configmap: regenerated from env.properties. `behavior: create` because
+# base doesn't ship a ConfigMap with this name — the overlay owns it.
+configMapGenerator:
+  - name: env-configmap
+    behavior: create
+    envs:
+      - env.properties
+
+# danswer-secrets: regenerated from secrets.env (gitignored). Same name as the
+# existing live Secret — deployments referencing `danswer-secrets` work
+# unchanged.
+secretGenerator:
+  - name: danswer-secrets
+    envs:
+      - secrets.env
+
+# Without this kustomize appends a content-hash suffix to generated names
+# (e.g. danswer-secrets-abc123). Disabled so deployments' explicit
+# secretKeyRef name=danswer-secrets continues to resolve.
+generatorOptions:
+  disableNameSuffixHash: true

@@ -29,3 +29,13 @@ requestdata.json
 # screenshots) written during local UI debugging. Not source.
 .playwright-mcp/
 model-picker-open.png
+
+# Live cluster dumps from `kubectl get -o yaml > …`. NEVER commit:
+# Darwin's ConfigMap currently contains real secrets in plaintext (Slack
+# tokens, GEN_AI client secret, Jira token, Opsgenie key, etc.) — those
+# values would be committed verbatim if temp/ ever got tracked. Real
+# secret values for the new k8s/ layout live in gitignored *.env files
+# under overlays/.
+darwin-kubernetes/temp/
+k8s/overlays/*/secrets.env
+k8s/overlays/*/*.secrets.env

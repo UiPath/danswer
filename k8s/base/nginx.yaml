@@ -1,0 +1,86 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nginx
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+      - command:
+        - /bin/sh
+        - -c
+        - 'while :; do sleep 6h & wait $$!; nginx -s reload; done & nginx -g "daemon
+          off;"
+
+          '
+        env:
+        - name: DOMAIN
+          valueFrom:
+            configMapKeyRef:
+              key: DOMAIN
+              name: env-configmap
+        image: nginx
+        imagePullPolicy: IfNotPresent
+        name: nginx
+        ports:
+        - containerPort: 80
+          protocol: TCP
+        resources: {}
+        volumeMounts:
+        - mountPath: /etc/nginx/conf.d
+          name: nginx-conf
+      volumes:
+      - configMap:
+          defaultMode: 420
+          name: nginx-configmap
+        name: nginx-conf
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-service
+spec:
+  ports:
+  - name: http
+    port: 80
+    protocol: TCP
+    targetPort: 80
+  - name: danswer
+    port: 3000
+    protocol: TCP
+    targetPort: 80
+  selector:
+    app: nginx
+  type: ClusterIP
+---
+apiVersion: v1
+data:
+  nginx.conf: "upstream api_server {\n    server api-server-service:80 fail_timeout=0;\n\
+    }\n\nupstream web_server {\n    server web-server-service:80 fail_timeout=0;\n\
+    }\n\nserver {\n    listen 80;\n    server_name $$DOMAIN;\n\n    client_max_body_size\
+    \ 5G;    # Maximum upload size\n\n    location ~ ^/api(.*)$ {\n        rewrite\
+    \ ^/api(/.*)$ $1 break;\n        proxy_set_header X-Real-IP $remote_addr;\n  \
+    \      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n        proxy_set_header\
+    \ X-Forwarded-Proto $scheme;\n        proxy_set_header X-Forwarded-Host $host;\n\
+    \        proxy_set_header Host $host;\n        proxy_http_version 1.1;\n     \
+    \   proxy_buffering off;\n        proxy_redirect off;\n        proxy_pass http://api_server;\n\
+    \    }\n\n    location / {\n        proxy_set_header X-Real-IP $remote_addr;\n\
+    \        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n      \
+    \  proxy_set_header X-Forwarded-Proto $scheme;\n        proxy_set_header X-Forwarded-Host\
+    \ $host;\n        proxy_set_header Host $host;\n        proxy_http_version 1.1;\n\
+    \        proxy_redirect off;\n        proxy_pass http://web_server;\n    }\n}\n"
+kind: ConfigMap
+metadata:
+  name: nginx-configmap

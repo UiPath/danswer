@@ -18,6 +18,7 @@ from danswer.db.persona import mark_persona_as_not_deleted
 from danswer.db.persona import update_all_personas_display_priority
 from danswer.db.persona import update_persona_shared_users
 from danswer.db.persona import update_persona_visibility
+from danswer.db.persona_cache import get_personas_for_user_cached
 from danswer.llm.answering.prompts.utils import build_dummy_prompt
 from danswer.server.features.persona.models import CreatePersonaRequest
 from danswer.server.features.persona.models import PersonaSnapshot
@@ -163,13 +164,15 @@ def list_personas(
     db_session: Session = Depends(get_session),
     include_deleted: bool = False,
 ) -> list[PersonaSnapshot]:
+    # Routes through the Redis-backed cache when PERSONA_CACHE_ENABLED;
+    # otherwise behaves exactly as before (direct DB read + serialize).
+    # The cache handles the include_deleted=True case by falling through.
     user_id = user.id if user is not None else None
-    return [
-        PersonaSnapshot.from_model(persona)
-        for persona in get_personas(
-            user_id=user_id, include_deleted=include_deleted, db_session=db_session
-        )
-    ]
+    return get_personas_for_user_cached(
+        user_id=user_id,
+        db_session=db_session,
+        include_deleted=include_deleted,
+    )
 
 
 @basic_router.get("/{persona_id}")

@@ -64,7 +64,7 @@ moved on substantially. This table is the explicit map.
 | Indexing runtime | Celery `docfetching` + `docprocessing` workers | **Dask `LocalCluster`** in `update.py` (Celery only does maintenance) |
 | Number of Celery workers | Eight specialized workers (primary, light, heavy, kg_processing, monitoring, beat, etc.) | One worker + beat, spawned by `dev_run_background_jobs.py` |
 | Celery task definition | `@shared_task` under `background/celery/tasks/` | `@celery_app.task` in `background/celery/celery_app.py` |
-| Celery broker | Redis | SQLAlchemy/Postgres (`sqla+postgresql+psycopg2://…`) |
+| Celery broker | Redis | SQLAlchemy/Postgres by default; **optionally Redis** via `CELERY_BROKER_REDIS_ENABLED=true` (logical DB `CELERY_REDIS_DB_NUMBER`, default 1). Prod enables it to keep Celery's queue traffic off Postgres. Indexing is still Dask either way. |
 | Error handling | `raise OnyxError(OnyxErrorCode.X, …)` everywhere; no `HTTPException` | Plain `HTTPException(status_code=…, detail=…)` is the norm here. `OnyxError` doesn't exist. |
 | FastAPI return types | "Don't use `response_model=`, just type the function" | Both styles exist in this fork (the typed-return-annotation form is the majority — `response_model=` only appears once in `connector.py:560`). New endpoints should use the typed-return form. Don't strip the existing `response_model=` without checking serialization behavior. |
 | LLM call instrumentation | Every call must open a `LLMFlow`-tagged span via `traced_llm_call(...)` | No tracing system. `LLMFlow` doesn't exist. |
@@ -75,6 +75,7 @@ moved on substantially. This table is the explicit map.
 | Test buckets | `backend/tests/{unit,external_dependency_unit,integration}` + Playwright e2e | No comparable structure here. Most code lacks tests; add tests with the change if practical, otherwise note in PR. |
 | Plan template | The "Creating a Plan" section in their `CLAUDE.md` (Issues / Notes / Strategy / Tests) | Useful template; can be borrowed for non-trivial changes here too. |
 | Frontend stack | Next.js 15+, React 18+ | Next.js 14.2.x (App Router), React 18 |
+| K8s manifest path | `deployment/kubernetes/*` is what upstream documents | **`darwin-kubernetes/*` is the source of truth for the Darwin prod cluster.** `deployment/kubernetes/*` is upstream legacy / scratch — Darwin doesn't apply from there. New manifests for Darwin go in `darwin-kubernetes/`. See critical fact §9. |
 
 **Rule of thumb when reading upstream code or upstream guidance:** assume
 it doesn't apply unless you can verify the same construct exists here.
@@ -164,8 +165,9 @@ web/src/
 deployment/docker_compose/
   docker-compose.dev.yml           ← local stack (relational_db + index/Vespa +
                                      api_server + web_server + model_server +
-                                     background + nginx). Note: no Redis
-                                     here — Celery uses Postgres as its broker.
+                                     background + nginx). Celery brokers on
+                                     Postgres by default, or Redis when
+                                     CELERY_BROKER_REDIS_ENABLED=true.
 ```
 
 ---
@@ -339,6 +341,96 @@ JSON files via SharePoint, the right fix is bypassing office365's
 auto-parse entirely with a raw `requests.get` against the
 `/drives/{drive_id}/items/{item_id}/content` endpoint using the bearer
 token. Don't reintroduce the lossy re-serialization.
+
+### 9. `darwin-kubernetes/` is the source of truth for the Darwin cluster
+
+The repo has two parallel k8s manifest trees and they are **not** kept
+in sync:
+
+| Path | What it is | When to touch |
+|---|---|---|
+| `darwin-kubernetes/*.yaml` | **The actual manifests applied to Darwin's AKS cluster (the `darwin` kube context).** Image registry is `sfbrdevhelmweacr.azurecr.io/...`, configmap is `env-configmap`, secrets is `danswer-secrets`, indexing pods have `indexcpu`-pool affinity + `darwin/indexing` toleration, env vars come from the Darwin configmap. | **Edit here for any prod-affecting change**, including new deployments. |
+| `deployment/kubernetes/*.yaml` | Upstream-style manifests inherited from Onyx / authored to match the OSS docker-compose. Generic image (`danswer/danswer-backend:latest`), no Azure-specific affinity / tolerations, no Darwin-specific configmap wiring. | Reference only — not deployed to Darwin. Useful for seeing the "upstream shape" of a new component before adapting it to `darwin-kubernetes/`. |
+
+When upstream (or a branch like `feature/backgroundscaling`) adds a
+new manifest in `deployment/kubernetes/`, the corresponding
+`darwin-kubernetes/` version must be hand-ported with:
+
+- Image: `sfbrdevhelmweacr.azurecr.io/danswer/danswer-backend:<tag>`
+- `envFrom: configMapRef name: env-configmap`
+- POSTGRES_USER / POSTGRES_PASSWORD via `secretKeyRef name: danswer-secrets`
+- REDIS_PASSWORD via `secretKeyRef name: danswer-secrets, optional: true`
+  (so unauth'd in-cluster Redis still works)
+- For indexing-related pods: `nodeAffinity` on `agentpool=indexcpu` +
+  `tolerations` for `darwin/indexing/NoSchedule` + `dynamic-pvc` /
+  `file-connector-pvc` volume mounts.
+
+A drop-in port that misses any of these will boot in Darwin but
+mis-route, miss secrets, or end up on the wrong node pool. The
+existing `darwin-kubernetes/background-deployment.yaml` and
+`api_server-service-deployment.yaml` are the canonical templates for
+the conventions.
+
+### 10. NEVER use `:latest` (or a floating tag) for Vespa — pin the exact version
+
+**This caused a full prod outage.** Vespa's config server refuses an
+auto-upgrade spanning more than ~30 releases (`VersionState
+.verifyVersionIntervalForUpgrade` → `Cannot upgrade from X to Y ...
+interval too large`). If a manifest change bumps the Vespa image to a
+much newer version, **every Vespa StatefulSet rolls and the config
+server crash-loops on bootstrap**, taking the whole cluster down
+(config tier → no quorum → cluster-wide `upstream connect error /
+connection refused` 503s on search AND the api-server's
+`ensure_indices_exist`).
+
+What triggered it: an image spec of bare `vespaengine/vespa` (which
+pulls `:latest` at pull time) was changed to an explicit
+`vespaengine/vespa:latest`, and on the next `kubectl apply` `:latest`
+had moved 30+ releases ahead of the running version.
+
+Rules:
+- **Pin Vespa to the exact version the cluster runs.** As of this
+  writing that is **`8.600.35`** — it's the on-disk format the content
+  nodes' index (1.6M+ docs, 100Gi PVCs) is written in. See the pinned
+  `images:` entry + comment in `k8s/overlays/{prod,local}/kustomization.yaml`.
+- **Upgrades are STEPWISE and deliberate** — at most ~30 releases per
+  hop, applied as an ordered operation, never a bare tag bump. Do NOT
+  set `VESPA_SKIP_UPGRADE_CHECK=true` to force a big jump on prod; it
+  risks the index format.
+- **Upgrade with `k8s/scripts/vespa-upgrade.sh <target> [ns]`, NOT a
+  kustomize apply.** Ordering across the 5 StatefulSets (configserver →
+  admin → content one-ordinal-at-a-time → feed → query, health-gated
+  between each) is impossible to express declaratively — a `kubectl
+  apply` rolls them all at once. The manifests support the script via
+  **per-role logical image names** (`vespa-configserver`, `vespa-admin`,
+  `vespa-content`, `vespa-feed`, `vespa-query` in `k8s/base/vespa/`) so
+  versions move independently, plus readiness probes on content/admin
+  with `publishNotReadyAddresses: true` on `vespa-internal` (peer
+  discovery must not be readiness-gated). Run `DRY_RUN=1` first. After a
+  successful upgrade, sync the per-role `newTag`s in the overlays.
+- **`k8s/scripts/guarded-apply.sh <overlay>` is the everyday-apply safety
+  net, not the upgrade tool.** The guard reads the live running Vespa
+  version, compares it to what the overlay would deploy, and refuses a
+  >30-minor upgrade / major change / floating tag (and warns on big
+  downgrades) before it can reach the cluster. It checks against *live*
+  (not the repo's previous pin) because config drifts out of git. But it
+  still rolls all roles at once — for an actual version change use
+  `vespa-upgrade.sh`.
+- This applies to any version-stateful StatefulSet, but Vespa is the
+  one that bites.
+
+**Recovery if it happens again** (data is safe — it lives on the
+content PVCs, untouched): set all 5 Vespa StatefulSets' image back to
+the running version (`kubectl set image statefulset/vespa-* ...`),
+delete the config-server pods to recreate on the correct version, wait
+for `:19071/state/v1/health` → 200, then restart the api-server so
+`ensure_indices_exist` redeploys the schema. (Clearing the
+config-server ZooKeeper state via `vespa-configserver-remove-state` is
+only needed if the ZK state is genuinely corrupt — the version
+mismatch alone does NOT require it.) Vespa nodes also have **no
+liveness probes by design** (an aggressive one kills slow-but-healthy
+nodes); readiness probes on the Service-backed nodes
+(configserver/query/feed) gate traffic during the slow bootstrap.
 
 ---
 

@@ -1,8 +1,11 @@
-"""Populate `analytics_daily_rollup` from existing chat data.
+"""Populate `analytics_daily_rollup` AND `analytics_user_first_seen` from
+existing chat data.
 
 Run this ONCE after deploying the rollup feature, before the next chat
 retention sweep deletes any old data. After this completes, the daily
-Celery beat task (`run_analytics_rollup_task`) keeps the table fresh.
+Celery beat task (`run_analytics_rollup_task`) keeps both tables fresh.
+Walking history ascending means each user's first_seen_date is their true
+first-ever active day (within the data that still exists).
 
 Usage:
 
