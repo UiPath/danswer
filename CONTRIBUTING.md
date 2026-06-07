@@ -327,6 +327,17 @@ export INDEXING_MODEL_SERVER_HOST=localhost
 export INDEXING_MODEL_SERVER_PORT=9000
 export REDIS_HOST=cache             # matches the compose service name
 
+# Cross-encoder reranking, available locally. The model server (`dmo`) loads the
+# reranker IN-PROCESS (sentence-transformers, CPU) — no extra container. Uses the
+# small default model (mxbai-rerank-xsmall-v1); set RERANK_MODEL_NAME to try a
+# bigger one. Reranking still only runs for assistants / chats that opt in.
+# (Prod serves the reranker via a TEI container instead — see k8s/optional/tei-rerank.)
+export RERANK_ENABLED=true
+export LLM_RELEVANCE_FILTER_ENABLED=true   # LLM relevance filter; independent of rerank
+# Advanced: to mirror prod and offload the reranker to a local TEI container
+# instead of in-process, run TEI yourself and set:
+# export RERANK_SERVER_URL=http://localhost:8086
+
 # ---------------------------------------------------------------------------
 # LLM (Generative AI) — UiPath LLM Gateway via OAuth client credentials
 # Replace with your own gateway / model-provider settings if different.

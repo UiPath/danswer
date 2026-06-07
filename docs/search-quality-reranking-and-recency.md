@@ -85,8 +85,7 @@ runs across both → a far more accurate relevance judgment. Standard
 retrieve-broad-then-rerank.
 
 **The real flow (corrected mental model):**
-1. Vespa returns `NUM_RETURNED_HITS = 50` (+ up to 10 from the prioritized query,
-   deduped) — **not 15**.
+1. Vespa returns `NUM_RETURNED_HITS = 50` (a single all-sources query) — **not 15**.
 2. `rerank_chunks` reranks only the **top 15** (`NUM_RERANKED_RESULTS`,
    `chunks_to_rerank[:num_rerank]`); the rest get `score=None`, appended behind.
 3. `semantic_reranking` computes the cross-encoder score, then
@@ -147,41 +146,38 @@ from the rerank rollout, and measure independently.
 
 ---
 
-## 5. The source-prioritization bias (and the fix)
+## 5. Source diversity: keeping KB/web from getting lost
 
-`_query_vespa` (`index.py:~705`) historically ran **two** queries and merged them:
-```
-Query A: all sources,           hits=50
-Query B: + source_type ∈ {web, sfkbarticles}, hits=10   (default-on)
-merge = B + A; dedup by (doc_id,chunk_id) keeping MAX score; sort desc
-```
-**Why it's a bug:** the rank profile uses `normalize_linear(...)`, which is
-min-max **relative to each query's own candidate set**. Query B's narrow set
-normalizes its top docs near the ceiling regardless of absolute relevance; dedup
-keeps the inflated B-score. ⇒ `web`/`sfkbarticles` are systematically lifted to
-the top by a normalization artifact.
+**The requirement:** if a chatty source (e.g. Slack) produces the
+highest-relevance chunks, it shouldn't crowd authoritative **KB/web doc**
+content out of the ~10 chunks that reach the LLM.
 
-**Interaction with reranking:** rerank only re-scores the **top 15 by this biased
-score**, so the bias moves *upstream into candidate selection* — a genuinely
-better non-prioritized doc ranked #16 never enters the rerank window. So the hack
-**partially undermines** the rerank rollout.
+**What the fork used to do (removed on this branch):** `_query_vespa` ran **two**
+queries and merged them — an all-sources query plus a second, source-filtered
+query — to force `web`/`sfkbarticles` in. That was the wrong mechanism: the rank
+profile uses `normalize_linear(...)`, which is min-max **relative to each query's
+own candidate set**, so the narrow second query's top docs normalized near the
+ceiling **regardless of absolute relevance**. Result: prioritized sources were
+*over-promoted* by a normalization artifact, and because rerank/relevance only
+see the **top-N candidate window**, the inflated ordering polluted what those
+stages got to evaluate.
 
-Secondary bugs in the same function: hardcodes `hits` (ignores
-`num_to_retrieve`/persona limit) and ignores `offset` (pagination).
+**What we do instead:** `_query_vespa` now issues a **single, comparably-scored
+query**, and source diversity is enforced at **final doc selection** —
+`ensure_source_diversity` in `llm/answering/doc_pruning.py` (called from
+`_apply_pruning`, after the relevance reorder, before the token-budget cut):
 
-**The fix (two paths, this branch):**
-- **Reranking ON** ⇒ `prioritize_sources=False` ⇒ a **single all-sources query**
-  (one comparable `normalize_linear` scale, honors the caller's `hits`); the
-  cross-encoder reorders.
-- **Reranking OFF** ⇒ legacy two-query prioritized flow, **byte-for-byte
-  unchanged**.
+- It promotes up to **`SOURCE_DIVERSITY_RESERVED_SLOTS`** (default **2**) of the
+  highest-ranked **`PROTECTED_SOURCES`** (default `web,sfkbarticles`) docs to the
+  front, preserving the rest of the order. Actual promotion is
+  `min(reserved, #protected docs present)`.
+- It's **always-on and globally configured** (env), operates on the **single
+  comparably-scored** candidate set (no inflation, plays correctly with rerank),
+  and is **not a per-assistant decision** — so it doesn't add an assistant knob.
+- Disable with `SOURCE_DIVERSITY_RESERVED_SLOTS=0`.
 
-Driven by `prioritize_sources=query.skip_rerank` in `doc_index_retrieval` — so it
-rides the same per-assistant + global rerank decision, no separate flag.
-
-> NOTE: the prioritized-source hack is a deliberate fork divergence. The split
-> preserves it whenever reranking is off; if you later remove it entirely,
-> confirm the original product intent first (curated web/KB content?).
+So the *goal* of the old prioritized-source hack is preserved (KB/web aren't
+lost), without the score-inflation bug and without a per-assistant toggle.
 
 ---
 
@@ -190,9 +186,9 @@ rides the same per-assistant + global rerank decision, no separate flag.
 **Two-level gate — rerank runs iff `RERANK_ENABLED` (global) AND
 `persona.rerank_enabled` (per-assistant).**
 
-- **Global** `RERANK_ENABLED` (env, default false): the master switch. When on, a
-  GPU-backed model server warms the reranker and the app *may* rerank. Off (local
-  / default) ⇒ reranking never runs ⇒ **no GPU required**.
+- **Global** `RERANK_ENABLED` (env, default false): the master switch. When on,
+  the reranker is available (served by **TEI on CPU** — see §7 — or a GPU) and
+  the app *may* rerank. Off (local / default) ⇒ reranking never runs.
 - **Per-assistant** `Persona.rerank_enabled` (bool, default false): which
   assistants actually rerank. Lets you enable it on one assistant, compare
   answers against an un-toggled copy in chat **or** Slack, and flip the default
@@ -209,39 +205,84 @@ Both chat and Slack respect it because `SearchTool` builds `SearchRequest` with
 
 ---
 
-## 7. Infrastructure / GPU plan
+## 6b. The two assistant knobs + valid combinations
 
-Observed on the **darwin** cluster (June 2026):
-- **No GPU anywhere** (4 nodes, all `nvidia.com/gpu: <none>`).
-- The inference model server (the `INDEXING_ONLY=false` pod) does **query
-  embedding + intent** today (~7.3 GiB RAM), with **no resource requests/limits**
-  on its container, on a node already at **87% memory** → eviction-prone.
-- With rerank off, the cross-encoder is **not even loaded** (`warm_up_cross_encoders`
-  is gated). So the reranker is a *net-new* model + per-query compute when enabled.
+There are **two per-assistant search-quality knobs**, each gated the same way
+(global master switch × per-assistant flag, with a per-conversation chat toggle
+that ignores the assistant). Source diversity (§5) is **not** a knob — it's
+automatic and globally configured.
 
-Decisions:
-- **Self-host on a dedicated GPU node**, `Standard_NC6s_v3` (1× V100 16 GB) — more
-  than enough (a cross-encoder uses ~1 GB; reranks 15 chunks in <50 ms).
-- **Co-locate** embedding + intent + reranker on that GPU node ("deploy rerank +
-  other inference models together on GPU") — maximizes the GPU, accelerates query
-  embedding, and evacuates the strained CPU node. **Single-GPU-node risk
-  accepted** (if it dies, search degrades, not just rerank).
-- The existing `danswer-model-server` image **already bundles CUDA torch** — no
-  rebuild; it auto-uses the GPU once scheduled there.
-- **Reranker model:** `BAAI/bge-reranker-v2-m3` (env-selectable via
-  `RERANK_MODEL_NAME`; local keeps the small default). **Switching rerankers needs
-  NO reindex** — cross-encoders score chunk *text* at query time; only changing
-  the *embedding* model forces a reindex. (Avoid late-interaction/ColBERT-style
-  models, which would need indexing changes.)
-- **Upstream's stance:** Onyx made the reranker pluggable (default none; local-dev
-  = mxbai-xsmall) and **disables local reranking when there's no GPU** (PR #4011)
-  — i.e. don't self-host cross-encoder reranking on CPU. Hence the GPU node.
+| Knob | Global flag | Per-assistant | Chat toggle (default) | Needs GPU? |
+|---|---|---|---|---|
+| **Reranking** (cross-encoder) | `RERANK_ENABLED` | `Persona.rerank_enabled` | off | No — TEI on CPU (§7) |
+| **LLM relevance filter** (one-shot, **main LLM**) | `LLM_RELEVANCE_FILTER_ENABLED` | `Persona.llm_relevance_filter` | off | **No** (LLM-only) |
 
-k8s: `k8s/optional/gpu-inference/` component pins the inference deployment to the
-GPU pool (`nodeSelector: agentpool=gpupool`, toleration `sku=gpu:NoSchedule`,
-`nvidia.com/gpu: 1`, real cpu/mem requests+limits — also fixes the no-limits
-smell), and sets `RERANK_MODEL_NAME`. The overlay must also set
-`RERANK_ENABLED=true` in `env.properties` (reaches every pod via env-configmap).
+- **LLM relevance filter** is a **single listwise call on the main LLM**
+  (`llm_eval_chunks_listwise`, fails open on parse/error), not 15 fast-LLM
+  calls. It needs **no GPU**, so it's a cheaper quality tier on its own.
+- **Source diversity** (KB/web protected from being crowded out) is handled
+  automatically at doc selection — global env (`PROTECTED_SOURCES`,
+  `SOURCE_DIVERSITY_RESERVED_SLOTS`), no per-assistant or chat decision (§5).
+- **Resolution precedence** for the two knobs: chat per-conversation toggle (if
+  the request set it) → assistant flag → default. Slack/one-shot always use the
+  assistant flag.
+
+**Reranking × relevance filter — all four combinations work** (source diversity
+applies underneath all of them):
+
+| `rerank_enabled` | `llm_relevance_filter` | Behavior | Infra |
+|---|---|---|---|
+| off | off | raw hybrid order (today's default) | none |
+| **on** | off | cross-encoder reordering | **TEI-CPU** (or GPU) |
+| off | **on** | LLM relevance filter only (1 LLM call) | **none / no GPU** |
+| **on** | **on** | rerank **then** relevance-filter | **TEI-CPU** (or GPU) |
+
+The "relevance-filter-only, no GPU" row is the cheap middle tier; the "rerank-on"
+rows need the TEI reranker but still **no GPU**.
+
+---
+
+## 7. Reranker serving: TEI on CPU (no GPU)
+
+**Decision: serve the reranker on CPU via Hugging Face TEI — no GPU.**
+
+The darwin cluster has **no GPU** (4 nodes, all `nvidia.com/gpu: <none>`). The
+*naive* path (our model server's `sentence_transformers.CrossEncoder` on CPU) is
+seconds-slow — which is why upstream Onyx disables local rerank without a GPU
+(PR #4011). But that's an artifact of the **unoptimized runtime**, not the model:
+with an optimized CPU runtime (**TEI** — Rust, native token batching), the same
+`BAAI/bge-reranker-v2-m3` (568M) reranks ~20 chunks in **~100–250 ms on CPU at
+full precision** — acceptable for the retrieval phase, and **no accuracy loss**
+vs a GPU (CPU vs GPU doesn't change the math; only INT8 *quantization* would, and
+we don't use it).
+
+How it's wired:
+- A **`tei-rerank`** deployment (`ghcr.io/huggingface/text-embeddings-inference:cpu-*`)
+  serves `bge-reranker-v2-m3` at `--dtype float32`, exposing `/rerank`.
+- The app's `CrossEncoderEnsembleModel` calls TEI's `/rerank` when
+  **`RERANK_SERVER_URL`** is set (scattering TEI's score-sorted reply back to
+  passage order); otherwise it uses the legacy model-server path. When TEI is in
+  use, our own model server does **not** load the cross-encoder.
+- **No reindex** to adopt or switch rerankers — cross-encoders score chunk *text*
+  at query time; only changing the *embedding* model forces a reindex. (Avoid
+  late-interaction/ColBERT-style models, which would need indexing changes.)
+
+Sizing / scaling (per replica): **~4 vCPU, request 4 GiB / limit 8 GiB** (weights
+~2.3 GB FP32 + batch headroom). TEI is stateless → scale with replicas or an HPA
+on CPU; rule of thumb ~1 replica per ~5 sustained rerank-QPS. Set CPU
+request==limit for predictable latency. Optional INT8 later trades a small
+accuracy hit for ~2× speed / ~0.6 GB.
+
+k8s: **`k8s/optional/tei-rerank/`** component (Deployment + Service, CPU
+resources, `/health` probes, model-cache volume). Included by **both** the prod
+and local overlays. The overlay's `env.properties` sets `RERANK_ENABLED=true`,
+`RERANK_SERVER_URL=http://tei-rerank-service:80`, and
+`LLM_RELEVANCE_FILTER_ENABLED=true`. (The earlier GPU `gpu-inference` component
+was removed in favor of this.)
+
+> If a GPU is ever desired for lowest latency, the same model runs on a **CUDA**
+> node (e.g. `NV6ads_A10_v5` — fractional NVIDIA A10; *not* `NV8as_v4`, whose GPU
+> is AMD and unusable by TEI/PyTorch). Not needed for current scale.
 
 ---
 
@@ -262,39 +303,69 @@ Backend:
 - `danswerbot/slack/handlers/handle_message.py` — `skip_rerank=None` (+ dropped
   the now-unused `ENABLE_RERANKING_ASYNC_FLOW` import).
 - `model_server/main.py` — warm cross-encoder when `RERANK_ENABLED`.
-- `document_index/vespa/index.py` — `_query_vespa(prioritize_sources=...)` single
-  vs two-query split; `hybrid_retrieval(prioritize_sources=...)`.
-- `document_index/interfaces.py` — `hybrid_retrieval` abstract signature.
-- `search/retrieval/search_runner.py` — pass
-  `prioritize_sources=query.skip_rerank`.
+- `document_index/vespa/index.py` — `_query_vespa` simplified to a **single
+  all-sources query** (removed the two-query union).
 
-Web (`web/src/app/admin/assistants/`):
-- `interfaces.ts`, `lib.ts`, `AssistantEditor.tsx` — "Rerank results (beta)"
-  toggle, mirroring `llm_relevance_filter`.
+LLM relevance filter (independent gate, one-shot, main LLM):
+- `configs/chat_configs.py` — `LLM_RELEVANCE_FILTER_ENABLED`.
+- `preprocessing.py` — `_resolve_skip_llm_chunk_filter` resolver.
+- `prompts/llm_chunk_filter.py` + `secondary_llm_flows/chunk_usefulness.py` —
+  `LISTWISE_CHUNK_FILTER_PROMPT` + `llm_eval_chunks_listwise` (+ `_parse_useful_indices`).
+- `search/pipeline.py` — relevance filter now uses the **main** llm (not fast).
+- `search/postprocessing/postprocessing.py` — `filter_chunks` → listwise call.
+
+Source diversity (automatic, global — replaces the old two-query prioritization):
+- `configs/chat_configs.py` — `PROTECTED_SOURCES`, `SOURCE_DIVERSITY_RESERVED_SLOTS`.
+- `llm/answering/doc_pruning.py` — `ensure_source_diversity`, called in
+  `_apply_pruning` after the relevance reorder.
+
+Chat per-conversation toggles + TEI serving:
+- `server/query_and_chat/models.py` — `use_reranking` / `use_relevance_filter`
+  on `CreateChatMessageRequest`.
+- `tools/search/search_tool.py` + `chat/process_message.py` — thread the
+  per-conversation skips into the `SearchRequest`.
+- `shared_configs/configs.py` — `RERANK_SERVER_URL`; `search_nlp_models.py`
+  `CrossEncoderEnsembleModel` TEI `/rerank` path; `model_server/main.py` skips
+  loading the cross-encoder when TEI serves it.
+
+Web:
+- `admin/assistants/{interfaces,lib,AssistantEditor}.tsx` — "Rerank results"
+  checkbox (relevance filter reuses the existing "Apply LLM Relevance Filter").
+- `chat/{lib.tsx,ChatPage.tsx,input/ChatInputBar.tsx}` — two per-conversation
+  chat toggles (Rerank, Relevance).
 
 Infra:
-- `k8s/optional/gpu-inference/` — kustomization + inference patch.
+- `k8s/optional/tei-rerank/` — CPU TEI reranker component; included by the **prod**
+  overlay (sets `RERANK_ENABLED` / `RERANK_SERVER_URL` /
+  `LLM_RELEVANCE_FILTER_ENABLED`). **Local** loads the reranker in-process (no
+  TEI), via `RERANK_ENABLED` with `RERANK_SERVER_URL` unset. (Replaced the
+  removed `gpu-inference`.)
 
-Tests (`backend/tests/unit/...`):
-- `search/preprocessing/test_resolve_skip_rerank.py` — global × per-assistant
-  matrix + explicit override + legacy fallback (7 cases).
-- `document_index/vespa/test_query_vespa_prioritization.py` — single-vs-two-query
-  split + default-is-legacy (3 cases).
+Tests:
+- `tests/unit/.../test_resolve_skip_rerank.py`, `test_resolve_skip_llm_chunk_filter.py`
+  — the two gating matrices.
+- `tests/unit/.../test_listwise_chunk_filter.py` — listwise parser.
+- `tests/unit/.../test_source_diversity.py` — diversity promotion / caps / disable.
+- `tests/integration/` — TEI rerank transport (mocked), **real CPU cross-encoder
+  reordering** (MiniLM), and `filter_chunks` with a stub LLM.
 
 ---
 
 ## 9. How to enable in prod (when ready)
 
 1. `alembic upgrade head` (adds `persona.rerank_enabled`) → bounce `dapi` + `dbe`.
-2. Add the `Standard_NC6s_v3` GPU node pool (label `agentpool=gpupool`, taint
-   `sku=gpu:NoSchedule`, NVIDIA device plugin).
-3. Prod overlay: add `- ../../optional/gpu-inference` to `components:` **and** set
-   `RERANK_ENABLED=true` in `env.properties`. Apply.
-4. Toggle **"Rerank results"** on one test assistant → A/B compare against an
-   un-toggled copy in chat + Slack → flip the default once satisfied.
+2. The prod overlay already includes `../../optional/tei-rerank` and sets
+   `RERANK_ENABLED` / `RERANK_SERVER_URL` / `LLM_RELEVANCE_FILTER_ENABLED` in
+   `env.properties` — `kubectl apply -k k8s/overlays/prod`. TEI downloads the
+   model on first boot (back `/data` with a PVC to avoid re-download); **no GPU,
+   no image rebuild.** (Verify the pinned `cpu-*` TEI image tag first.)
+3. Per assistant (admin editor): toggle **Rerank results** and/or **Apply LLM
+   Relevance Filter**. Or use the **chat-page toggles** to A/B per conversation.
+   Compare answers, then flip the defaults once satisfied. Source diversity is
+   automatic (tune via `PROTECTED_SOURCES` / `SOURCE_DIVERSITY_RESERVED_SLOTS`).
 
-Local stays GPU-free with zero config: omit the component, leave `RERANK_ENABLED`
-unset → reranking never runs.
+No GPU required at any point. Local mirrors prod (the `local` overlay includes
+the same TEI component), so reranking can be exercised locally.
 
 ---
 
@@ -303,8 +374,9 @@ unset → reranking never runs.
 - **Recency tuning is a separate experiment** from reranking — don't bundle.
   Start with `favor_recent` on the test assistant (config); lower the `0.75`
   floor only if needed (schema redeploy). Measure independently.
-- **Confirm the intent** of the prioritized-source hack before ever removing it
-  outright (it's preserved whenever reranking is off).
+- **Graceful rerank fallback:** if the TEI reranker errors, search currently
+  degrades rather than falling back to bi-encoder order — worth adding before
+  enabling rerank by default (see §3 / reliability).
 - **`enable_auto_detect_filters` is dead** globally (§4) — fixing it would restore
   LLM time/source filter extraction *and* the `auto` recency path; tracked
   separately.
