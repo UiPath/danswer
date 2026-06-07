@@ -25,6 +25,32 @@ Respond with EXACTLY AND ONLY: "{USEFUL_PAT}" or "{NONUSEFUL_PAT}"
 """.strip()
 
 
+# Listwise variant: judge ALL candidate sections in ONE call (cheaper +
+# lower-latency than one call per chunk, and lets the model compare them).
+# Run on the MAIN llm. {sections} is a numbered list; the model returns a JSON
+# array of the USEFUL section numbers.
+LISTWISE_CHUNK_FILTER_PROMPT = """
+You are given {count} numbered reference sections and a user query. For EACH
+section, decide whether it is USEFUL for answering the query. It is NOT enough
+to be related — the section must contain information USEFUL for answering. If a
+section contains ANY useful information that counts; it need not fully answer
+the query.
+
+Reference Sections:
+{sections}
+
+User Query:
+```
+{user_query}
+```
+
+Respond with EXACTLY AND ONLY a JSON array of the numbers of the useful
+sections, in any order, e.g. [1, 3, 4]. If none are useful, respond with [].
+""".strip()
+
+
 # Use the following for easy viewing of prompts
 if __name__ == "__main__":
     print(CHUNK_FILTER_PROMPT)
+    print("\n\n")
+    print(LISTWISE_CHUNK_FILTER_PROMPT)

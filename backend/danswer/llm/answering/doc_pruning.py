@@ -5,6 +5,8 @@ from typing import TypeVar
 from danswer.chat.models import (
     LlmDoc,
 )
+from danswer.configs.chat_configs import PROTECTED_SOURCES
+from danswer.configs.chat_configs import SOURCE_DIVERSITY_RESERVED_SLOTS
 from danswer.configs.constants import IGNORE_FOR_QA
 from danswer.configs.model_configs import DOC_EMBEDDING_CONTEXT_SIZE
 from danswer.llm.answering.models import DocumentPruningConfig
@@ -84,6 +86,37 @@ def reorder_docs(
     return reordered_docs
 
 
+def ensure_source_diversity(docs: list[T]) -> list[T]:
+    """Guarantee that up to SOURCE_DIVERSITY_RESERVED_SLOTS of the highest-ranked
+    docs from PROTECTED_SOURCES survive final selection, so curated KB/web
+    content isn't crowded out of the prompt by a chatty high-relevance source
+    (e.g. Slack). Promotes those protected docs to the front (keeping their
+    relative order); everything else keeps its order. No-op when disabled
+    (reserved <= 0), when there are no protected sources, or when none are
+    present in `docs`.
+    """
+    if SOURCE_DIVERSITY_RESERVED_SLOTS <= 0 or not PROTECTED_SOURCES:
+        return docs
+
+    protected = set(PROTECTED_SOURCES)
+    promote_indices: list[int] = []
+    for ind, doc in enumerate(docs):
+        source = doc.source_type
+        source_str = (source.value if hasattr(source, "value") else str(source)).lower()
+        if source_str in protected:
+            promote_indices.append(ind)
+            if len(promote_indices) >= SOURCE_DIVERSITY_RESERVED_SLOTS:
+                break
+
+    if not promote_indices:
+        return docs
+
+    promote_set = set(promote_indices)
+    promoted = [docs[i] for i in promote_indices]
+    rest = [doc for i, doc in enumerate(docs) if i not in promote_set]
+    return promoted + rest
+
+
 def _remove_docs_to_ignore(docs: list[LlmDoc]) -> list[LlmDoc]:
     return [doc for doc in docs if not doc.metadata.get(IGNORE_FOR_QA)]
 
@@ -103,6 +136,8 @@ def _apply_pruning(
     docs = reorder_docs(docs=docs, doc_relevance_list=doc_relevance_list)
     # remove docs that are explicitly marked as not for QA
     docs = _remove_docs_to_ignore(docs=docs)
+    # guarantee curated KB/web docs aren't crowded out before the token-budget cut
+    docs = ensure_source_diversity(docs)
 
     tokens_per_doc: list[int] = []
     final_doc_ind = None

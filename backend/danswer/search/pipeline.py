@@ -300,7 +300,10 @@ class SearchPipeline:
         self._postprocessing_generator = search_postprocessing(
             search_query=self.search_query,
             retrieved_chunks=self.retrieved_chunks,
-            llm=self.fast_llm,  # use fast_llm for relevance, since it is a relatively easier task
+            # Use the MAIN llm (not fast_llm) for the relevance filter: it now
+            # judges all chunks in one listwise call, and the main model is more
+            # reliable at that structured multi-item judgment.
+            llm=self.llm,
             rerank_metrics_callback=self.rerank_metrics_callback,
         )
         self._reranked_chunks = cast(

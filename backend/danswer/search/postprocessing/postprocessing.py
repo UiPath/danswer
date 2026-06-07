@@ -17,7 +17,7 @@ from danswer.search.models import RerankMetricsContainer
 from danswer.search.models import SearchQuery
 from danswer.search.models import SearchType
 from danswer.search.search_nlp_models import CrossEncoderEnsembleModel
-from danswer.secondary_llm_flows.chunk_usefulness import llm_batch_eval_chunks
+from danswer.secondary_llm_flows.chunk_usefulness import llm_eval_chunks_listwise
 from danswer.utils.logger import setup_logger
 from danswer.utils.threadpool_concurrency import FunctionCall
 from danswer.utils.threadpool_concurrency import run_functions_in_parallel
@@ -141,7 +141,9 @@ def filter_chunks(
 
     Returns a list of the unique chunk IDs that were marked as relevant"""
     chunks_to_filter = chunks_to_filter[: query.max_llm_filter_chunks]
-    llm_chunk_selection = llm_batch_eval_chunks(
+    # One listwise call over all candidates (on the main LLM) rather than one
+    # call per chunk — cheaper, lower latency, and lets the model compare them.
+    llm_chunk_selection = llm_eval_chunks_listwise(
         query=query.query,
         chunk_contents=[chunk.content for chunk in chunks_to_filter],
         llm=llm,

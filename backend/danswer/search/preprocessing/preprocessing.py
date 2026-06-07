@@ -4,6 +4,7 @@ from danswer.configs.chat_configs import BASE_RECENCY_DECAY
 from danswer.configs.chat_configs import DISABLE_LLM_CHUNK_FILTER
 from danswer.configs.chat_configs import DISABLE_LLM_FILTER_EXTRACTION
 from danswer.configs.chat_configs import FAVOR_RECENT_DECAY_MULTIPLIER
+from danswer.configs.chat_configs import LLM_RELEVANCE_FILTER_ENABLED
 from danswer.configs.chat_configs import NUM_RETURNED_HITS
 from danswer.db.models import Persona
 from danswer.db.models import User
@@ -50,6 +51,30 @@ def _resolve_skip_rerank(
     persona_opts_in = bool(persona and persona.rerank_enabled)
     rerank = (RERANK_ENABLED and persona_opts_in) or ENABLE_RERANKING_REAL_TIME_FLOW
     return not rerank
+
+
+def _resolve_skip_llm_chunk_filter(
+    explicit_skip: bool | None,
+    persona: Persona | None,
+    disable_llm_chunk_filter: bool,
+) -> bool:
+    """Single source of truth for whether to skip the LLM relevance filter.
+
+    Independent of reranking (it's LLM-only, needs no GPU). The filter runs only
+    when the global master switch LLM_RELEVANCE_FILTER_ENABLED AND the
+    per-assistant opt-in (Persona.llm_relevance_filter) are both on. The global
+    DISABLE_LLM_CHUNK_FILTER kill-switch always wins. If a caller set skip
+    explicitly (e.g. the chat flow, which has already applied the global gate +
+    its per-conversation toggle), honor it — but the kill-switch still applies.
+    """
+    if disable_llm_chunk_filter:
+        return True
+    if explicit_skip is not None:
+        return explicit_skip
+    use = LLM_RELEVANCE_FILTER_ENABLED and bool(
+        persona and persona.llm_relevance_filter
+    )
+    return not use
 
 
 @log_function_time(print_only=True)
@@ -179,19 +204,9 @@ def retrieval_preprocessing(
         prioritized_sources=preset_filters.prioritized_sources,  # Use prioritized_sources from filters
     )
 
-    llm_chunk_filter = False
-    if search_request.skip_llm_chunk_filter is not None:
-        llm_chunk_filter = not search_request.skip_llm_chunk_filter
-    elif persona:
-        llm_chunk_filter = persona.llm_relevance_filter
-
-    if disable_llm_chunk_filter:
-        if llm_chunk_filter:
-            logger.info(
-                "LLM chunk filtering would have run but has been globally disabled"
-            )
-        llm_chunk_filter = False
-
+    skip_llm_chunk_filter = _resolve_skip_llm_chunk_filter(
+        search_request.skip_llm_chunk_filter, persona, disable_llm_chunk_filter
+    )
     skip_rerank = _resolve_skip_rerank(search_request.skip_rerank, persona)
 
     # Decays at 1 / (1 + (multiplier * num years))
@@ -216,7 +231,7 @@ def retrieval_preprocessing(
             num_hits=limit if limit is not None else NUM_RETURNED_HITS,
             offset=offset or 0,
             skip_rerank=skip_rerank,
-            skip_llm_chunk_filter=not llm_chunk_filter,
+            skip_llm_chunk_filter=skip_llm_chunk_filter,
             chunks_above=search_request.chunks_above,
             chunks_below=search_request.chunks_below,
             full_doc=search_request.full_doc,

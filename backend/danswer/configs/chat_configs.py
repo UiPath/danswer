@@ -33,6 +33,28 @@ DISABLE_LLM_FILTER_EXTRACTION = (
 DISABLE_LLM_CHUNK_FILTER = (
     os.environ.get("DISABLE_LLM_CHUNK_FILTER", "").lower() == "true"
 )
+# Global master switch for the (one-shot, main-LLM) relevance filter, mirroring
+# RERANK_ENABLED. When true the app may run the filter for assistants/chats that
+# opt in; when false (default) it never runs regardless of per-assistant flags.
+# Unlike reranking this is LLM-only — it needs NO GPU — so it can be enabled on
+# its own as a cheaper quality tier. DISABLE_LLM_CHUNK_FILTER still hard-kills it.
+LLM_RELEVANCE_FILTER_ENABLED = (
+    os.environ.get("LLM_RELEVANCE_FILTER_ENABLED", "").lower() == "true"
+)
+# Source diversity at final doc selection: guarantee that up to
+# SOURCE_DIVERSITY_RESERVED_SLOTS of the highest-ranked docs from PROTECTED_SOURCES
+# survive into the LLM prompt, so curated KB/web content isn't crowded out by a
+# chatty high-relevance source (e.g. Slack). Replaces the old two-query
+# source-prioritization hack — always-on, global, operates on the single
+# comparably-scored candidate set. Set RESERVED_SLOTS=0 to disable.
+PROTECTED_SOURCES = [
+    s.strip().lower()
+    for s in (os.environ.get("PROTECTED_SOURCES") or "web,sfkbarticles").split(",")
+    if s.strip()
+]
+SOURCE_DIVERSITY_RESERVED_SLOTS = int(
+    os.environ.get("SOURCE_DIVERSITY_RESERVED_SLOTS") or 2
+)
 # Whether the LLM should be used to decide if a search would help given the chat history
 DISABLE_LLM_CHOOSE_SEARCH = (
     os.environ.get("DISABLE_LLM_CHOOSE_SEARCH", "").lower() == "true"
