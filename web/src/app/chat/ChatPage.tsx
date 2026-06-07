@@ -363,6 +363,12 @@ export function ChatPage({
   );
   const [isStreaming, setIsStreaming] = useState(false);
 
+  // Per-conversation search-quality toggles (default OFF, independent of the
+  // assistant's own settings). Each is also gated server-side by its global
+  // master switch. Reset per page load — "default off" is intentional.
+  const [useReranking, setUseReranking] = useState(false);
+  const [useRelevanceFilter, setUseRelevanceFilter] = useState(false);
+
   // uploaded files
   const [currentMessageFiles, setCurrentMessageFiles] = useState<
     FileDescriptor[]
@@ -798,6 +804,8 @@ export function ChatPage({
         systemPromptOverride:
           searchParams.get(SEARCH_PARAM_NAMES.SYSTEM_PROMPT) || undefined,
         useExistingUserMessage: isSeededChat,
+        useReranking: useReranking,
+        useRelevanceFilter: useRelevanceFilter,
       });
       const updateFn = (messages: Message[]) => {
         const replacementsMap = finalMessage
@@ -1595,6 +1603,10 @@ export function ChatPage({
                           }
                           filterManager={filterManager}
                           llmOverrideManager={llmOverrideManager}
+                          useReranking={useReranking}
+                          setUseReranking={setUseReranking}
+                          useRelevanceFilter={useRelevanceFilter}
+                          setUseRelevanceFilter={setUseRelevanceFilter}
                           selectedAssistant={livePersona}
                           files={currentMessageFiles}
                           setFiles={setCurrentMessageFiles}

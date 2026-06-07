@@ -40,6 +40,10 @@ export function ChatInputBar({
   retrievalDisabled,
   filterManager,
   llmOverrideManager,
+  useReranking,
+  setUseReranking,
+  useRelevanceFilter,
+  setUseRelevanceFilter,
   onSetSelectedAssistant,
   selectedAssistant,
   files,
@@ -59,6 +63,10 @@ export function ChatInputBar({
   retrievalDisabled: boolean;
   filterManager: FilterManager;
   llmOverrideManager: LlmOverrideManager;
+  useReranking: boolean;
+  setUseReranking: (value: boolean) => void;
+  useRelevanceFilter: boolean;
+  setUseRelevanceFilter: (value: boolean) => void;
   selectedAssistant: Persona;
   alternativeAssistant: Persona | null;
   files: FileDescriptor[];
@@ -410,6 +418,36 @@ export function ChatInputBar({
                   icon={FiFilter}
                   onClick={() => setConfigModalActiveTab("filters")}
                 />
+              )}
+
+              {/* Per-conversation search-quality toggles (default off). Only
+                  take effect if enabled globally by an admin. */}
+              {!retrievalDisabled && (
+                <button
+                  type="button"
+                  onClick={() => setUseReranking(!useReranking)}
+                  title="Rerank retrieved results with a cross-encoder for this conversation (only applies if reranking is enabled by an admin)"
+                  className={`flex-none text-sm rounded px-2 py-1 ${
+                    useReranking ? "bg-hover text-emphasis" : "text-subtle"
+                  }`}
+                >
+                  Rerank: {useReranking ? "On" : "Off"}
+                </button>
+              )}
+
+              {!retrievalDisabled && (
+                <button
+                  type="button"
+                  onClick={() => setUseRelevanceFilter(!useRelevanceFilter)}
+                  title="Apply an LLM relevance filter to retrieved results for this conversation (only applies if enabled by an admin)"
+                  className={`flex-none text-sm rounded px-2 py-1 ${
+                    useRelevanceFilter
+                      ? "bg-hover text-emphasis"
+                      : "text-subtle"
+                  }`}
+                >
+                  Relevance: {useRelevanceFilter ? "On" : "Off"}
+                </button>
               )}
 
               <ChatInputOption

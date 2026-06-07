@@ -96,6 +96,8 @@ export async function* sendMessage({
   systemPromptOverride,
   useExistingUserMessage,
   alternateAssistantId,
+  useReranking,
+  useRelevanceFilter,
 }: {
   message: string;
   fileDescriptors: FileDescriptor[];
@@ -116,6 +118,11 @@ export async function* sendMessage({
   // and will ignore the specified `message`
   useExistingUserMessage?: boolean;
   alternateAssistantId?: number;
+  // Per-conversation search-quality toggles (default off). Each is also gated
+  // server-side by its global master switch (RERANK_ENABLED /
+  // LLM_RELEVANCE_FILTER_ENABLED).
+  useReranking?: boolean;
+  useRelevanceFilter?: boolean;
 }) {
   const documentsAreSelected =
     selectedDocumentIds && selectedDocumentIds.length > 0;
@@ -161,6 +168,8 @@ export async function* sendMessage({
             }
           : null,
       use_existing_user_message: useExistingUserMessage,
+      use_reranking: useReranking ?? false,
+      use_relevance_filter: useRelevanceFilter ?? false,
     }),
   });
   if (!sendMessageResponse.ok) {
