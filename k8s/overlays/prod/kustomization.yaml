@@ -16,6 +16,9 @@ resources:
 
 components:
   - ../../optional/background-scaling
+  # CPU-hosted cross-encoder reranker (no GPU). Also set RERANK_ENABLED=true and
+  # RERANK_SERVER_URL in env.properties for the app to use it.
+  - ../../optional/tei-rerank
 
 namespace: darwin
 

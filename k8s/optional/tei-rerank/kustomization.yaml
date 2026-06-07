@@ -1,0 +1,26 @@
+# Kustomize Component — CPU-hosted cross-encoder reranker via Hugging Face TEI.
+#
+# Adds a `tei-rerank` Deployment + Service that serves BAAI/bge-reranker-v2-m3
+# on CPU at full precision (no GPU, no accuracy loss vs GPU — just a bit more
+# latency, ~100-250ms for ~20 chunks).
+#
+# Opting an overlay into this component is the "global enable" half of
+# reranking. You MUST ALSO set, in the including overlay's env.properties (so
+# they reach the api-server / background pods via env-configmap):
+#
+#     RERANK_ENABLED=true
+#     RERANK_SERVER_URL=http://tei-rerank-service:80
+#
+# With those set, the app reranks for assistants whose `rerank_enabled` flag is
+# on (and for chat conversations whose Rerank toggle is on). Our own model
+# server then does NOT load the cross-encoder — TEI owns it.
+#
+# Opt in from an overlay:
+#   components:
+#     - ../../optional/tei-rerank
+#   # + RERANK_ENABLED=true and RERANK_SERVER_URL=... in env.properties
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+
+resources:
+  - tei-rerank.yaml

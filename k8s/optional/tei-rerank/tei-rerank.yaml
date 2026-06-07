@@ -1,0 +1,94 @@
+# Hugging Face Text-Embeddings-Inference (TEI) serving the cross-encoder
+# reranker on CPU at full precision (FP32). CPU-optimized (Rust + native token
+# batching), so no GPU is needed. The app reaches it via RERANK_SERVER_URL
+# (set in the overlay's env.properties) → its /rerank endpoint.
+#
+# Scaling: stateless — bump `replicas` (or add an HPA on CPU) for more
+# rerank throughput. Rule of thumb ~4 vCPU + 4-8Gi per replica, ~1 replica
+# per ~5 sustained rerank-QPS.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tei-rerank-deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tei-rerank
+  template:
+    metadata:
+      labels:
+        app: tei-rerank
+    spec:
+      containers:
+        - name: tei-rerank
+          # PIN a real CPU tag (never :latest — see the Vespa lesson). Verify
+          # the latest available cpu-* tag at ghcr.io/huggingface/text-embeddings-inference.
+          image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.5
+          args:
+            - "--model-id"
+            - "BAAI/bge-reranker-v2-m3"
+            - "--dtype"
+            - "float32" # full precision: no accuracy loss vs GPU
+            - "--port"
+            - "80"
+            # Bound memory/load so a burst queues instead of OOMing.
+            - "--max-concurrent-requests"
+            - "64"
+            - "--max-batch-tokens"
+            - "16384"
+            - "--max-client-batch-size"
+            - "32"
+          ports:
+            - containerPort: 80
+              protocol: TCP
+          env:
+            # TEI caches the model under /data; back it with a volume so a
+            # restart doesn't re-download. emptyDir here for simplicity — use a
+            # PVC in prod to make restarts instant and avoid egress.
+            - name: HUGGINGFACE_HUB_CACHE
+              value: /data
+          resources:
+            requests:
+              cpu: "4"
+              memory: 4Gi
+            limits:
+              cpu: "4" # request==limit cpu → predictable rerank latency
+              memory: 8Gi
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 80
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 80
+            periodSeconds: 30
+          # Model download on first boot can take minutes — don't kill it early.
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 80
+            periodSeconds: 10
+            failureThreshold: 60
+          volumeMounts:
+            - mountPath: /data
+              name: tei-model-cache
+      volumes:
+        - name: tei-model-cache
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tei-rerank-service
+spec:
+  ports:
+    - name: tei-rerank-port
+      port: 80
+      protocol: TCP
+      targetPort: 80
+  selector:
+    app: tei-rerank
+  type: ClusterIP
