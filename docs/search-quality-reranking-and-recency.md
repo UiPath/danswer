@@ -233,36 +233,43 @@ applies underneath all of them):
 | `rerank_enabled` | `llm_relevance_filter` | Behavior | Infra |
 |---|---|---|---|
 | off | off | raw hybrid order (today's default) | none |
-| **on** | off | cross-encoder reordering | **TEI-CPU** (or GPU) |
+| **on** | off | cross-encoder reordering | **TEI on GPU** |
 | off | **on** | LLM relevance filter only (1 LLM call) | **none / no GPU** |
-| **on** | **on** | rerank **then** relevance-filter | **TEI-CPU** (or GPU) |
+| **on** | **on** | rerank **then** relevance-filter | **TEI on GPU** |
 
-The "relevance-filter-only, no GPU" row is the cheap middle tier; the "rerank-on"
-rows need the TEI reranker but still **no GPU**.
+The "relevance-filter-only, no GPU" row is the cheap middle tier (just one extra
+LLM call); the "rerank-on" rows need the **GPU** TEI reranker (CPU was measured at
+24–98 s/query — see §7).
 
 ---
 
-## 7. Reranker serving: TEI on CPU (no GPU)
+## 7. Reranker serving: TEI on GPU (NVIDIA T4)
 
-**Decision: serve the reranker on CPU via Hugging Face TEI — no GPU.**
+**Decision: serve the reranker on GPU via the upstream Hugging Face TEI image.**
 
-The darwin cluster has **no GPU** (4 nodes, all `nvidia.com/gpu: <none>`). The
-*naive* path (our model server's `sentence_transformers.CrossEncoder` on CPU) is
-seconds-slow — which is why upstream Onyx disables local rerank without a GPU
-(PR #4011). But that's an artifact of the **unoptimized runtime**, not the model:
-with an optimized CPU runtime (**TEI** — Rust, native token batching), the same
-`BAAI/bge-reranker-v2-m3` (568M) reranks ~20 chunks in **~100–250 ms on CPU at
-full precision** — acceptable for the retrieval phase, and **no accuracy loss**
-vs a GPU (CPU vs GPU doesn't change the math; only INT8 *quantization* would, and
-we don't use it).
+We first tried **CPU** (the cluster had no GPU). It was functionally correct but
+**not interactive-viable**: measured live on prod (`bge-reranker-v2-m3`, 568M,
+fp32, 4 vCPU) reranking 15 chunks took **24 s** (passages ≤512 tok) to **98 s**
+(longer passages) — ~1.6 s/passage — and the long blocking inference starved the
+`/health` endpoint, so the liveness probe killed the pod (503s under load).
+`--auto-truncate` caps the tail but not the ~24 s floor; replicas add concurrency,
+not single-query speed; fp16 doesn't help on CPU (x86 has no native fp16 matmul —
+ORT upcasts to fp32); int8 is only ~2–4×. So reranking moved to **GPU**, where the
+same model reranks 15 chunks in **~20–80 ms**.
+
+Why the **upstream image, no custom build**: TEI's **GPU** backend is Candle +
+**safetensors**, which `bge-reranker-v2-m3` ships — so the model loads directly.
+The custom-image/ONNX-export dance was *only* needed by TEI's **CPU** runtime
+(ONNX-Runtime-based; the model has no ONNX weights). On GPU that constraint is
+gone, so we point straight at `ghcr.io/huggingface/text-embeddings-inference:turing-1.5`
+(`turing` == T4, compute 7.5; use `86-1.5` for A10, `1.5` for A100/H100).
 
 How it's wired:
-- A **`tei-rerank`** deployment runs **our own image** (`tei-reranker:bge-v2-m3-*`,
-  built from `k8s/optional/tei-rerank/Dockerfile`) — TEI's CPU base with
-  `bge-reranker-v2-m3` **exported to ONNX and baked in** at `/model`. The CPU
-  TEI runtime is ONNX-Runtime-based and the model ships no ONNX weights, so we
-  export them at build time (HF Optimum) — this also means **no runtime
-  download, no re-download on restart, no HuggingFace runtime dependency**.
+- A **`tei-rerank`** Deployment (upstream GPU image, `--dtype float16`) on the
+  tainted GPU node pool — it tolerates `gpu=true:NoSchedule` and requests
+  `nvidia.com/gpu: 1` (only GPU nodes advertise it, which also pins scheduling).
+  Model weights download once into a PVC-backed HF cache (`/data`); restarts reuse
+  it (no re-download), so no custom image is needed to avoid re-downloads.
 - The app's `CrossEncoderEnsembleModel` calls TEI's `/rerank` when
   **`RERANK_SERVER_URL`** is set (scattering TEI's score-sorted reply back to
   passage order); otherwise it uses the legacy model-server path. When TEI is in
@@ -271,18 +278,18 @@ How it's wired:
   at query time; only changing the *embedding* model forces a reindex. (Avoid
   late-interaction/ColBERT-style models, which would need indexing changes.)
 
-Sizing / scaling (per replica): **~4 vCPU, request 4 GiB / limit 8 GiB** (weights
-~2.3 GB FP32 + batch headroom). TEI is stateless → scale with replicas or an HPA
-on CPU; rule of thumb ~1 replica per ~5 sustained rerank-QPS. Set CPU
-request==limit for predictable latency. Optional INT8 later trades a small
-accuracy hit for ~2× speed / ~0.6 GB.
+Node pool: **`Standard_NC4as_T4_v3`** (1× T4 16 GB, 4 vCPU, ~$480/mo) tainted
+`gpu=true:NoSchedule`. The reranker needs only ~1.5–2 GB VRAM, so the T4 is ample
+and GPU compute is never the bottleneck. TEI is stateless → scale with replicas /
+an HPA for throughput.
 
-k8s: **`k8s/optional/tei-rerank/`** component (Deployment + Service, CPU
-resources, `/health` probes, model-cache volume). Included by **both** the prod
-and local overlays. The overlay's `env.properties` sets `RERANK_ENABLED=true`,
+k8s: **`k8s/optional/tei-rerank/`** component (PVC + Deployment + Service, GPU
+request + taint toleration, `/health` probes). Included by the **prod** overlay
+(local dev loads the cross-encoder in-process — no TEI container). The overlay's
+`env.properties` sets `RERANK_ENABLED=true`,
 `RERANK_SERVER_URL=http://tei-rerank-service:80`, and
-`LLM_RELEVANCE_FILTER_ENABLED=true`. (The earlier GPU `gpu-inference` component
-was removed in favor of this.)
+`LLM_RELEVANCE_FILTER_ENABLED=true`. (The earlier CPU `tei-rerank` image and its
+ONNX-export Dockerfile were removed in favor of this.)
 
 > If a GPU is ever desired for lowest latency, the same model runs on a **CUDA**
 > node (e.g. `NV6ads_A10_v5` — fractional NVIDIA A10; *not* `NV8as_v4`, whose GPU
@@ -339,11 +346,11 @@ Web:
   chat toggles (Rerank, Relevance).
 
 Infra:
-- `k8s/optional/tei-rerank/` — CPU TEI reranker component; included by the **prod**
-  overlay (sets `RERANK_ENABLED` / `RERANK_SERVER_URL` /
-  `LLM_RELEVANCE_FILTER_ENABLED`). **Local** loads the reranker in-process (no
-  TEI), via `RERANK_ENABLED` with `RERANK_SERVER_URL` unset. (Replaced the
-  removed `gpu-inference`.)
+- `k8s/optional/tei-rerank/` — GPU TEI reranker component (upstream TEI image on a
+  T4 node pool); included by the **prod** overlay (sets `RERANK_ENABLED` /
+  `RERANK_SERVER_URL` / `LLM_RELEVANCE_FILTER_ENABLED`). **Local** loads the
+  reranker in-process (no TEI, no GPU), via `RERANK_ENABLED` with
+  `RERANK_SERVER_URL` unset.
 
 Tests:
 - `tests/unit/.../test_resolve_skip_rerank.py`, `test_resolve_skip_llm_chunk_filter.py`
@@ -358,19 +365,19 @@ Tests:
 ## 9. How to enable in prod (when ready)
 
 1. `alembic upgrade head` (adds `persona.rerank_enabled`) → bounce `dapi` + `dbe`.
-2. The prod overlay already includes `../../optional/tei-rerank` and sets
-   `RERANK_ENABLED` / `RERANK_SERVER_URL` / `LLM_RELEVANCE_FILTER_ENABLED` in
-   `env.properties` — `kubectl apply -k k8s/overlays/prod`. The reranker image
-   has the ONNX model baked in (build/push it from
-   `k8s/optional/tei-rerank/Dockerfile`), so it starts fast with **no runtime
-   download and no GPU**.
+2. Add a GPU node pool tainted `gpu=true:NoSchedule` (prod uses
+   `Standard_NC4as_T4_v3`). The prod overlay already includes
+   `../../optional/tei-rerank` and sets `RERANK_ENABLED` / `RERANK_SERVER_URL` /
+   `LLM_RELEVANCE_FILTER_ENABLED` in `env.properties` — `kubectl apply -k
+   k8s/overlays/prod`. TEI pulls the upstream GPU image and downloads the model
+   once into its PVC-backed cache.
 3. Per assistant (admin editor): toggle **Rerank results** and/or **Apply LLM
    Relevance Filter**. Or use the **chat-page toggles** to A/B per conversation.
    Compare answers, then flip the defaults once satisfied. Source diversity is
    automatic (tune via `PROTECTED_SOURCES` / `SOURCE_DIVERSITY_RESERVED_SLOTS`).
 
-No GPU required at any point. Local mirrors prod (the `local` overlay includes
-the same TEI component), so reranking can be exercised locally.
+Reranking needs the GPU node; the **relevance filter alone needs no GPU**. Local
+exercises reranking in-process (no GPU) for dev.
 
 ---
 

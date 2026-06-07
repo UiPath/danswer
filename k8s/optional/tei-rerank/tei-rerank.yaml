@@ -1,17 +1,44 @@
-# Hugging Face Text-Embeddings-Inference (TEI) serving the cross-encoder
-# reranker on CPU at full precision (FP32). CPU-optimized (Rust + native token
-# batching), so no GPU is needed. The app reaches it via RERANK_SERVER_URL
-# (set in the overlay's env.properties) → its /rerank endpoint.
+# HuggingFace Text-Embeddings-Inference (TEI) serving the cross-encoder reranker
+# on GPU (NVIDIA T4). The app reaches it via RERANK_SERVER_URL → /rerank.
 #
-# Scaling: stateless — bump `replicas` (or add an HPA on CPU) for more
-# rerank throughput. Rule of thumb ~4 vCPU + 4-8Gi per replica, ~1 replica
-# per ~5 sustained rerank-QPS.
+# Why the UPSTREAM image (no custom build): TEI's GPU backend is Candle +
+# safetensors, and BAAI/bge-reranker-v2-m3 ships safetensors — so the model
+# loads directly, no ONNX export needed. (That dance was only required by TEI's
+# *CPU* runtime, which is ONNX-Runtime-based and the model has no ONNX weights.)
+# CPU serving was also far too slow (~1.6s/passage, 24–98s for 15 chunks), so
+# reranking lives on GPU (~20–80ms).
+#
+# Why NO istio sidecar: TEI is a leaf service that needs no mesh features, mTLS
+# is PERMISSIVE (the api-server still reaches it), and — critically — an istio
+# sidecar isn't running during the init phase, so the model-prefetch init
+# container below couldn't reach the network with the sidecar injected.
+#
+# Why prefetch the model in an init container (vs letting TEI download it): TEI's
+# Rust hf-hub client fails on Hugging Face's redirect with "relative URL without
+# a base". The Python huggingface_hub client resolves it fine, so we prefetch the
+# weights into the PVC and run TEI offline against the local path.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: tei-rerank-model-cache
+spec:
+  accessModes: ["ReadWriteOnce"]
+  # No storageClassName → cluster default SC (AKS managed-csi,
+  # volumeBindingMode=WaitForFirstConsumer, so the disk lands in the GPU node's
+  # zone — no cross-zone attach conflict).
+  resources:
+    requests:
+      storage: 10Gi
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: tei-rerank-deployment
 spec:
   replicas: 1
+  strategy:
+    # RWO model-cache PVC can't be mounted by an old + new pod simultaneously.
+    type: Recreate
   selector:
     matchLabels:
       app: tei-rerank
@@ -19,38 +46,70 @@ spec:
     metadata:
       labels:
         app: tei-rerank
+      annotations:
+        # Leaf service — keep it out of the mesh (see header).
+        sidecar.istio.io/inject: "false"
     spec:
+      # Tolerate the GPU pool's taint (gpu=true:NoSchedule).
+      tolerations:
+        - key: gpu
+          operator: Equal
+          value: "true"
+          effect: NoSchedule
+      initContainers:
+        # Prefetch the model into the PVC with the (robust) Python HF client.
+        # Idempotent: skips the download when the weights are already cached.
+        - name: fetch-model
+          image: python:3.11-slim
+          command: ["sh", "-c"]
+          args:
+            - |
+              set -e
+              if [ ! -f /data/model/model.safetensors ]; then
+                pip install --no-cache-dir huggingface_hub
+                python -c "from huggingface_hub import snapshot_download; snapshot_download('BAAI/bge-reranker-v2-m3', local_dir='/data/model')"
+              else
+                echo "model already cached at /data/model"
+              fi
+          volumeMounts:
+            - name: model-cache
+              mountPath: /data
       containers:
         - name: tei-rerank
-          # Our own image with BAAI/bge-reranker-v2-m3 baked in (see Dockerfile).
-          # No runtime HuggingFace download → fast, reliable, offline; sidesteps
-          # the stock-image download bug and the re-download-on-restart problem.
-          image: sfbrdevhelmweacr.azurecr.io/danswer/tei-reranker:bge-v2-m3-2
+          # Upstream TEI GPU image, pinned. `turing-1.5` == NVIDIA T4 (compute
+          # cap 7.5). For an A10 node switch to `86-1.5`; A100/H100 → `1.5`.
+          image: ghcr.io/huggingface/text-embeddings-inference:turing-1.5
           args:
-            # Local path — the ONNX model is baked into the image at /model.
+            # Local path — prefetched by the init container; no runtime download.
             - "--model-id"
-            - "/model"
+            - "/data/model"
             - "--dtype"
-            - "float32" # full precision: no accuracy loss vs GPU
+            - "float16" # GPU: fp16, ~no quality loss vs fp32 for this model
             - "--port"
             - "80"
-            # Bound memory/load so a burst queues instead of OOMing.
             - "--max-concurrent-requests"
             - "64"
             - "--max-batch-tokens"
             - "16384"
             - "--max-client-batch-size"
             - "32"
+          env:
+            - name: HF_HUB_OFFLINE
+              value: "1" # belt-and-suspenders: never touch the hub at runtime
           ports:
             - containerPort: 80
               protocol: TCP
           resources:
             requests:
-              cpu: "4"
-              memory: 4Gi
+              cpu: "2"
+              memory: 6Gi
             limits:
-              cpu: "4" # request==limit cpu → predictable rerank latency
-              memory: 8Gi
+              # Requesting a GPU forces this pod onto the GPU node pool.
+              nvidia.com/gpu: 1
+              memory: 12Gi
+          volumeMounts:
+            - name: model-cache
+              mountPath: /data
           readinessProbe:
             httpGet:
               path: /health
@@ -61,14 +120,17 @@ spec:
               path: /health
               port: 80
             periodSeconds: 30
-          # Model is baked in (loaded from the image's /data), so startup is
-          # just model load — but keep headroom for CPU model init.
+          # First boot prefetches the model (init) then loads it; generous.
           startupProbe:
             httpGet:
               path: /health
               port: 80
             periodSeconds: 10
-            failureThreshold: 30
+            failureThreshold: 60
+      volumes:
+        - name: model-cache
+          persistentVolumeClaim:
+            claimName: tei-rerank-model-cache
 ---
 apiVersion: v1
 kind: Service
