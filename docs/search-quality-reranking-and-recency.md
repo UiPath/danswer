@@ -257,8 +257,12 @@ vs a GPU (CPU vs GPU doesn't change the math; only INT8 *quantization* would, an
 we don't use it).
 
 How it's wired:
-- A **`tei-rerank`** deployment (`ghcr.io/huggingface/text-embeddings-inference:cpu-*`)
-  serves `bge-reranker-v2-m3` at `--dtype float32`, exposing `/rerank`.
+- A **`tei-rerank`** deployment runs **our own image** (`tei-reranker:bge-v2-m3-*`,
+  built from `k8s/optional/tei-rerank/Dockerfile`) — TEI's CPU base with
+  `bge-reranker-v2-m3` **exported to ONNX and baked in** at `/model`. The CPU
+  TEI runtime is ONNX-Runtime-based and the model ships no ONNX weights, so we
+  export them at build time (HF Optimum) — this also means **no runtime
+  download, no re-download on restart, no HuggingFace runtime dependency**.
 - The app's `CrossEncoderEnsembleModel` calls TEI's `/rerank` when
   **`RERANK_SERVER_URL`** is set (scattering TEI's score-sorted reply back to
   passage order); otherwise it uses the legacy model-server path. When TEI is in
@@ -356,9 +360,10 @@ Tests:
 1. `alembic upgrade head` (adds `persona.rerank_enabled`) → bounce `dapi` + `dbe`.
 2. The prod overlay already includes `../../optional/tei-rerank` and sets
    `RERANK_ENABLED` / `RERANK_SERVER_URL` / `LLM_RELEVANCE_FILTER_ENABLED` in
-   `env.properties` — `kubectl apply -k k8s/overlays/prod`. TEI downloads the
-   model on first boot (back `/data` with a PVC to avoid re-download); **no GPU,
-   no image rebuild.** (Verify the pinned `cpu-*` TEI image tag first.)
+   `env.properties` — `kubectl apply -k k8s/overlays/prod`. The reranker image
+   has the ONNX model baked in (build/push it from
+   `k8s/optional/tei-rerank/Dockerfile`), so it starts fast with **no runtime
+   download and no GPU**.
 3. Per assistant (admin editor): toggle **Rerank results** and/or **Apply LLM
    Relevance Filter**. Or use the **chat-page toggles** to A/B per conversation.
    Compare answers, then flip the defaults once satisfied. Source diversity is

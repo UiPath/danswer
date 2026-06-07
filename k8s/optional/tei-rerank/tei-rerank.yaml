@@ -22,12 +22,14 @@ spec:
     spec:
       containers:
         - name: tei-rerank
-          # PIN a real CPU tag (never :latest — see the Vespa lesson). Verify
-          # the latest available cpu-* tag at ghcr.io/huggingface/text-embeddings-inference.
-          image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.5
+          # Our own image with BAAI/bge-reranker-v2-m3 baked in (see Dockerfile).
+          # No runtime HuggingFace download → fast, reliable, offline; sidesteps
+          # the stock-image download bug and the re-download-on-restart problem.
+          image: sfbrdevhelmweacr.azurecr.io/danswer/tei-reranker:bge-v2-m3-2
           args:
+            # Local path — the ONNX model is baked into the image at /model.
             - "--model-id"
-            - "BAAI/bge-reranker-v2-m3"
+            - "/model"
             - "--dtype"
             - "float32" # full precision: no accuracy loss vs GPU
             - "--port"
@@ -42,12 +44,6 @@ spec:
           ports:
             - containerPort: 80
               protocol: TCP
-          env:
-            # TEI caches the model under /data; back it with a volume so a
-            # restart doesn't re-download. emptyDir here for simplicity — use a
-            # PVC in prod to make restarts instant and avoid egress.
-            - name: HUGGINGFACE_HUB_CACHE
-              value: /data
           resources:
             requests:
               cpu: "4"
@@ -65,19 +61,14 @@ spec:
               path: /health
               port: 80
             periodSeconds: 30
-          # Model download on first boot can take minutes — don't kill it early.
+          # Model is baked in (loaded from the image's /data), so startup is
+          # just model load — but keep headroom for CPU model init.
           startupProbe:
             httpGet:
               path: /health
               port: 80
             periodSeconds: 10
-            failureThreshold: 60
-          volumeMounts:
-            - mountPath: /data
-              name: tei-model-cache
-      volumes:
-        - name: tei-model-cache
-          emptyDir: {}
+            failureThreshold: 30
 ---
 apiVersion: v1
 kind: Service
