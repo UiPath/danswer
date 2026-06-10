@@ -1,15 +1,23 @@
 import "./globals.css";
 
-import { Inter } from "next/font/google";
+import { IBM_Plex_Sans, Fraunces } from "next/font/google";
 import { getCombinedSettings } from "@/components/settings/lib";
 import { CUSTOM_ANALYTICS_ENABLED } from "@/lib/constants";
 import { SettingsProvider } from "@/components/settings/SettingsProvider";
 import { Metadata } from "next";
 import { buildClientUrl } from "@/lib/utilsSS";
 
-const inter = Inter({
+// Body / UI: IBM Plex Sans — a refined, characterful humanist sans (not Inter).
+const plexSans = IBM_Plex_Sans({
   subsets: ["latin"],
-  variable: "--font-inter",
+  weight: ["400", "500", "600", "700"],
+  variable: "--font-sans",
+});
+// Display: Fraunces — a warm, high-contrast serif for the assistant identity
+// and empty-state headline. Gives the product an editorial point of view.
+const fraunces = Fraunces({
+  subsets: ["latin"],
+  variable: "--font-display",
 });
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -39,22 +47,26 @@ export default async function RootLayout({
   const combinedSettings = await getCombinedSettings({});
 
   return (
-    <html lang="en">
-      {CUSTOM_ANALYTICS_ENABLED && combinedSettings.customAnalyticsScript && (
-        <head>
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        {/* No-flash theme init: dark is the default everywhere; only an explicit
+            "light" choice opts out. Runs before paint so there's no flash. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `try{if(localStorage.getItem('darwin-theme')!=='light'){document.documentElement.classList.add('dark')}}catch(e){document.documentElement.classList.add('dark')}`,
+          }}
+        />
+        {CUSTOM_ANALYTICS_ENABLED && combinedSettings.customAnalyticsScript && (
           <script
             type="text/javascript"
             dangerouslySetInnerHTML={{
               __html: combinedSettings.customAnalyticsScript,
             }}
           />
-        </head>
-      )}
+        )}
+      </head>
       <body
-        className={`${inter.variable} font-sans text-default bg-background ${
-          // TODO: remove this once proper dark mode exists
-          process.env.THEME_IS_DARK?.toLowerCase() === "true" ? "dark" : ""
-        }`}
+        className={`${plexSans.variable} ${fraunces.variable} font-sans text-default bg-background`}
       >
         <SettingsProvider settings={combinedSettings}>
           {children}

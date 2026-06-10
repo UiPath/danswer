@@ -175,7 +175,7 @@ export function ChatSessionDisplay({
                   <div className="ml-auto my-auto flex">
                     <div
                       onClick={onRename}
-                      className={`hover:bg-black/10 p-1 -m-1 rounded`}
+                      className={`hover:bg-black/10 dark:hover:bg-white/10 p-1 -m-1 rounded`}
                     >
                       <FiCheck size={16} />
                     </div>
@@ -184,7 +184,7 @@ export function ChatSessionDisplay({
                         setChatName(chatSession.name);
                         setIsRenamingChat(false);
                       }}
-                      className={`hover:bg-black/10 p-1 -m-1 rounded ml-2`}
+                      className={`hover:bg-black/10 dark:hover:bg-white/10 p-1 -m-1 rounded ml-2`}
                     >
                       <FiX size={16} />
                     </div>
@@ -206,7 +206,7 @@ export function ChatSessionDisplay({
                             setIsMoreOptionsDropdownOpen(open)
                           }
                           content={
-                            <div className="hover:bg-black/10 p-1 rounded">
+                            <div className="hover:bg-black/10 dark:hover:bg-white/10 p-1 rounded">
                               <FiMoreHorizontal size={16} />
                             </div>
                           }
@@ -232,7 +232,7 @@ export function ChatSessionDisplay({
                     </div>
                     <div
                       onClick={() => setIsDeletionModalVisible(true)}
-                      className={`hover:bg-black/10 p-1 -m-1 rounded ml-2`}
+                      className={`hover:bg-black/10 dark:hover:bg-white/10 p-1 -m-1 rounded ml-2`}
                     >
                       <FiTrash size={16} />
                     </div>

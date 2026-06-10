@@ -225,7 +225,7 @@ function GalleryCard({ assistant, user, isAdded, onAdd, onRemove }: CardProps) {
       )}
 
       {/* Footer row: author (or built-in subtle text) + Add/Remove */}
-      <div className="mt-auto flex items-center justify-between gap-2 pt-2 border-t border-border/40">
+      <div className="mt-auto flex items-center justify-between gap-2 pt-2 border-t border-gray-200/40">
         <div className="text-xs text-subtle truncate min-w-0">
           {isBuiltIn ? (
             <span>Bundled assistant</span>

@@ -1149,7 +1149,10 @@ export function ChatPage({
       Only used in the EE version of the app. */}
       <ChatPopup />
 
-      <div className="flex relative bg-background text-default overflow-x-hidden">
+      <div
+        id="chat-root"
+        className="flex relative bg-background text-default overflow-x-hidden"
+      >
         <ChatSidebar
           existingChats={chatSessions}
           currentChatSession={selectedChatSession}

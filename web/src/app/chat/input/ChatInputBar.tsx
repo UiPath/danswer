@@ -228,7 +228,7 @@ export function ChatInputBar({
               ref={suggestionsRef}
               className="text-sm absolute inset-x-0 top-0 w-full transform -translate-y-full"
             >
-              <div className="rounded-lg py-1.5 bg-white border border-border-medium overflow-hidden shadow-lg mx-2 px-1.5 mt-2 rounded z-10">
+              <div className="rounded-lg py-1.5 bg-background-search dark:bg-background-strong border border-border-medium overflow-hidden shadow-lg mx-2 px-1.5 mt-2 rounded z-10">
                 {filteredPersonas.map((currentPersona, index) => (
                   <button
                     key={index}
@@ -275,11 +275,16 @@ export function ChatInputBar({
               flex-col
               border
               border-border-medium
-              rounded-lg
+              rounded-xl
               overflow-hidden
               bg-background-weak
-              [&:has(textarea:focus)]::ring-1
-              [&:has(textarea:focus)]::ring-black
+              shadow-lg
+              shadow-black/5
+              dark:shadow-black/40
+              transition
+              focus-within:border-accent
+              focus-within:ring-2
+              focus-within:ring-accent/30
             "
           >
             {alternativeAssistant && (

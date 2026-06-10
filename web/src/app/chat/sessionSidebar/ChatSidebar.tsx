@@ -20,6 +20,7 @@ import {
 } from "@/lib/constants";
 
 import { ChatTab } from "./ChatTab";
+import { ChatThemeToggle } from "../ChatThemeToggle";
 import { Folder } from "../folders/interfaces";
 import { createFolder } from "../folders/FolderManagement";
 import { usePopup } from "@/components/admin/connectors/Popup";
@@ -189,6 +190,10 @@ export const ChatSidebar = ({
               {isNavigatingAssistants ? "Loading…" : "Manage Assistants"}
             </div>
           </BasicClickable>
+        </div>
+
+        <div className="mt-2 mb-1 mx-3">
+          <ChatThemeToggle />
         </div>
 
         <div className="border-b border-border pb-4 mx-3" />

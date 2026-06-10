@@ -1,7 +1,7 @@
 import { Persona } from "@/app/admin/assistants/interfaces";
 import { Bubble } from "@/components/Bubble";
 import { AssistantIcon } from "@/components/assistants/AssistantIcon";
-import React from "react";
+import React, { useState } from "react";
 import { FiBookmark, FiImage, FiSearch } from "react-icons/fi";
 
 interface AssistantsTabProps {
@@ -15,11 +15,38 @@ export function AssistantsTab({
   availableAssistants,
   onSelect,
 }: AssistantsTabProps) {
+  const [query, setQuery] = useState("");
+  const q = query.trim().toLowerCase();
+  const filteredAssistants = availableAssistants.filter(
+    (assistant) =>
+      !q ||
+      assistant.name.toLowerCase().includes(q) ||
+      (assistant.description?.toLowerCase().includes(q) ?? false)
+  );
+
   return (
     <>
       <h3 className="text-lg font-semibold">Choose Assistant</h3>
+
+      <div className="mt-2 flex items-center rounded border border-border bg-background px-2.5 py-1.5">
+        <FiSearch className="text-subtle mr-2 shrink-0" />
+        <input
+          autoFocus
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search assistants…"
+          className="w-full bg-transparent text-sm text-default placeholder:text-subtle focus:outline-none"
+        />
+      </div>
+
       <div className="my-3 grid grid-cols-1 gap-4">
-        {availableAssistants.map((assistant) => (
+        {filteredAssistants.length === 0 && (
+          <div className="text-sm text-subtle">
+            No assistants match “{query}”.
+          </div>
+        )}
+        {filteredAssistants.map((assistant) => (
           <div
             key={assistant.id}
             className={`

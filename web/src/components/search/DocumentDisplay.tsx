@@ -193,7 +193,7 @@ export const DocumentDisplay = ({
             {isSelected && (
               <div className="w-4 h-4 my-auto mr-1 flex flex-col">
                 <HoverPopup
-                  mainContent={<FiRadio className="text-gray-500 my-auto" />}
+                  mainContent={<FiRadio className="text-subtle my-auto" />}
                   popupContent={
                     <div className="text-xs text-gray-300 w-36 flex">
                       <div className="flex mx-auto">

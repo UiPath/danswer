@@ -38,7 +38,7 @@ export function EditableValue({
               onSubmit(initialValue);
             }
           }}
-          className="border bg-background-strong border-gray-300 rounded py-1 px-1 w-12 h-4 my-auto"
+          className="border bg-background-strong border-border-medium rounded py-1 px-1 w-12 h-4 my-auto"
         />
         <div
           onClick={async () => {

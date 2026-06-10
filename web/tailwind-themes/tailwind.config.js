@@ -21,7 +21,8 @@ module.exports = {
         "3xl": "1700px",
       },
       fontFamily: {
-        sans: ["var(--font-inter)"],
+        sans: ["var(--font-sans)", "ui-sans-serif", "system-ui", "sans-serif"],
+        display: ["var(--font-display)", "ui-serif", "Georgia", "serif"],
       },
       width: {
         "message-xs": "450px",
@@ -37,25 +38,27 @@ module.exports = {
         "document-sidebar": "1000px",
       },
       colors: {
-        // background
-        background: "#f9fafb", // gray-50
-        "background-subtle": "#e5e7eb", // gray-200
-        "background-emphasis": "#f6f7f8",
-        "background-strong": "#eaecef",
-        "background-search": "#ffffff",
-        "background-custom-header": "#f3f4f6",
+        // background — CSS-variable-driven so they flip under a `.dark`
+        // ancestor (see the `.dark { }` block in globals.css). The fallback is
+        // the exact previous light value, so light mode is unchanged.
+        background: "var(--background, #f9fafb)", // gray-50
+        "background-subtle": "var(--background-subtle, #e5e7eb)", // gray-200
+        "background-emphasis": "var(--background-emphasis, #f6f7f8)",
+        "background-strong": "var(--background-strong, #eaecef)",
+        "background-search": "var(--background-search, #ffffff)",
+        "background-custom-header": "var(--background-custom-header, #f3f4f6)",
         "background-inverted": "#000000",
-        "background-weak": "#f3f4f6", // gray-100
+        "background-weak": "var(--background-weak, #f3f4f6)", // gray-100
         "background-dark": "#111827", // gray-900
 
         // text or icons
-        light: "#e5e7eb", // gray-200
+        light: "var(--text-light, #e5e7eb)", // gray-200
         link: "#3b82f6", // blue-500
         "link-hover": "#1d4ed8", // blue-700
-        subtle: "#6b7280", // gray-500
-        default: "#4b5563", // gray-600
-        emphasis: "#374151", // gray-700
-        strong: "#111827", // gray-900
+        subtle: "var(--text-subtle, #6b7280)", // gray-500
+        default: "var(--text-default, #4b5563)", // gray-600
+        emphasis: "var(--text-emphasis, #374151)", // gray-700
+        strong: "var(--text-strong, #111827)", // gray-900
         inverted: "#ffffff", // white
         error: "#ef4444", // red-500
         success: "#059669", // emerald-600
@@ -63,15 +66,15 @@ module.exports = {
         accent: "#6671d0",
 
         // borders
-        border: "#e5e7eb", // gray-200
-        "border-light": "#f3f4f6", // gray-100
-        "border-medium": "#d1d5db", // gray-300
-        "border-strong": "#9ca3af", // gray-400
+        border: "var(--border, #e5e7eb)", // gray-200
+        "border-light": "var(--border-light, #f3f4f6)", // gray-100
+        "border-medium": "var(--border-medium, #d1d5db)", // gray-300
+        "border-strong": "var(--border-strong, #9ca3af)", // gray-400
 
         // hover
-        "hover-light": "#f3f4f6", // gray-100
-        hover: "#e5e7eb", // gray-200
-        "hover-emphasis": "#d1d5db", // gray-300
+        "hover-light": "var(--hover-light, #f3f4f6)", // gray-100
+        hover: "var(--hover, #e5e7eb)", // gray-200
+        "hover-emphasis": "var(--hover-emphasis, #d1d5db)", // gray-300
         "accent-hover": "#5964c2",
 
         // keyword highlighting

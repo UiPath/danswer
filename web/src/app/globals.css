@@ -2,6 +2,72 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Dark mode palette. Only the dark overrides live here — light mode uses the
+ * fallbacks baked into the token definitions (tailwind-themes/tailwind.config.js).
+ * Scoped to any `.dark` ancestor (CSS vars cascade), so dark mode applies only
+ * where the `.dark` class is set (currently: the chat page container). */
+.dark {
+  --background: #0f1117;
+  --background-weak: #171a21;
+  --background-emphasis: #1c1f27;
+  --background-strong: #232733;
+  --background-subtle: #2a2f3a;
+  --background-search: #171a21;
+  --background-custom-header: #171a21;
+
+  --text-light: #3a3f4b;
+  --text-subtle: #9aa3b2;
+  --text-default: #c7ccd5;
+  --text-emphasis: #e4e7ec;
+  --text-strong: #f5f6f8;
+
+  --border: #2a2f3a;
+  --border-light: #232733;
+  --border-medium: #353b48;
+  --border-strong: #4a5160;
+
+  --hover-light: #1c1f27;
+  --hover: #232733;
+  --hover-emphasis: #2f3542;
+}
+
+/* Atmosphere: a soft accent glow at the top of the chat canvas for depth
+ * (subtle in light, a touch more present in dark). */
+#chat-root {
+  background-image: radial-gradient(
+    1100px 560px at 50% -12%,
+    rgba(102, 113, 208, 0.05),
+    transparent 68%
+  );
+}
+.dark #chat-root {
+  background-image: radial-gradient(
+    1100px 560px at 50% -10%,
+    rgba(120, 134, 255, 0.1),
+    transparent 64%
+  );
+}
+
+/* High-impact entrance motion (used for the empty state + message reveals). */
+@keyframes da-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.da-fade-up {
+  animation: da-fade-up 0.55s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .da-fade-up {
+    animation: none;
+  }
+}
+
 @layer utilities {
   /* Hide scrollbar for Chrome, Safari and Opera */
   .no-scrollbar::-webkit-scrollbar {

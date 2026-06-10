@@ -118,22 +118,26 @@ export function ChatIntro({
       <div className="flex justify-center items-center h-full">
         <div className="w-message-xs 2xl:w-message-sm 3xl:w-message">
           <div className="flex">
-            <div className="mx-auto">
+            <div className="mx-auto da-fade-up text-center">
               <Logo height={80} width={80} className="m-auto" />
 
-              <div className="m-auto text-3xl font-bold text-strong mt-4 w-fit">
+              <div className="m-auto font-display text-4xl font-semibold tracking-tight text-strong mt-5 w-fit">
                 {selectedPersona?.name || "How can I help you today?"}
               </div>
               {selectedPersona && (
-                <div className="mt-1">{selectedPersona.description}</div>
+                <div className="mt-2 text-subtle">
+                  {selectedPersona.description}
+                </div>
               )}
             </div>
           </div>
 
           {setConfigModalActiveTab && (
-            <OnboardingSteps
-              setConfigModalActiveTab={setConfigModalActiveTab}
-            />
+            <div className="da-fade-up" style={{ animationDelay: "0.12s" }}>
+              <OnboardingSteps
+                setConfigModalActiveTab={setConfigModalActiveTab}
+              />
+            </div>
           )}
 
           {selectedPersona && selectedPersona.num_chunks !== 0 && (

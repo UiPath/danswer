@@ -143,7 +143,7 @@ function ToolForm({
         <div className="mt-4">
           <h3 className="text-base font-semibold mb-2">Available methods</h3>
           <div className="overflow-x-auto">
-            <table className="min-w-full bg-white border border-gray-200">
+            <table className="min-w-full bg-background-search border border-border">
               <thead>
                 <tr>
                   <th className="px-4 py-2 border-b">Name</th>
