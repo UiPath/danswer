@@ -26,6 +26,7 @@ from fastapi_users.openapi import OpenAPIResponseType
 from fastapi_users_db_sqlalchemy import SQLAlchemyUserDatabase
 from sqlalchemy.orm import Session
 
+from danswer.auth.api_key import request_has_valid_api_key
 from danswer.auth.invited_users import get_invited_users
 from danswer.auth.schemas import UserCreate
 from danswer.auth.schemas import UserRole
@@ -354,8 +355,19 @@ async def double_check_user(
 
 
 async def current_user(
+    request: Request,
     user: User | None = Depends(optional_user),
+    db_session: Session = Depends(get_session),
 ) -> User | None:
+    # API keys are service credentials for automation (not browser users) and
+    # intentionally don't map to a User. A request carrying a valid key is
+    # authorized as an anonymous service caller (user stays None — endpoints
+    # already handle that), rather than being 403'd into the SSO flow once
+    # AUTH_TYPE enforces auth (e.g. OIDC). Browser requests without a session
+    # still 403. Admin-only routes (current_admin_user) still require an admin
+    # user, so a key alone does not grant admin access.
+    if user is None and request_has_valid_api_key(request, db_session):
+        return None
     return await double_check_user(user)
 
 
