@@ -24,15 +24,10 @@ export function UserDropdown({
   const userInfoRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
 
-  const combinedSettings = useContext(SettingsContext);
-  if (!combinedSettings) {
-    return null;
-  }
-  const settings = combinedSettings.settings;
-
   // App-wide light/dark toggle (dark is the default; set pre-paint by the inline
   // script in layout.tsx). Available here so every page with the avatar menu can
   // switch, not just the chat sidebar. Flips `.dark` on <html> + persists.
+  // NOTE: must stay ABOVE the early `return null` below — rules-of-hooks.
   const [darkMode, setDarkMode] = useState(true);
   useEffect(() => {
     setDarkMode(document.documentElement.classList.contains("dark"));
@@ -43,6 +38,12 @@ export function UserDropdown({
     localStorage.setItem("darwin-theme", next ? "dark" : "light");
     document.documentElement.classList.toggle("dark", next);
   };
+
+  const combinedSettings = useContext(SettingsContext);
+  if (!combinedSettings) {
+    return null;
+  }
+  const settings = combinedSettings.settings;
 
   const handleLogout = () => {
     logout().then((isSuccess) => {
