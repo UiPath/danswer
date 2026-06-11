@@ -31,7 +31,7 @@ images:
     newTag: vha-149
   - name: danswer-web-server
     newName: sfbrdevhelmweacr.azurecr.io/danswer/danswer-web-server
-    newTag: vha-79
+    newTag: vha-80
   - name: danswer-model-server
     newName: danswer/danswer-model-server
     newTag: v0.3.94
