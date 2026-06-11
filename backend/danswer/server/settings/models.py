@@ -22,6 +22,13 @@ class Settings(BaseModel):
     # here so the chat UI pre-checks against the SAME value the backend enforces
     # instead of a hardcoded duplicate.
     chat_file_max_size_mb: int = 25
+    # Env-driven (RERANK_ENABLED / LLM_RELEVANCE_FILTER_ENABLED), injected in
+    # load_settings — surfaced so the chat + assistant UIs hide the
+    # per-conversation and per-assistant rerank / relevance toggles when the
+    # feature is disabled cluster-wide. Effective values (relevance also respects
+    # the DISABLE_LLM_CHUNK_FILTER kill-switch).
+    rerank_enabled: bool = False
+    llm_relevance_filter_enabled: bool = False
 
     def check_validity(self) -> None:
         chat_page_enabled = self.chat_page_enabled

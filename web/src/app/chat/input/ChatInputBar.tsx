@@ -1,6 +1,7 @@
 import React, {
   Dispatch,
   SetStateAction,
+  useContext,
   useEffect,
   useRef,
   useState,
@@ -20,6 +21,7 @@ import { Persona } from "@/app/admin/assistants/interfaces";
 import { FilterManager, LlmOverrideManager } from "@/lib/hooks";
 import { SelectedFilterDisplay } from "./SelectedFilterDisplay";
 import { useChatContext } from "@/components/context/ChatContext";
+import { SettingsContext } from "@/components/settings/SettingsProvider";
 import { getFinalLLM } from "@/lib/llm/utils";
 import { getModelDisplayName } from "@/lib/llm/models";
 import { FileDescriptor } from "../interfaces";
@@ -112,6 +114,9 @@ export function ChatInputBar({
   };
 
   const { llmProviders } = useChatContext();
+  // Cluster-level enablement — hide the per-conversation rerank/relevance
+  // toggles entirely when the feature is disabled cluster-wide.
+  const settings = useContext(SettingsContext)?.settings;
   const [_, llmName] = getFinalLLM(llmProviders, selectedAssistant, null);
 
   const suggestionsRef = useRef<HTMLDivElement | null>(null);
@@ -425,9 +430,9 @@ export function ChatInputBar({
                 />
               )}
 
-              {/* Per-conversation search-quality toggles (default off). Only
-                  take effect if enabled globally by an admin. */}
-              {!retrievalDisabled && (
+              {/* Per-conversation search-quality toggles. Hidden entirely when
+                  the feature is disabled cluster-wide (settings.*_enabled). */}
+              {!retrievalDisabled && settings?.rerank_enabled && (
                 <button
                   type="button"
                   onClick={() => setUseReranking(!useReranking)}
@@ -440,7 +445,7 @@ export function ChatInputBar({
                 </button>
               )}
 
-              {!retrievalDisabled && (
+              {!retrievalDisabled && settings?.llm_relevance_filter_enabled && (
                 <button
                   type="button"
                   onClick={() => setUseRelevanceFilter(!useRelevanceFilter)}

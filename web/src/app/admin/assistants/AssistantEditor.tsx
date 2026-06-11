@@ -17,7 +17,7 @@ import { useRouter } from "next/navigation";
 import { usePopup } from "@/components/admin/connectors/Popup";
 import { Persona, StarterMessage } from "./interfaces";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useContext, useEffect, useState } from "react";
 import {
   BooleanFormField,
   SelectorFormField,
@@ -82,6 +82,9 @@ export function AssistantEditor({
   const { popup, setPopup } = usePopup();
 
   const isPaidEnterpriseFeaturesEnabled = usePaidEnterpriseFeaturesEnabled();
+  // Cluster-level enablement — hide the rerank / relevance assistant settings
+  // entirely when the feature is disabled cluster-wide.
+  const globalSettings = useContext(SettingsContext)?.settings;
 
   // EE only
   const { data: userGroups, isLoading: userGroupsIsLoading } = useUserGroups();
@@ -574,21 +577,25 @@ export function AssistantEditor({
 
                                   <Label>Misc</Label>
 
-                                  <BooleanFormField
-                                    name="llm_relevance_filter"
-                                    label="Apply LLM Relevance Filter"
-                                    subtext={
-                                      "If enabled, the LLM will filter out chunks that are not relevant to the user query."
-                                    }
-                                  />
+                                  {globalSettings?.llm_relevance_filter_enabled && (
+                                    <BooleanFormField
+                                      name="llm_relevance_filter"
+                                      label="Apply LLM Relevance Filter"
+                                      subtext={
+                                        "If enabled, the LLM will filter out chunks that are not relevant to the user query."
+                                      }
+                                    />
+                                  )}
 
-                                  <BooleanFormField
-                                    name="rerank_enabled"
-                                    label="Rerank results (beta)"
-                                    subtext={
-                                      "If enabled, retrieved results are reordered by a cross-encoder reranking model before being passed to the LLM, which usually improves answer quality. Only takes effect when reranking is enabled globally (a GPU-backed model server is deployed); otherwise this setting is ignored."
-                                    }
-                                  />
+                                  {globalSettings?.rerank_enabled && (
+                                    <BooleanFormField
+                                      name="rerank_enabled"
+                                      label="Rerank results (beta)"
+                                      subtext={
+                                        "If enabled, retrieved results are reordered by a cross-encoder reranking model before being passed to the LLM, which usually improves answer quality. Only takes effect when reranking is enabled globally (a GPU-backed model server is deployed); otherwise this setting is ignored."
+                                      }
+                                    />
+                                  )}
 
                                   <BooleanFormField
                                     name="include_citations"
