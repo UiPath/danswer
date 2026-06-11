@@ -7,6 +7,9 @@
  * Scoped to any `.dark` ancestor (CSS vars cascade), so dark mode applies only
  * where the `.dark` class is set (currently: the chat page container). */
 .dark {
+  /* Render native form controls (checkboxes, date pickers, default input
+     backgrounds) and scrollbars in dark — fixes bright white checkboxes/inputs. */
+  color-scheme: dark;
   --background: #0f1117;
   --background-weak: #171a21;
   --background-emphasis: #1c1f27;
@@ -66,6 +69,13 @@
   .da-fade-up {
     animation: none;
   }
+}
+
+/* Brand the native checkbox/radio accent so the checked state matches the app
+ * accent in both themes (pairs with color-scheme above for the box itself). */
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: #6671d0;
 }
 
 @layer utilities {
