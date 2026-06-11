@@ -1,0 +1,66 @@
+# Backup-failure alerts. `release: robusta` is REQUIRED to match the
+# Prometheus ruleSelector (matchLabels release=robusta); robusta forwards
+# firing alerts to Slack.
+#
+# The alert that matters most is VeleroNoRecentSuccessfulBackup — it fires on
+# the EXACT failure mode that went unnoticed for ~a year last time (auth
+# broke -> backups silently failing). It watches the OUTCOME (time since last
+# success), so it catches every cause: bad credentials, BSL down, velero
+# crashed, schedule disabled.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: velero-backup-alerts
+  namespace: velero
+  labels:
+    app.kubernetes.io/name: velero
+    release: robusta
+spec:
+  groups:
+    - name: velero-backups
+      rules:
+        # SAFETY NET: no successful weekly backup in >8 days (weekly + 1 day slack).
+        - alert: VeleroNoRecentSuccessfulBackup
+          expr: (time() - velero_backup_last_successful_timestamp{schedule="vespa-weekly"}) > 8 * 24 * 3600
+          for: 1h
+          labels:
+            severity: critical
+          annotations:
+            summary: "Velero: no successful vespa-weekly backup in over 8 days"
+            description: "The last successful 'vespa-weekly' backup is older than 8 days. The weekly schedule is failing or not running. Check `velero backup get` and the velero pod logs."
+        # velero down / not scraped / never ran -> metric absent.
+        - alert: VeleroBackupMetricsAbsent
+          expr: absent(velero_backup_last_successful_timestamp{schedule="vespa-weekly"})
+          for: 6h
+          labels:
+            severity: critical
+          annotations:
+            summary: "Velero: vespa-weekly backup metric absent"
+            description: "No metric for the 'vespa-weekly' schedule for 6h — velero may be down, unscraped, or no backup has ever completed."
+        # A backup attempt failed.
+        - alert: VeleroBackupFailure
+          expr: increase(velero_backup_failure_total{schedule="vespa-weekly"}[1h]) > 0
+          for: 0m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Velero: vespa-weekly backup FAILED"
+            description: "A 'vespa-weekly' backup failed in the last hour. `velero backup describe --details`."
+        # A backup partially failed (some items errored).
+        - alert: VeleroBackupPartialFailure
+          expr: increase(velero_backup_partial_failure_total{schedule="vespa-weekly"}[1h]) > 0
+          for: 0m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Velero: vespa-weekly backup partially failed"
+            description: "A 'vespa-weekly' backup partially failed in the last hour (some resources/snapshots errored)."
+        # A volume (disk) snapshot failed — the index data didn't get captured.
+        - alert: VeleroVolumeSnapshotFailure
+          expr: increase(velero_volume_snapshot_failure_total[1h]) > 0
+          for: 0m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Velero: volume snapshot failed"
+            description: "A PV snapshot failed in the last hour — the Vespa disk data may not be in the latest backup."

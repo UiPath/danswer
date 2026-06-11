@@ -1,0 +1,26 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: velero
+  namespace: velero
+  labels:
+    app.kubernetes.io/name: velero
+---
+# Velero needs broad access to snapshot/restore arbitrary resources. This
+# mirrors the upstream `velero install` default (cluster-admin). Scope it down
+# later if desired, but the backup/restore controllers touch many resource
+# types across the cluster.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: velero
+  labels:
+    app.kubernetes.io/name: velero
+subjects:
+  - kind: ServiceAccount
+    name: velero
+    namespace: velero
+roleRef:
+  kind: ClusterRole
+  name: cluster-admin
+  apiGroup: rbac.authorization.k8s.io

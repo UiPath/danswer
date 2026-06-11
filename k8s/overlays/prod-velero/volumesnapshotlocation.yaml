@@ -1,0 +1,16 @@
+# Where Velero creates the Azure Managed Disk snapshots for the backed-up PVs.
+# Snapshots land in the AKS node RG (MC_darwin_darwin_westeurope) — NOT the
+# lock-protected `darwin` RG — so TTL-driven snapshot GC can delete them. The
+# SP 155fae3c holds Contributor there.
+apiVersion: velero.io/v1
+kind: VolumeSnapshotLocation
+metadata:
+  name: default
+  namespace: velero
+  labels:
+    app.kubernetes.io/name: velero
+spec:
+  provider: velero.io/azure
+  config:
+    resourceGroup: MC_darwin_darwin_westeurope
+    subscriptionId: 202e5d15-5356-4826-bc61-ebd449d12e34
