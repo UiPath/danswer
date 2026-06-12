@@ -18,7 +18,7 @@ personas:
     # Enable/Disable usage of the LLM chunk filter feature whereby each chunk is passed to the LLM to determine
     # if the chunk is useful or not towards the latest user query
     # This feature can be overriden for all personas via DISABLE_LLM_CHUNK_FILTER env variable
-    llm_relevance_filter: true
+    llm_relevance_filter: false
     # Enable/Disable usage of the LLM to extract query time filters including source type and time range filters
     llm_filter_extraction: true
     # Decay documents priority as they age, options are:
@@ -61,7 +61,7 @@ personas:
     prompts:
       - "OnlyLLM"
     num_chunks: 0
-    llm_relevance_filter: true
+    llm_relevance_filter: false
     llm_filter_extraction: true
     recency_bias: "auto"
     document_sets: []
@@ -74,7 +74,7 @@ personas:
     prompts:
       - "Paraphrase"
     num_chunks: 10
-    llm_relevance_filter: true
+    llm_relevance_filter: false
     llm_filter_extraction: true
     recency_bias: "auto"
     document_sets: []
