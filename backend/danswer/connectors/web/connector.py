@@ -1,6 +1,7 @@
 import io
 import ipaddress
 import random
+import re
 import socket
 import time
 from datetime import datetime
@@ -127,8 +128,17 @@ def is_valid_url(url: str) -> bool:
 
 
 def get_internal_links(
-    base_url: str, url: str, soup: BeautifulSoup, should_ignore_pound: bool = True
+    base_url: str,
+    url: str,
+    soup: BeautifulSoup,
+    should_ignore_pound: bool = True,
+    allowed_prefixes: list[str] | None = None,
 ) -> set[str]:
+    # Recursion scope: a link is followed only if it lives under one of these
+    # prefixes. Defaults to [base_url]; for UiPath docs version-expansion this is
+    # the set of the latest-N version base URLs so all N subtrees are crawled
+    # (and older versions are excluded).
+    prefixes = allowed_prefixes if allowed_prefixes else [base_url]
     internal_links = set()
     for link in cast(list[dict[str, Any]], soup.find_all("a")):
         href = cast(str | None, link.get("href"))
@@ -142,7 +152,9 @@ def get_internal_links(
             # Relative path handling
             href = urljoin(url, href)
 
-        if urlparse(href).netloc == urlparse(url).netloc and base_url in href:
+        if urlparse(href).netloc == urlparse(url).netloc and any(
+            prefix in href for prefix in prefixes
+        ):
             internal_links.add(href)
     return internal_links
 
@@ -279,6 +291,97 @@ def get_sitemap_url_from_base_url(base_url: str) -> str:
     return sitemap_url
 
 
+# Concrete UiPath docs version segment, e.g. "2022.10", "2023.4", "2.2510".
+# Deliberately matches only numeric dotted versions so the "latest" alias and
+# non-version path segments are excluded.
+_UIPATH_VERSION_RE = re.compile(r"^\d+(?:\.\d+)+$")
+
+
+def _uipath_product_prefix(path: str) -> str:
+    """The path up to (but excluding) the first version-or-'latest' segment.
+
+    /robot/standalone/latest                       -> /robot/standalone
+    /robot/standalone/2022.10                       -> /robot/standalone
+    /apps/automation-suite/                         -> /apps/automation-suite
+    /automation-cloud/automation-cloud/latest/x/y   -> /automation-cloud/automation-cloud
+    """
+    segs = [s for s in path.strip("/").split("/") if s]
+    cut = len(segs)
+    for i, seg in enumerate(segs):
+        if seg == "latest" or _UIPATH_VERSION_RE.match(seg):
+            cut = i
+            break
+    return "/" + "/".join(segs[:cut])
+
+
+def get_uipath_docs_version_base_urls(base_url: str, max_versions: int = 3) -> list[str]:
+    """Expand a docs.uipath.com product URL to the base URLs of its latest N
+    concrete versions.
+
+    docs.uipath product pages render a version selector (newest-first) linking
+    each available version, e.g. /robot/standalone/2025.10. On-prem / standalone
+    products list many concrete versions; cloud / evergreen products expose only
+    the 'latest' alias. We take the first `max_versions` CONCRETE versions in the
+    selector's own order — the site already sorts newest-first, which correctly
+    handles the calendar -> MAJOR.YYMM scheme change (e.g. 2.2510 is newer than
+    2023.10, which no naive numeric sort would get right) — skipping 'latest'.
+
+    Returns, fail-safe:
+      - the latest N concrete version base URLs for versioned products, else
+      - [base_url] unchanged for non-docs.uipath.com URLs, evergreen products
+        with no concrete versions, or any fetch/parse error.
+    """
+    if "docs.uipath.com" not in base_url:
+        return [base_url]
+
+    try:
+        prefix = _uipath_product_prefix(urlparse(base_url).path)
+        prefix_segs = [s for s in prefix.strip("/").split("/") if s]
+
+        response = requests.get(base_url, timeout=30)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, "html.parser")
+
+        # Collect version-root links in document order (the selector is
+        # newest-first), deduped: exactly the product prefix + one concrete
+        # version segment (no deeper path -> isolates selector links from
+        # content links).
+        versions: list[str] = []
+        for link in cast(list[dict[str, Any]], soup.find_all("a")):
+            href = cast(str | None, link.get("href"))
+            if not href:
+                continue
+            parsed = urlparse(urljoin(base_url, href.split("#")[0]))
+            if parsed.netloc != "docs.uipath.com":
+                continue
+            segs = [s for s in parsed.path.strip("/").split("/") if s]
+            if (
+                len(segs) == len(prefix_segs) + 1
+                and segs[: len(prefix_segs)] == prefix_segs
+                and _UIPATH_VERSION_RE.match(segs[-1])
+                and segs[-1] not in versions
+            ):
+                versions.append(segs[-1])
+
+        if not versions:
+            # evergreen / no multi-version selector -> crawl the URL as-is
+            return [base_url]
+
+        latest = versions[:max_versions]
+        result = [f"https://docs.uipath.com{prefix}/{v}" for v in latest]
+        logger.info(
+            f"docs.uipath versioned product '{prefix}': crawling latest "
+            f"{len(result)} of {len(versions)} versions {latest}"
+        )
+        return result
+    except Exception as e:
+        logger.warning(
+            f"Could not expand UiPath docs versions for {base_url} ({e}); "
+            "crawling the configured URL as-is."
+        )
+        return [base_url]
+
+
 class WebConnector(LoadConnector, PollConnector):
     def __init__(
         self,
@@ -286,16 +389,39 @@ class WebConnector(LoadConnector, PollConnector):
         web_connector_type: str = WEB_CONNECTOR_VALID_SETTINGS.RECURSIVE.value,
         mintlify_cleanup: bool = True,  # Mostly ok to apply to other websites as well
         batch_size: int = INDEX_BATCH_SIZE,
+        # OPT-IN, docs.uipath.com + RECURSIVE only. When True, the configured
+        # base_url is expanded to the latest `max_versions` concrete versions of
+        # that product (via the page's version selector), re-evaluated every
+        # indexing run so new releases are auto-picked-up and the oldest drops
+        # off. Leave False (default) for every other connector — auto-applying
+        # would make per-version connectors all crawl the same latest set.
+        uipath_latest_versions: bool = False,
+        max_versions: int = 3,
     ) -> None:
         self.base_url = base_url
         self.mintlify_cleanup = mintlify_cleanup
         self.batch_size = batch_size
         self.recursive = False
         self.web_connector_type = web_connector_type
+        self.uipath_latest_versions = uipath_latest_versions
+        self.max_versions = max_versions
+        # Recursion scope (RECURSIVE mode). Defaults to the configured base_url;
+        # overridden below to the latest-N version base URLs when version
+        # tracking is enabled for a versioned docs.uipath product.
+        self.recursive_prefixes: list[str] = [base_url]
 
         if web_connector_type == WEB_CONNECTOR_VALID_SETTINGS.RECURSIVE.value:
             self.recursive = True
-            self.to_visit_list = [_ensure_valid_url(base_url)]
+            if uipath_latest_versions:
+                # docs.uipath versioned product -> latest N version base URLs;
+                # returns [base_url] unchanged for evergreen / non-docs URLs.
+                expanded = get_uipath_docs_version_base_urls(
+                    base_url, max_versions=max_versions
+                )
+                self.to_visit_list = [_ensure_valid_url(u) for u in expanded]
+                self.recursive_prefixes = self.to_visit_list
+            else:
+                self.to_visit_list = [_ensure_valid_url(base_url)]
             return
 
         elif web_connector_type == WEB_CONNECTOR_VALID_SETTINGS.SINGLE.value:
@@ -431,7 +557,12 @@ class WebConnector(LoadConnector, PollConnector):
                         soup = BeautifulSoup(content, "html.parser")
 
                         if self.recursive and not is_polling:
-                            for link in get_internal_links(base_url, current_url, soup):
+                            for link in get_internal_links(
+                                base_url,
+                                current_url,
+                                soup,
+                                allowed_prefixes=self.recursive_prefixes,
+                            ):
                                 if link not in visited_links:
                                     to_visit.append(link)
 
@@ -563,8 +694,14 @@ class WebConnector(LoadConnector, PollConnector):
 
         except Exception as e:
             logger.warning(f"Failed to use sitemap for polling: {e}")
-            # Fall back to regular indexing if sitemap fails
-            return self.load_from_state(is_polling=True)
+            # Fall back to a full RECURSIVE crawl (is_polling=False) when the
+            # sitemap is unavailable. The product sitemap URL is currently stale
+            # (404s), so this fallback is the common path; with is_polling=True
+            # recursion is disabled (see load_from_state) and only the seed
+            # URL(s) would be indexed — i.e. just landing pages. A full crawl
+            # also honors uipath_latest_versions (to_visit_list/recursive_prefixes
+            # are version-expanded in __init__).
+            return self.load_from_state(is_polling=False)
 
 
 if __name__ == "__main__":

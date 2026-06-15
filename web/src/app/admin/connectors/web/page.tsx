@@ -12,6 +12,7 @@ import {
 import { errorHandlingFetcher } from "@/lib/fetcher";
 import { ErrorCallout } from "@/components/ErrorCallout";
 import {
+  BooleanFormField,
   SelectorFormField,
   TextFormField,
 } from "@/components/admin/connectors/Field";
@@ -103,6 +104,17 @@ export default function Web() {
                   ]}
                 />
               </div>
+              <BooleanFormField
+                name="uipath_latest_versions"
+                label="Track latest versions (UiPath docs only)"
+                subtext="For docs.uipath.com versioned products (e.g. Automation Suite, standalone Robot), automatically index the latest N versions instead of a fixed one — re-evaluated each run so new releases are picked up and the oldest drops off. Use the Recursive scrape method and point the URL at the product (e.g. https://docs.uipath.com/robot/standalone/latest). Ignored for non-docs.uipath or evergreen pages."
+              />
+              <TextFormField
+                name="max_versions"
+                label="Number of latest versions to index:"
+                type="number"
+                subtext="How many of the most recent versions to index (default 3). Only used when 'Track latest versions' is enabled."
+              />
             </>
           }
           validationSchema={Yup.object().shape({
@@ -112,10 +124,14 @@ export default function Web() {
             web_connector_type: Yup.string()
               .oneOf(["recursive", "single", "sitemap"])
               .optional(),
+            uipath_latest_versions: Yup.boolean().optional(),
+            max_versions: Yup.number().min(1).optional(),
           })}
           initialValues={{
             base_url: "",
             web_connector_type: undefined,
+            uipath_latest_versions: false,
+            max_versions: 3,
           }}
           refreshFreq={60 * 60 * 24} // 1 day
           pruneFreq={0} // Don't prune

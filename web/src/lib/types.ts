@@ -106,6 +106,10 @@ export interface Connector<T> extends ConnectorBase<T> {
 export interface WebConfig {
   base_url: string;
   web_connector_type?: "recursive" | "single" | "sitemap";
+  // docs.uipath.com only: auto-index the latest `max_versions` versions of a
+  // versioned product (Recursive scrape method). Ignored otherwise.
+  uipath_latest_versions?: boolean;
+  max_versions?: number;
 }
 
 export interface GithubConfig {
