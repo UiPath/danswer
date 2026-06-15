@@ -705,6 +705,15 @@ class WebConnector(LoadConnector, PollConnector):
                         break
             else:  # RECURSIVE case
                 for url, lastmod in urls_with_dates:
+                    # Scope to the crawl prefixes. For a uipath_latest_versions
+                    # connector these are the latest-N version base URLs, so the
+                    # all-versions product sitemap (it lists EVERY version under
+                    # the product) is filtered down to just those. Without this,
+                    # poll re-indexes every version, bypassing the expansion.
+                    # For a normal connector recursive_prefixes == [base_url], so
+                    # this is the same scoping as before.
+                    if not any(prefix in url for prefix in self.recursive_prefixes):
+                        continue
                     if lastmod and start_datetime <= lastmod <= end_datetime:
                         urls_to_index.append(url)
                     # If we don't have a lastmod date, we should check the page
