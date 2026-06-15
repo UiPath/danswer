@@ -30,11 +30,13 @@ and a same-cc-pair pair never runs two attempts concurrently.
 """
 from __future__ import annotations
 
+import os
 import random
 import unittest
 from dataclasses import dataclass
 from dataclasses import field
 from enum import Enum
+from unittest import mock
 
 from danswer.background.update import _build_running_view
 from danswer.background.update import _DEFER_CC_PAIR
@@ -48,6 +50,7 @@ class _Source(str, Enum):
     GITHUB = "github"
     CONFLUENCE = "confluence"
     SALESFORCE = "salesforce"
+    WEB = "web"
 
 
 @dataclass
@@ -701,6 +704,97 @@ class TestSchedulerStress(unittest.TestCase):
                         f"invariant violated under crashy workers: "
                         f"seed={seed} tick={tick}: {e}"
                     )
+
+
+class TestPerSourceCapOverrides(unittest.TestCase):
+    """The per-source override (`INDEXING_PER_SOURCE_CAP_OVERRIDES`) lets a
+    single source run at a different cap than the global default without
+    affecting other sources. Web is the motivating case: lift its cap while
+    Slack/Confluence stay at 1.
+    """
+
+    def _tick(
+        self,
+        candidates: list[_FakeAttempt],
+        in_progress: list[_FakeAttempt],
+        per_source_cap: int,
+        overrides: dict[str, int],
+    ) -> tuple[list[int], list[tuple[int, str]]]:
+        running_per_source, keys = _build_running_view(
+            in_progress, [], per_source_cap, overrides
+        )
+        dispatched: list[int] = []
+        deferred: list[tuple[int, str]] = []
+        for attempt in candidates:
+            decision = _evaluate_dispatch_for_attempt(
+                attempt, running_per_source, keys, per_source_cap, overrides
+            )
+            if decision == _DISPATCH:
+                dispatched.append(attempt.id)
+            else:
+                deferred.append((attempt.id, decision))
+        return dispatched, deferred
+
+    def test_override_uncaps_one_source_only(self) -> None:
+        # Default cap 1, web uncapped (0). Three distinct web cc-pairs +
+        # two distinct slack cc-pairs queued on an idle scheduler.
+        candidates = [
+            _attempt(id=1, source=_Source.WEB),
+            _attempt(id=2, source=_Source.WEB),
+            _attempt(id=3, source=_Source.WEB),
+            _attempt(id=4, source=_Source.SLACK),
+            _attempt(id=5, source=_Source.SLACK),
+        ]
+        dispatched, deferred = self._tick(
+            candidates, in_progress=[], per_source_cap=1, overrides={"web": 0}
+        )
+        # All three web attempts go (uncapped); only one slack goes (cap 1).
+        self.assertEqual(set(dispatched), {1, 2, 3, 4})
+        self.assertEqual(deferred, [(5, _DEFER_SOURCE_CAP)])
+
+    def test_override_with_finite_cap(self) -> None:
+        # web=2: at most two web at once; the third defers.
+        candidates = [
+            _attempt(id=1, source=_Source.WEB),
+            _attempt(id=2, source=_Source.WEB),
+            _attempt(id=3, source=_Source.WEB),
+        ]
+        dispatched, deferred = self._tick(
+            candidates, in_progress=[], per_source_cap=1, overrides={"web": 2}
+        )
+        self.assertEqual(set(dispatched), {1, 2})
+        self.assertEqual(deferred, [(3, _DEFER_SOURCE_CAP)])
+
+    def test_non_overridden_source_keeps_global_default(self) -> None:
+        # Override only names web; confluence must still honor the global 1.
+        candidates = [
+            _attempt(id=1, source=_Source.CONFLUENCE),
+            _attempt(id=2, source=_Source.CONFLUENCE),
+        ]
+        dispatched, deferred = self._tick(
+            candidates, in_progress=[], per_source_cap=1, overrides={"web": 0}
+        )
+        self.assertEqual(dispatched, [1])
+        self.assertEqual(deferred, [(2, _DEFER_SOURCE_CAP)])
+
+    def test_per_cc_pair_lock_still_holds_when_uncapped(self) -> None:
+        # Even uncapped, the same cc-pair never runs twice concurrently.
+        running = _attempt(id=1, source=_Source.WEB, connector_id=99)
+        dup = _attempt(id=2, source=_Source.WEB, connector_id=99)
+        dispatched, deferred = self._tick(
+            [dup], in_progress=[running], per_source_cap=1, overrides={"web": 0}
+        )
+        self.assertEqual(dispatched, [])
+        self.assertEqual(deferred, [(2, _DEFER_CC_PAIR)])
+
+    def test_resolve_overrides_parsing(self) -> None:
+        from danswer.configs.indexing_concurrency import _resolve_overrides
+
+        with mock.patch.dict(
+            os.environ,
+            {"INDEXING_PER_SOURCE_CAP_OVERRIDES": " web = 0 , slack=2 ,bad,=3,x=y"},
+        ):
+            self.assertEqual(_resolve_overrides(), {"web": 0, "slack": 2})
 
 
 if __name__ == "__main__":
