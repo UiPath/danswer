@@ -326,47 +326,70 @@ def get_uipath_docs_version_base_urls(base_url: str, max_versions: int = 3) -> l
     handles the calendar -> MAJOR.YYMM scheme change (e.g. 2.2510 is newer than
     2023.10, which no naive numeric sort would get right) — skipping 'latest'.
 
-    Returns, fail-safe:
+    Returns:
       - the latest N concrete version base URLs for versioned products, else
-      - [base_url] unchanged for non-docs.uipath.com URLs, evergreen products
-        with no concrete versions, or any fetch/parse error.
+      - [base_url] unchanged for non-docs.uipath.com URLs, or evergreen / single
+        pages already scoped to a version or '/latest'.
+
+    RAISES (fail-safe, does NOT fall back to a product-base crawl) when the
+    selector can't be fetched after retries, or no concrete versions are found
+    AND base_url is a version-less product base — both cases would otherwise
+    recursively index EVERY version.
     """
     if "docs.uipath.com" not in base_url:
         return [base_url]
 
-    try:
-        prefix = _uipath_product_prefix(urlparse(base_url).path)
-        prefix_segs = [s for s in prefix.strip("/").split("/") if s]
+    prefix = _uipath_product_prefix(urlparse(base_url).path)
+    prefix_segs = [s for s in prefix.strip("/").split("/") if s]
+    path_segs = [s for s in urlparse(base_url).path.strip("/").split("/") if s]
+    # base_url already sits inside a specific version / 'latest' segment (so a
+    # recursive crawl stays within ONE version) iff a version/'latest' segment
+    # was found, i.e. the product prefix is shorter than the full path.
+    base_within_version = len(prefix_segs) < len(path_segs)
 
-        response = requests.get(base_url, timeout=30)
-        response.raise_for_status()
-        soup = BeautifulSoup(response.content, "html.parser")
+    # Fetch the version selector, with retries. A transient failure must NEVER
+    # silently fall back to crawling the bare product base — for a version-less
+    # base URL that recursively indexes EVERY version, the exact thing this
+    # feature exists to prevent. Fail the run instead; it retries cleanly.
+    soup = None
+    last_err: Exception | None = None
+    for attempt in range(3):
+        try:
+            response = requests.get(base_url, timeout=30)
+            response.raise_for_status()
+            soup = BeautifulSoup(response.content, "html.parser")
+            break
+        except Exception as e:
+            last_err = e
+            time.sleep(2 * (attempt + 1))
+    if soup is None:
+        raise RuntimeError(
+            f"Could not fetch the UiPath docs version selector for {base_url} "
+            f"after 3 attempts ({last_err}). Failing rather than falling back to "
+            "a full product-base crawl (which would index every version)."
+        )
 
-        # Collect version-root links in document order (the selector is
-        # newest-first), deduped: exactly the product prefix + one concrete
-        # version segment (no deeper path -> isolates selector links from
-        # content links).
-        versions: list[str] = []
-        for link in cast(list[dict[str, Any]], soup.find_all("a")):
-            href = cast(str | None, link.get("href"))
-            if not href:
-                continue
-            parsed = urlparse(urljoin(base_url, href.split("#")[0]))
-            if parsed.netloc != "docs.uipath.com":
-                continue
-            segs = [s for s in parsed.path.strip("/").split("/") if s]
-            if (
-                len(segs) == len(prefix_segs) + 1
-                and segs[: len(prefix_segs)] == prefix_segs
-                and _UIPATH_VERSION_RE.match(segs[-1])
-                and segs[-1] not in versions
-            ):
-                versions.append(segs[-1])
+    # Collect version-root links in document order (the selector is
+    # newest-first), deduped: exactly the product prefix + one concrete version
+    # segment (no deeper path -> isolates selector links from content links).
+    versions: list[str] = []
+    for link in cast(list[dict[str, Any]], soup.find_all("a")):
+        href = cast(str | None, link.get("href"))
+        if not href:
+            continue
+        parsed = urlparse(urljoin(base_url, href.split("#")[0]))
+        if parsed.netloc != "docs.uipath.com":
+            continue
+        segs = [s for s in parsed.path.strip("/").split("/") if s]
+        if (
+            len(segs) == len(prefix_segs) + 1
+            and segs[: len(prefix_segs)] == prefix_segs
+            and _UIPATH_VERSION_RE.match(segs[-1])
+            and segs[-1] not in versions
+        ):
+            versions.append(segs[-1])
 
-        if not versions:
-            # evergreen / no multi-version selector -> crawl the URL as-is
-            return [base_url]
-
+    if versions:
         latest = versions[:max_versions]
         result = [f"https://docs.uipath.com{prefix}/{v}" for v in latest]
         logger.info(
@@ -374,12 +397,19 @@ def get_uipath_docs_version_base_urls(base_url: str, max_versions: int = 3) -> l
             f"{len(result)} of {len(versions)} versions {latest}"
         )
         return result
-    except Exception as e:
-        logger.warning(
-            f"Could not expand UiPath docs versions for {base_url} ({e}); "
-            "crawling the configured URL as-is."
-        )
+
+    # No concrete versions in the selector. Crawl base_url as-is ONLY if it's
+    # already scoped to a single version / 'latest' (e.g. an evergreen product
+    # like activities/other/latest, or a deep cloud page .../latest/admin/...).
+    # A version-less product base would span EVERY version under a recursive
+    # crawl, so refuse instead of leaking.
+    if base_within_version:
         return [base_url]
+    raise RuntimeError(
+        f"No concrete versions found for UiPath docs product '{prefix}' and "
+        f"'{base_url}' has no version/'latest' segment. Refusing a full "
+        "product-base crawl — point the connector at a specific version or /latest."
+    )
 
 
 class WebConnector(LoadConnector, PollConnector):
