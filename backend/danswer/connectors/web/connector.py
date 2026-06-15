@@ -314,7 +314,7 @@ def _uipath_product_prefix(path: str) -> str:
     return "/" + "/".join(segs[:cut])
 
 
-def get_uipath_docs_version_base_urls(base_url: str, max_versions: int = 3) -> list[str]:
+def get_uipath_docs_version_base_urls(base_url: str, max_versions: int = 2) -> list[str]:
     """Expand a docs.uipath.com product URL to the base URLs of its latest N
     concrete versions.
 
@@ -426,7 +426,7 @@ class WebConnector(LoadConnector, PollConnector):
         # off. Leave False (default) for every other connector — auto-applying
         # would make per-version connectors all crawl the same latest set.
         uipath_latest_versions: bool = False,
-        max_versions: int = 3,
+        max_versions: int = 2,
     ) -> None:
         self.base_url = base_url
         self.mintlify_cleanup = mintlify_cleanup

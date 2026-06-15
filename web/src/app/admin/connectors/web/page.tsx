@@ -113,7 +113,7 @@ export default function Web() {
                 name="max_versions"
                 label="Number of latest versions to index:"
                 type="number"
-                subtext="How many of the most recent versions to index (default 3). Only used when 'Track latest versions' is enabled."
+                subtext="How many of the most recent versions to index (default 2). Only used when 'Track latest versions' is enabled."
               />
             </>
           }
@@ -131,7 +131,7 @@ export default function Web() {
             base_url: "",
             web_connector_type: undefined,
             uipath_latest_versions: false,
-            max_versions: 3,
+            max_versions: 2,
           }}
           refreshFreq={60 * 60 * 24} // 1 day
           pruneFreq={0} // Don't prune
