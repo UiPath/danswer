@@ -106,6 +106,7 @@ export default function Web() {
               </div>
               <BooleanFormField
                 name="uipath_latest_versions"
+                alignTop
                 label="Track latest versions (UiPath docs only)"
                 subtext="For docs.uipath.com versioned products (e.g. Automation Suite, standalone Robot), automatically index the latest N versions instead of a fixed one — re-evaluated each run so new releases are picked up and the oldest drops off. Use the Recursive scrape method and point the URL at the product (e.g. https://docs.uipath.com/robot/standalone/latest). Ignored for non-docs.uipath or evergreen pages."
               />

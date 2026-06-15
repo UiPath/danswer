@@ -12,6 +12,7 @@ import {
   BarChartIcon,
   DatabaseIcon,
   KeyIcon,
+  TriangleAlertIcon,
 } from "@/components/icons/icons";
 import { User } from "@/lib/types";
 import {
@@ -83,6 +84,28 @@ export async function Layout({ children }: { children: React.ReactNode }) {
                       </div>
                     ),
                     link: "/admin/indexing/status",
+                  },
+                  {
+                    name: (
+                      <div className="flex">
+                        <BarChartIcon size={18} />
+                        <div className="ml-1">Indexing Activity</div>
+                      </div>
+                    ),
+                    // Deep-link shortcut into the "Active (running + queued)"
+                    // status filter on the Existing Connectors table.
+                    link: "/admin/indexing/status?status=active",
+                  },
+                  {
+                    name: (
+                      <div className="flex">
+                        <TriangleAlertIcon size={18} />
+                        <div className="ml-1">Failed Indexing</div>
+                      </div>
+                    ),
+                    // Deep-link shortcut into the "Failed" status filter on
+                    // the Existing Connectors table.
+                    link: "/admin/indexing/status?status=failed",
                   },
                   {
                     name: (

@@ -191,8 +191,15 @@ export const useUserGroups = (): {
   error: string;
   refreshUserGroups: () => void;
 } => {
-  const swrResponse = useSWR<UserGroup[]>(USER_GROUP_URL, errorHandlingFetcher);
   const isPaidEnterpriseFeaturesEnabled = usePaidEnterpriseFeaturesEnabled();
+  // Pass a null key when EE is off so SWR skips the request entirely —
+  // otherwise this fires `/api/manage/admin/user-group` on every mount of an
+  // EE-gated page, which 404s repeatedly (the endpoint isn't registered in
+  // this MIT-only deployment) and spams the browser console.
+  const swrResponse = useSWR<UserGroup[]>(
+    isPaidEnterpriseFeaturesEnabled ? USER_GROUP_URL : null,
+    errorHandlingFetcher
+  );
 
   if (!isPaidEnterpriseFeaturesEnabled) {
     return {

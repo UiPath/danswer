@@ -270,10 +270,23 @@ function fillSourceMetadata(
 }
 
 export function getSourceMetadata(sourceType: ValidSources): SourceMetadata {
-  const response = fillSourceMetadata(
-    SOURCE_METADATA_MAP[sourceType],
+  // Defensive fallback: some backend DocumentSource values have no tile in
+  // SOURCE_METADATA_MAP (e.g. `ingestion_api`, the built-in "Ingestion API"
+  // cc-pair that ships with every install). Without this, any UI that renders
+  // such a cc-pair — e.g. the document-set connector picker's dropdown — would
+  // pass `undefined` into fillSourceMetadata and crash on
+  // `undefined.displayName` (a client-side exception that takes down the page).
+  const partialMetadata: PartialSourceMetadata = SOURCE_METADATA_MAP[
     sourceType
-  );
+  ] ?? {
+    icon: GlobeIcon,
+    displayName: (sourceType ?? "unknown")
+      .split("_")
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(" "),
+    category: SourceCategory.ImportedKnowledge,
+  };
+  const response = fillSourceMetadata(partialMetadata, sourceType);
 
   return response;
 }

@@ -110,13 +110,17 @@ function ClickableTableRow({
 export function CCPairIndexingStatusTable({
   ccPairsIndexingStatuses,
   onRefresh,
+  initialStatusFilter = "all",
 }: {
   ccPairsIndexingStatuses: ConnectorIndexingStatus<any, any>[];
   onRefresh?: () => void;
+  // Seeds the status dropdown so a deep-link (e.g. ?status=active) lands
+  // straight in the filtered view without the user touching the filters.
+  initialStatusFilter?: string;
 }) {
   const [page, setPage] = useState(1);
   const [sourceFilter, setSourceFilter] = useState<string>("all");
-  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [statusFilter, setStatusFilter] = useState<string>(initialStatusFilter);
   const [nameSearch, setNameSearch] = useState<string>("");
   // Sort state for the "Last Indexed" column. `none` falls back to the
   // page's default ordering (source-name ascending, set in page.tsx).
@@ -153,7 +157,13 @@ export function CCPairIndexingStatusTable({
     if (sourceFilter !== "all") {
       rows = rows.filter((s) => s.connector.source === sourceFilter);
     }
-    if (statusFilter !== "all") {
+    if (statusFilter === "active") {
+      // Composite lens: currently running + queued waiting for a worker
+      // slot — the scheduler's live activity in one view.
+      rows = rows.filter((s) =>
+        ["in_progress", "not_started"].includes(effectiveStatus(s))
+      );
+    } else if (statusFilter !== "all") {
       rows = rows.filter((s) => effectiveStatus(s) === statusFilter);
     }
     const q = nameSearch.trim().toLowerCase();
@@ -306,6 +316,7 @@ export function CCPairIndexingStatusTable({
             onChange={(e) => setStatusFilter(e.target.value)}
           >
             <option value="all">All statuses</option>
+            <option value="active">Active (running + queued)</option>
             <option value="success">Success</option>
             <option value="failed">Failed</option>
             <option value="in_progress">In progress</option>
