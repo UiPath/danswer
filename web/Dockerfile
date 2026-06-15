@@ -1,4 +1,9 @@
-FROM node:20-alpine AS base
+# Base node image. Overridable so CI can pull from a registry that isn't
+# subject to Docker Hub's unauthenticated pull-rate limit (e.g. our ACR mirror,
+# `az acr build --build-arg NODE_BASE=darwinacr.azurecr.io/library/node:20-alpine`).
+# Defaults to Docker Hub so local builds are unchanged.
+ARG NODE_BASE=node:20-alpine
+FROM ${NODE_BASE} AS base
 
 LABEL com.danswer.maintainer="founders@danswer.ai"
 LABEL com.danswer.description="This image is the web/frontend container of Danswer which \
