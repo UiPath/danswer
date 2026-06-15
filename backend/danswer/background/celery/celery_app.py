@@ -39,6 +39,7 @@ from danswer.db.document_set import mark_document_set_as_synced
 from danswer.db.engine import build_connection_string
 from danswer.db.engine import get_sqlalchemy_engine
 from danswer.db.engine import SYNC_DB_API
+from danswer.db.tasks import get_stuck_deletion_cc_ids
 from danswer.db.models import DocumentSet
 from danswer.document_index.document_index_utils import get_both_index_names
 from danswer.document_index.factory import get_default_document_index
@@ -414,6 +415,41 @@ def check_for_prune_task() -> None:
                 )
 
 
+@celery_app.task(
+    name="check_for_stuck_deletion_tasks",
+    soft_time_limit=JOB_TIMEOUT,
+)
+def check_for_stuck_deletion_tasks() -> None:
+    """Re-drive connector deletions orphaned by a lost broker message.
+
+    Connector deletion is the event-driven `cleanup_connector_credential_pair_task`
+    on the non-durable Redis broker. A Redis/worker restart while it's queued
+    loses the broker message but leaves the `task_queue_jobs` row PENDING, so
+    the connector is stuck "Deleting" forever — deletion, unlike sync/prune, is
+    never periodically rescheduled, and the delete API's dedup guard then blocks
+    re-submission. This re-enqueues any cleanup task whose latest row has been
+    non-terminal past JOB_TIMEOUT.
+
+    Safe to run repeatedly: the cleanup task's per-cc-pair advisory lock makes a
+    re-enqueue a no-op if a deletion is genuinely still running, and the fresh
+    row a re-enqueue creates stays "live" for JOB_TIMEOUT — so this self-throttles
+    to at most one re-drive per cc-pair per timeout window. A re-enqueue for an
+    already-deleted cc-pair simply fails fast (cc-pair not found -> FAILURE),
+    clearing the stale "Deleting" state."""
+    with Session(get_sqlalchemy_engine()) as db_session:
+        for connector_id, credential_id in get_stuck_deletion_cc_ids(db_session):
+            logger.info(
+                f"Re-driving orphaned connector deletion: "
+                f"connector_id={connector_id}, credential_id={credential_id}"
+            )
+            cleanup_connector_credential_pair_task.apply_async(
+                kwargs=dict(
+                    connector_id=connector_id,
+                    credential_id=credential_id,
+                )
+            )
+
+
 #####
 # Celery Beat (Periodic Tasks) Settings
 #####
@@ -428,6 +464,19 @@ celery_app.conf.beat_schedule.update(
         "check-for-prune": {
             "task": "check_for_prune_task",
             "schedule": timedelta(seconds=5),
+        },
+    }
+)
+celery_app.conf.beat_schedule.update(
+    {
+        # Safety net for connector deletions orphaned by a lost broker message
+        # (Redis is non-durable; a restart strands the task_queue_jobs row
+        # PENDING and the connector sticks on "Deleting"). Re-drives any cleanup
+        # task non-terminal past JOB_TIMEOUT. 30-min cadence is fine — the
+        # orphan threshold is JOB_TIMEOUT (6h) and the re-drive self-throttles.
+        "check-for-stuck-deletions": {
+            "task": "check_for_stuck_deletion_tasks",
+            "schedule": timedelta(minutes=30),
         },
     }
 )
