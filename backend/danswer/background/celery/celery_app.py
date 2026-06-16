@@ -76,6 +76,12 @@ celery_app.conf.broker_connection_retry_on_startup = True
 
 
 _SYNC_BATCH_SIZE = 100
+# Cap on how many document-set syncs run at once. Each sync fans out
+# _NUM_THREADS (32) concurrent Vespa requests, so without a cap up to
+# worker-concurrency (10) syncs × 32 = ~320 simultaneous Vespa calls would
+# hammer the cluster. Bounding to 2 keeps Vespa load predictable while still
+# making steady progress; the rest wait and are picked up on later ticks.
+_MAX_CONCURRENT_DOCUMENT_SET_SYNCS = 2
 
 
 #####
@@ -330,12 +336,29 @@ def check_for_document_sets_sync_task() -> None:
         document_set_info = fetch_document_sets(
             user_id=None, db_session=db_session, include_outdated=True
         )
+
+        # Bound how many syncs run concurrently (each fans out 32 Vespa
+        # threads). Count the ones already in flight, then only kick off enough
+        # new ones to reach _MAX_CONCURRENT_DOCUMENT_SET_SYNCS. The rest are
+        # left for a later tick. should_sync_doc_set() returns False for sets
+        # that are up-to-date OR already syncing, so an out-of-date set for
+        # which it returns False is one that's currently in flight.
+        live_syncs = 0
+        candidates = []
         for document_set, _ in document_set_info:
+            if document_set.is_up_to_date:
+                continue
             if should_sync_doc_set(document_set, db_session):
-                logger.info(f"Syncing the {document_set.name} document set")
-                sync_document_set_task.apply_async(
-                    kwargs=dict(document_set_id=document_set.id),
-                )
+                candidates.append(document_set)
+            else:
+                live_syncs += 1
+
+        open_slots = max(0, _MAX_CONCURRENT_DOCUMENT_SET_SYNCS - live_syncs)
+        for document_set in candidates[:open_slots]:
+            logger.info(f"Syncing the {document_set.name} document set")
+            sync_document_set_task.apply_async(
+                kwargs=dict(document_set_id=document_set.id),
+            )
 
 
 @celery_app.task(
