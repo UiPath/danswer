@@ -9,6 +9,10 @@ export interface Option<T> {
   description?: string;
   metadata?: { [key: string]: any };
   icon?: React.FC<{ size?: number; className?: string }>;
+  // Optional haystack the search matches against instead of just `name`.
+  // Lets callers make extra fields searchable (e.g. a web connector's URL,
+  // which lives in its config, not its display name). Falls back to `name`.
+  searchableText?: string;
 }
 
 export type StringOrNumberOption = Option<string | number>;
@@ -57,9 +61,16 @@ export function SearchMultiSelectDropdown({
     setSearchTerm(""); // Clear search term after selection
   };
 
-  const filteredOptions = options.filter((option) =>
-    option.name.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  // Token-based AND match over `searchableText` (falling back to `name`):
+  // split the query on whitespace and require every term to appear, in any
+  // order. So "orchestrator latest" matches ".../orchestrator/.../latest"
+  // even though they aren't contiguous, and typing a URL fragment matches a
+  // connector whose URL is only in its searchableText.
+  const filteredOptions = options.filter((option) => {
+    const haystack = (option.searchableText ?? option.name).toLowerCase();
+    const terms = searchTerm.toLowerCase().split(/\s+/).filter(Boolean);
+    return terms.every((term) => haystack.includes(term));
+  });
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {

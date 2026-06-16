@@ -163,17 +163,30 @@ export const DocumentSetCreationForm = ({
                   .filter(
                     (ccPair) => !values.cc_pair_ids.includes(ccPair.cc_pair_id)
                   )
-                  .map((ccPair) => ({
-                    name: ccPair.name?.toString() || "",
-                    value: ccPair.cc_pair_id?.toString() ?? "",
-                    metadata: {
-                      ccPairId: ccPair.cc_pair_id,
-                      connector: ccPair.connector,
-                      configSummary: summarizeConnectorConfig(
-                        ccPair.connector.connector_specific_config
-                      ),
-                    },
-                  }));
+                  .map((ccPair) => {
+                    const configSummary = summarizeConnectorConfig(
+                      ccPair.connector.connector_specific_config
+                    );
+                    return {
+                      name: ccPair.name?.toString() || "",
+                      value: ccPair.cc_pair_id?.toString() ?? "",
+                      // Make the connector's source + config (which for web
+                      // connectors holds the URL) searchable, not just the
+                      // display name — so typing a URL fragment finds it.
+                      searchableText: [
+                        ccPair.name,
+                        ccPair.connector?.source,
+                        configSummary,
+                      ]
+                        .filter(Boolean)
+                        .join(" "),
+                      metadata: {
+                        ccPairId: ccPair.cc_pair_id,
+                        connector: ccPair.connector,
+                        configSummary,
+                      },
+                    };
+                  });
                 return (
                   <div className="mb-3">
                     {selectedCCPairs.length > 0 && (
