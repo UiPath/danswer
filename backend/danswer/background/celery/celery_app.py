@@ -461,9 +461,15 @@ celery_app.conf.beat_schedule = {
 }
 celery_app.conf.beat_schedule.update(
     {
+        # Was every 5s, but check_for_prune_task scans ALL cc-pairs (444+ here,
+        # with lazy-loaded connector/credential → N+1, ~8s/run). At a 5s cadence
+        # the runs overlapped and piled up until they saturated all worker
+        # threads, starving sync_document_set_task (doc sets stuck syncing).
+        # Pruning is governed by each connector's prune_freq (~daily), so a
+        # frequent check buys nothing — 15 min is plenty.
         "check-for-prune": {
             "task": "check_for_prune_task",
-            "schedule": timedelta(seconds=5),
+            "schedule": timedelta(minutes=15),
         },
     }
 )
