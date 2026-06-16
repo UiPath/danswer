@@ -97,6 +97,11 @@ _BATCH_SIZE = 128  # Specific to Vespa
 _NUM_THREADS = (
     32  # since Vespa doesn't allow batching of inserts / updates, we use threads
 )
+# How many document_ids to fold into a single visit/selection scan when looking
+# up chunk IDs in bulk (see _get_vespa_chunk_ids_by_document_ids). Kept modest
+# so the `... or ...` selection string stays well within Vespa's request-URI
+# limit even for long (URL-style) document ids.
+_VESPA_VISIT_DOC_ID_BATCH = 25
 # up from 500ms for now, since we've seen quite a few timeouts
 # in the long term, we are looking to improve the performance of Vespa
 # so that we can bring this back to default
@@ -218,7 +223,6 @@ def _get_vespa_chunks_by_document_id(
                     ):
                         continue
                 document_chunks.append(document)
-            document_chunks.extend(response_data["documents"])
 
         # Check for continuation token to handle pagination
         if "continuation" in response_data and response_data["continuation"]:
@@ -239,6 +243,63 @@ def _get_vespa_chunk_ids_by_document_id(
         field_names=[DOCUMENT_ID],
     )
     return [chunk["id"].split("::", 1)[-1] for chunk in document_chunks]
+
+
+def _get_vespa_chunk_ids_by_document_ids(
+    document_ids: list[str], index_name: str
+) -> dict[str, list[str]]:
+    """Fetch chunk IDs for MANY documents in a single Vespa visit.
+
+    A visit with `document_id == 'X'` is a selection scan; doing it once per
+    document (the old behavior) meant N scans for N documents. Selecting all
+    the ids in one visit (`... or ... or ...`) returns every matching chunk in a
+    single scan, so bulk updates (doc-set sync especially) issue far fewer
+    scans. Callers batch `document_ids` (see _VESPA_VISIT_DOC_ID_BATCH) to keep
+    the selection string / request URL within Vespa's limits. Returns chunk IDs
+    grouped by their document_id field.
+    """
+    if not document_ids:
+        return {}
+
+    url = DOCUMENT_ID_ENDPOINT.format(index_name=index_name)
+    id_filter = " or ".join(
+        f"{index_name}.document_id=='{document_id}'" for document_id in document_ids
+    )
+    params: dict[str, str | int | None] = {
+        "selection": f"({id_filter})",
+        "continuation": None,
+        "wantedDocumentCount": 1_000,
+        "fieldSet": f"{index_name}:{DOCUMENT_ID}",
+    }
+
+    chunk_ids_by_document: dict[str, list[str]] = {}
+    while True:
+        response = requests.get(url, params=params)
+        try:
+            response.raise_for_status()
+        except requests.HTTPError as e:
+            error_base = (
+                f"Error getting chunk IDs for {len(document_ids)} documents "
+                f"in index {index_name}"
+            )
+            logger.error(f"{error_base}: {response.status_code} {response.text}")
+            raise requests.HTTPError(error_base) from e
+
+        response_data = response.json()
+        for document in response_data.get("documents", []):
+            doc_id = document.get("fields", {}).get(DOCUMENT_ID)
+            if doc_id is None:
+                continue
+            chunk_id = document["id"].split("::", 1)[-1]
+            chunk_ids_by_document.setdefault(doc_id, []).append(chunk_id)
+
+        continuation = response_data.get("continuation")
+        if continuation:
+            params["continuation"] = continuation
+        else:
+            break
+
+    return chunk_ids_by_document
 
 
 @retry(tries=3, delay=1, backoff=2)
@@ -948,29 +1009,40 @@ class VespaIndex(DocumentIndex):
             index_names.append(self.secondary_index_name)
 
         chunk_id_start_time = time.monotonic()
+        all_document_ids = [
+            document_id
+            for update_request in update_requests
+            for document_id in update_request.document_ids
+        ]
+        # Look up chunk IDs in batched visits (one selection scan per
+        # _VESPA_VISIT_DOC_ID_BATCH documents) instead of one scan per
+        # document — far fewer scans against Vespa for bulk updates. Batches
+        # (× indexes) still run concurrently across the thread pool.
         with concurrent.futures.ThreadPoolExecutor(
             max_workers=_NUM_THREADS
         ) as executor:
-            future_to_doc_chunk_ids = {
+            future_to_index = {
                 executor.submit(
-                    _get_vespa_chunk_ids_by_document_id,
-                    document_id=document_id,
+                    _get_vespa_chunk_ids_by_document_ids,
+                    document_ids=list(id_batch),
                     index_name=index_name,
-                ): (document_id, index_name)
+                ): index_name
                 for index_name in index_names
-                for update_request in update_requests
-                for document_id in update_request.document_ids
+                for id_batch in batch_generator(
+                    all_document_ids, _VESPA_VISIT_DOC_ID_BATCH
+                )
             }
-            for future in concurrent.futures.as_completed(future_to_doc_chunk_ids):
-                document_id, index_name = future_to_doc_chunk_ids[future]
+            for future in concurrent.futures.as_completed(future_to_index):
+                index_name = future_to_index[future]
                 try:
-                    doc_chunk_ids = future.result()
-                    if document_id not in all_doc_chunk_ids:
-                        all_doc_chunk_ids[document_id] = []
-                    all_doc_chunk_ids[document_id].extend(doc_chunk_ids)
+                    for document_id, doc_chunk_ids in future.result().items():
+                        all_doc_chunk_ids.setdefault(document_id, []).extend(
+                            doc_chunk_ids
+                        )
                 except Exception as e:
                     logger.error(
-                        f"Error retrieving chunk IDs for document {document_id} in index {index_name}: {e}"
+                        f"Error retrieving chunk IDs (batched visit) in index "
+                        f"{index_name}: {e}"
                     )
         logger.debug(
             f"Took {time.monotonic() - chunk_id_start_time:.2f} seconds to fetch all Vespa chunk IDs"
