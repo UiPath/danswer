@@ -56,7 +56,13 @@ export async function fetchChatData(searchParams: {
     fetchSS("/folder"),
   ];
 
-  let results: (
+  // Use allSettled (not Promise.all) so that ONE failing fetch — e.g. a
+  // backend 500 whose body isn't valid JSON — degrades only that piece instead
+  // of rejecting the whole batch and nulling everything (which previously
+  // crashed the entire /chat server render with "object null is not iterable"
+  // when results[4] was destructured).
+  const settled = await Promise.allSettled(tasks);
+  const results: (
     | User
     | Response
     | AuthTypeMetadata
@@ -65,21 +71,26 @@ export async function fetchChatData(searchParams: {
     | LLMProviderDescriptor[]
     | [Persona[], string | null]
     | null
-  )[] = [null, null, null, null, null, null, null, null, null, null];
-  try {
-    results = await Promise.all(tasks);
-  } catch (e) {
-    console.log(`Some fetch failed for the main search page - ${e}`);
-  }
+  )[] = settled.map((outcome, i) => {
+    if (outcome.status === "fulfilled") {
+      return outcome.value;
+    }
+    console.log(
+      `Some fetch failed for the main chat page (task ${i}) - ${outcome.reason}`
+    );
+    return null;
+  });
 
   const authTypeMetadata = results[0] as AuthTypeMetadata | null;
   const user = results[1] as User | null;
   const ccPairsResponse = results[2] as Response | null;
   const documentSetsResponse = results[3] as Response | null;
-  const [rawAssistantsList, assistantsFetchError] = results[4] as [
-    Persona[],
-    string | null,
-  ];
+  // results[4] is fetchAssistantsSS()'s [assistants, error] tuple — but it's
+  // null if that fetch failed, so guard the destructure (this exact spot was
+  // the crash).
+  const assistantsResult = results[4] as [Persona[], string | null] | null;
+  const rawAssistantsList: Persona[] = assistantsResult?.[0] ?? [];
+  const assistantsFetchError: string | null = assistantsResult?.[1] ?? null;
   const chatSessionsResponse = results[5] as Response | null;
   const tagsResponse = results[6] as Response | null;
   const llmProviders = (results[7] || []) as LLMProviderDescriptor[];

@@ -169,7 +169,9 @@ export const AIMessage = ({
   return (
     <div className={"py-5 px-5 flex -mr-6 w-full bg-background-weak border-y border-border"}>
       <div className="mx-auto w-searchbar-xs 2xl:w-searchbar-sm 3xl:w-searchbar relative">
-        <div className="ml-8">
+        {/* px-4 matches the input bar's inset so the answer text lines up
+        exactly with the search box (previously ml-8 shifted it ~16px right). */}
+        <div className="px-4">
           <div className="flex">
             <AssistantIcon
               size="small"
@@ -187,7 +189,7 @@ export const AIMessage = ({
               handleShowRetrieved !== undefined &&
               isCurrentlyShowingRetrieved !== undefined &&
               !retrievalDisabled && (
-                <div className="flex w-message-xs 2xl:w-message-sm 3xl:w-message-default absolute ml-8">
+                <div className="flex w-full absolute pr-4">
                   <div className="ml-auto">
                     <ShowHideDocsButton
                       messageId={messageId}
@@ -199,7 +201,7 @@ export const AIMessage = ({
               )}
           </div>
 
-          <div className="w-message-xs 2xl:w-message-sm 3xl:w-message-default break-words mt-1 ml-8">
+          <div className="w-full break-words mt-1">
             {(!toolCall || toolCall.tool_name === SEARCH_TOOL_NAME) && (
               <>
                 {query !== undefined &&
@@ -455,7 +457,9 @@ export const HumanMessage = ({
       onMouseLeave={() => setIsHovered(false)}
     >
       <div className="mx-auto w-searchbar-xs 2xl:w-searchbar-sm 3xl:w-searchbar">
-        <div className="ml-8">
+        {/* px-4 matches the input bar inset (see AIMessage) so the user's
+        message lines up exactly with the search box. */}
+        <div className="px-4">
           <div className="flex">
             <div className="p-1 bg-user rounded-lg h-fit">
               <div className="text-inverted">
@@ -465,8 +469,8 @@ export const HumanMessage = ({
 
             <div className="font-bold text-emphasis ml-2 my-auto">You</div>
           </div>
-          <div className="mx-auto mt-1 ml-8 w-searchbar-xs 2xl:w-searchbar-sm 3xl:w-searchbar-default flex flex-wrap">
-            <div className="w-message-xs 2xl:w-message-sm 3xl:w-message-default break-words">
+          <div className="mt-1 w-full flex flex-wrap">
+            <div className="w-full break-words">
               <FileDisplay files={files || []} />
 
               {isEditing ? (

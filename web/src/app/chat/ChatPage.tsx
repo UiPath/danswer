@@ -1095,7 +1095,10 @@ export function ChatPage({
     router.push("/search");
   }
 
-  const [showDocSidebar, setShowDocSidebar] = useState(true); // State to track if sidebar is open
+  // Collapsed by default — the retrieved-documents sidebar stays hidden until
+  // the user opens it (there's a toggle button), so the landing isn't cluttered
+  // by an empty sidebar before any results exist.
+  const [showDocSidebar, setShowDocSidebar] = useState(false);
 
   const toggleSidebar = () => {
     if (sidebarElementRef.current) {
@@ -1128,6 +1131,29 @@ export function ChatPage({
   const [editingRetrievalEnabled, setEditingRetrievalEnabled] = useState(false);
   const sidebarElementRef = useRef<HTMLDivElement>(null);
   const innerSidebarElementRef = useRef<HTMLDivElement>(null);
+
+  // Auto-open the retrieved-documents panel when a fresh answer comes back with
+  // documents (it starts collapsed on the landing — see showDocSidebar above).
+  // Tracked per-message via the ref so the user can still manually hide it
+  // without it springing back open on the next render.
+  const autoOpenedDocsForRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!retrievalEnabled) {
+      return;
+    }
+    const lastWithDocs = [...messageHistory]
+      .reverse()
+      .find(
+        (m) => m.type === "assistant" && !!m.documents && m.documents.length > 0
+      );
+    if (
+      lastWithDocs &&
+      autoOpenedDocsForRef.current !== lastWithDocs.messageId
+    ) {
+      autoOpenedDocsForRef.current = lastWithDocs.messageId;
+      setShowDocSidebar(true);
+    }
+  }, [messageHistory, retrievalEnabled]);
 
   const currentPersona = selectedAssistant || livePersona;
 
@@ -1211,21 +1237,33 @@ export function ChatPage({
               {({ getRootProps }) => (
                 <>
                   <div
-                    className={`w-full sm:relative h-screen ${
+                    className={`w-full sm:relative h-screen relative isolate ${
                       !retrievalEnabled ? "pb-[111px]" : "pb-[140px]"
                     }
-                      flex-auto transition-margin duration-300 
+                      flex-auto transition-margin duration-300
                       overflow-x-auto
                       `}
                     {...getRootProps()}
                   >
                     {/* <input {...getInputProps()} /> */}
 
+                    {/* Atmospheric backdrop behind the empty-state landing only
+                    (removed once a conversation starts so it never sits behind
+                    messages). Lives on this full-height container — not the
+                    inner scroll area — so it also covers the bottom input
+                    padding region, otherwise that strip renders as a black
+                    band. -z-10 stays contained by `isolate`. */}
+                    {messageHistory.length === 0 &&
+                      !isFetchingChatMessages &&
+                      !isStreaming && (
+                        <div className="pointer-events-none absolute inset-0 -z-10 chat-landing-bg" />
+                      )}
+
                     <div
                       className={`w-full h-full flex flex-col overflow-y-auto overflow-x-hidden relative`}
                       ref={scrollableDivRef}
                     >
-                      {/* ChatBanner is a custom banner that displays a admin-specified message at 
+                      {/* ChatBanner is a custom banner that displays a admin-specified message at
                       the top of the chat page. Only used in the EE version of the app. */}
                       <ChatBanner />
 
@@ -1263,16 +1301,6 @@ export function ChatPage({
                           </div>
                         </div>
                       )}
-
-                      {messageHistory.length === 0 &&
-                        !isFetchingChatMessages &&
-                        !isStreaming && (
-                          <ChatIntro
-                            availableSources={finalAvailableSources}
-                            selectedPersona={livePersona}
-                            setConfigModalActiveTab={setConfigModalActiveTab}
-                          />
-                        )}
 
                       <div
                         className={
@@ -1574,9 +1602,23 @@ export function ChatPage({
 
                     <div
                       ref={inputRef}
-                      className="absolute bottom-0 z-10 w-full"
+                      className={`${
+                        messageHistory.length === 0 &&
+                        !isFetchingChatMessages &&
+                        !isStreaming
+                          ? "absolute inset-x-0 top-1/2 -translate-y-1/2"
+                          : "absolute bottom-0"
+                      } z-10 w-full`}
                     >
                       <div className="w-full relative pb-4">
+                        {/* Empty-state landing: greeting sits directly above
+                        the input, and the whole group is vertically centered
+                        (the wrapper above switches from bottom-pinned to
+                        center). Once a conversation starts it snaps to the
+                        bottom as usual. */}
+                        {messageHistory.length === 0 &&
+                          !isFetchingChatMessages &&
+                          !isStreaming && <ChatIntro />}
                         {aboveHorizon && (
                           <div className="pointer-events-none w-full bg-transparent flex sticky justify-center">
                             <button

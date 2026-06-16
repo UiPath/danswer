@@ -71,6 +71,71 @@
   }
 }
 
+/* A tight glow hugging ONLY the chat box on the empty landing — a small,
+ * wide-but-short ellipse centered on the input (≈50% x / 56% y of the chat
+ * area), fading quickly to the plain dark page background so everything else
+ * (the heading, the corners, top and bottom) stays black. Pure CSS, no image
+ * asset. The ::before layer breathes slowly for a subtle sense of life. */
+.chat-landing-bg {
+  background: radial-gradient(
+    36% 18% at 50% 56%,
+    rgba(99, 102, 241, 0.12),
+    transparent 76%
+  );
+  animation: da-fade-up 0.7s ease both;
+}
+.dark .chat-landing-bg {
+  background: radial-gradient(
+    36% 17% at 50% 56%,
+    rgba(110, 114, 250, 0.38) 0%,
+    rgba(76, 91, 232, 0.12) 52%,
+    transparent 78%
+  );
+  animation: da-fade-up 0.7s ease both;
+}
+/* Slow breathing halo — gentle scale + opacity drift, centered on the box. */
+.dark .chat-landing-bg::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  transform-origin: 50% 56%;
+  background: radial-gradient(
+    28% 13% at 50% 56%,
+    rgba(132, 121, 255, 0.22),
+    transparent 74%
+  );
+  animation: da-glow-breathe 16s ease-in-out infinite alternate;
+}
+@keyframes da-glow-breathe {
+  from {
+    opacity: 0.5;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 0.9;
+    transform: scale(1.06);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .chat-landing-bg {
+    animation: none;
+  }
+  .dark .chat-landing-bg::before {
+    animation: none;
+  }
+}
+
+/* Tailwind Typography (`prose`) hard-codes a near-black color for bold text
+ * and headings. The chat renders markdown on a DARK surface but only forces the
+ * light token onto <p>, so <strong>/<b>/headings (e.g. the bold lead-in labels
+ * of bullet points) came out dark-on-dark and nearly invisible. In dark mode,
+ * let them inherit the surrounding (light) text color instead. Scoped to
+ * `.dark` so light mode keeps the default dark bold. */
+.dark .prose :is(strong, b, h1, h2, h3, h4, h5, h6) {
+  color: inherit;
+}
+
 /* Brand the native checkbox/radio accent so the checked state matches the app
  * accent in both themes (pairs with color-scheme above for the box itself). */
 input[type="checkbox"],

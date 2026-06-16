@@ -215,7 +215,7 @@ export function ChatInputBar({
 
   return (
     <div>
-      <div className="flex justify-center pb-2 max-w-screen-lg mx-auto mb-2">
+      <div className="flex justify-center pb-2 mx-auto mb-2">
         <div
           className="
             w-full
@@ -380,7 +380,7 @@ export function ChatInputBar({
               style={{ scrollbarWidth: "thin" }}
               role="textarea"
               aria-multiline
-              placeholder="Send a message..."
+              placeholder="How can I help you today?"
               value={message}
               onKeyDown={(event) => {
                 if (event.key === "Enter" && !event.shiftKey && canSubmit) {

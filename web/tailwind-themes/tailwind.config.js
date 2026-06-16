@@ -26,11 +26,15 @@ module.exports = {
       },
       width: {
         "message-xs": "450px",
-        "message-sm": "550px",
-        "message-default": "740px",
+        "message-sm": "680px",
+        "message-default": "880px",
+        // `w-message` (no suffix) is referenced by the chat landing (ChatIntro)
+        // at 3xl but was previously undefined (a no-op). Widths bumped overall
+        // to give the chat a more spacious, full-width feel on large screens.
+        message: "900px",
         "searchbar-xs": "560px",
-        "searchbar-sm": "660px",
-        searchbar: "850px",
+        "searchbar-sm": "820px",
+        searchbar: "1040px",
         "document-sidebar": "800px",
         "document-sidebar-large": "1000px",
       },
