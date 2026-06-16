@@ -1,6 +1,5 @@
 from fastapi import APIRouter
 from fastapi import Depends
-from fastapi import HTTPException
 from fastapi import Path
 from sqlalchemy.orm import Session
 
@@ -24,6 +23,7 @@ from danswer.server.features.folder.models import FolderUpdateRequest
 from danswer.server.features.folder.models import GetUserFoldersResponse
 from danswer.server.models import DisplayPriorityRequest
 from danswer.server.query_and_chat.models import ChatSessionDetails
+from danswer.server.utils import user_facing_http_exception
 
 router = APIRouter(prefix="/folder", dependencies=[Depends(validate_api_key)])
 
@@ -103,7 +103,7 @@ def patch_folder_endpoint(
             db_session=db_session,
         )
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise user_facing_http_exception(e, "rename the folder")
 
 
 @router.delete("/{folder_id}")
@@ -122,7 +122,7 @@ def delete_folder_endpoint(
             db_session=db_session,
         )
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise user_facing_http_exception(e, "delete the folder")
 
 
 @router.post("/{folder_id}/add-chat-session")
@@ -148,7 +148,7 @@ def add_chat_to_folder_endpoint(
             db_session=db_session,
         )
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise user_facing_http_exception(e, "add the chat to the folder")
 
 
 @router.post("/{folder_id}/remove-chat-session/")
@@ -174,4 +174,4 @@ def remove_chat_from_folder_endpoint(
             db_session=db_session,
         )
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise user_facing_http_exception(e, "remove the chat from the folder")

@@ -387,12 +387,24 @@ def list_highspot_spots(
             HighspotSpotResponse(id=s["id"], name=s.get("title", ""))
             for s in client.get_spots()
         ]
-    except HighspotAuthenticationError as e:
+    except HighspotAuthenticationError:
+        logger.exception("Highspot authentication failed while listing spots")
         raise HTTPException(
-            status_code=401, detail=f"Highspot authentication failed: {e}"
+            status_code=401,
+            detail=(
+                "Could not authenticate to Highspot. Please check the API key "
+                "and secret on this credential and try again."
+            ),
         )
-    except HighspotClientError as e:
-        raise HTTPException(status_code=502, detail=f"Highspot API error: {e}")
+    except HighspotClientError:
+        logger.exception("Highspot API error while listing spots")
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                "Highspot returned an error while listing spots. Please try "
+                "again, or contact an administrator if the problem persists."
+            ),
+        )
 
 
 @router.post("/admin/connector/file/upload")

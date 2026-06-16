@@ -1,6 +1,5 @@
 from fastapi import APIRouter
 from fastapi import Depends
-from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from danswer.auth.api_key import validate_api_key
@@ -19,9 +18,19 @@ from danswer.server.features.document_set.models import CheckDocSetPublicRespons
 from danswer.server.features.document_set.models import DocumentSet
 from danswer.server.features.document_set.models import DocumentSetCreationRequest
 from danswer.server.features.document_set.models import DocumentSetUpdateRequest
-
+from danswer.server.utils import user_facing_http_exception
 
 router = APIRouter(prefix="/manage", dependencies=[Depends(validate_api_key)])
+
+# Surfaced when a document-set write hits an IntegrityError. The common cause
+# is a document set with both an is_current=True and is_current=False row for
+# the same cc-pair (a known data inconsistency); flipping current→outdated then
+# collides on the (document_set_id, cc_pair_id, is_current) primary key.
+_DOC_SET_INTEGRITY_DETAIL = (
+    "This document set has duplicate or conflicting connector entries, so it "
+    "couldn't be saved. This is a known data inconsistency — please contact an "
+    "administrator to clean it up."
+)
 
 
 @router.post("/admin/document-set")
@@ -37,7 +46,9 @@ def create_document_set(
             db_session=db_session,
         )
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise user_facing_http_exception(
+            e, "create the document set", integrity_detail=_DOC_SET_INTEGRITY_DETAIL
+        )
     return document_set_db_model.id
 
 
@@ -53,7 +64,9 @@ def patch_document_set(
             db_session=db_session,
         )
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise user_facing_http_exception(
+            e, "update the document set", integrity_detail=_DOC_SET_INTEGRITY_DETAIL
+        )
 
 
 @router.delete("/admin/document-set/{document_set_id}")
@@ -67,7 +80,7 @@ def delete_document_set(
             document_set_id=document_set_id, db_session=db_session
         )
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise user_facing_http_exception(e, "delete the document set")
 
 
 @router.get("/admin/document-set")
