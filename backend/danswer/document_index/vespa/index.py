@@ -1073,7 +1073,11 @@ class VespaIndex(DocumentIndex):
                 continue
 
             for document_id in update_request.document_ids:
-                for doc_chunk_id in all_doc_chunk_ids[document_id]:
+                # .get(): a document with no chunks in Vespa (e.g. an orphaned
+                # doc row that was never indexed / already removed) simply has
+                # nothing to update — skip it rather than KeyError. The old
+                # per-document path implicitly initialized an empty list here.
+                for doc_chunk_id in all_doc_chunk_ids.get(document_id, []):
                     processed_updates_requests.append(
                         _VespaUpdateRequest(
                             document_id=document_id,
