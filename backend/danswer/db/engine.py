@@ -87,6 +87,15 @@ def get_sqlalchemy_async_engine() -> AsyncEngine:
             connection_string,
             pool_size=POSTGRES_POOL_SIZE,
             max_overflow=POSTGRES_POOL_OVERFLOW,
+            # Mirror the sync engine: validate a pooled connection before use so
+            # a stale/closed one (server- or proxy-side idle timeout) is
+            # transparently reconnected instead of raising
+            # `asyncpg.InterfaceError: connection is closed`, which was surfacing
+            # as intermittent 500s on async endpoints (e.g. the /chat SSR
+            # fetches). pool_recycle proactively retires connections before the
+            # server's idle timeout can close them.
+            pool_pre_ping=True,
+            pool_recycle=3600,
         )
     return _ASYNC_ENGINE
 
