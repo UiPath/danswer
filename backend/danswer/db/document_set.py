@@ -7,6 +7,7 @@ from sqlalchemy import delete
 from sqlalchemy import func
 from sqlalchemy import or_
 from sqlalchemy import select
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from danswer.db.document_set_cache import invalidate_document_sets_all
@@ -18,6 +19,13 @@ from danswer.db.models import DocumentSet__ConnectorCredentialPair
 from danswer.server.features.document_set.models import DocumentSetCreationRequest
 from danswer.server.features.document_set.models import DocumentSetUpdateRequest
 from danswer.utils.variable_functionality import fetch_versioned_implementation
+
+
+def document_set_sync_cursor_key(document_set_id: int) -> str:
+    """key_value_store key holding the resumable doc-set sync cursor (the last
+    document id synced). Lets sync_document_set_task resume after a restart or
+    the 6h soft_time_limit instead of re-syncing from scratch."""
+    return f"document_set_sync_cursor__{document_set_id}"
 
 
 def _delete_document_set_cc_pairs__no_commit(
@@ -169,6 +177,13 @@ def update_document_set(
         document_set_row.description = document_set_update_request.description
         document_set_row.is_up_to_date = False
         document_set_row.is_public = document_set_update_request.is_public
+
+        # A membership change needs a full re-tag of every doc, so discard any
+        # resume cursor left by a previous (interrupted) sync of this set.
+        db_session.execute(
+            text("DELETE FROM key_value_store WHERE key = :k"),
+            {"k": document_set_sync_cursor_key(document_set_update_request.id)},
+        )
 
         versioned_private_doc_set_fn = fetch_versioned_implementation(
             "danswer.db.document_set", "make_doc_set_private"

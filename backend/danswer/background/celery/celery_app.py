@@ -31,11 +31,14 @@ from danswer.db.deletion_attempt import check_deletion_attempt_is_allowed
 from danswer.db.document import get_document_ids_for_connector_credential_pair
 from danswer.db.document import prepare_to_modify_documents
 from danswer.db.document_set import delete_document_set
+from danswer.db.document_set import document_set_sync_cursor_key
 from danswer.db.document_set import fetch_document_sets
 from danswer.db.document_set import fetch_document_sets_for_documents
 from danswer.db.document_set import fetch_documents_for_document_set_paginated
 from danswer.db.document_set import get_document_set_by_id
 from danswer.db.document_set import mark_document_set_as_synced
+from danswer.dynamic_configs.factory import get_dynamic_config_store
+from danswer.dynamic_configs.interface import ConfigNotFoundError
 from danswer.db.engine import build_connection_string
 from danswer.db.engine import get_sqlalchemy_engine
 from danswer.db.engine import SYNC_DB_API
@@ -277,9 +280,24 @@ def sync_document_set_task(document_set_id: int) -> None:
             ]
             document_index.update(update_requests=update_requests)
 
+    kv_store = get_dynamic_config_store()
+    cursor_key = document_set_sync_cursor_key(document_set_id)
+
     with Session(get_sqlalchemy_engine()) as db_session:
         try:
-            cursor = None
+            # Resume from the last persisted cursor so a worker restart or the
+            # 6h soft_time_limit doesn't force a from-scratch re-sync. Without
+            # this, a set too large to finish in one window kept re-doing its
+            # first batches forever and never reached the rest.
+            try:
+                cursor = cast(str, kv_store.load(cursor_key))
+                logger.info(
+                    f"Resuming document set {document_set_id} sync after cursor "
+                    f"'{cursor}'"
+                )
+            except ConfigNotFoundError:
+                cursor = None
+
             while True:
                 document_id_batch, cursor = fetch_documents_for_document_set_paginated(
                     document_set_id=document_set_id,
@@ -294,6 +312,16 @@ def sync_document_set_task(document_set_id: int) -> None:
                 )
                 if cursor is None:
                     break
+                # Checkpoint progress after each fully-synced batch so an
+                # interruption resumes here (re-doing at most one batch, which
+                # is idempotent since updates are "assign").
+                kv_store.store(cursor_key, cursor)
+
+            # Completed a full pass — drop the resume cursor.
+            try:
+                kv_store.delete(cursor_key)
+            except ConfigNotFoundError:
+                pass
 
             # if there are no connectors, then delete the document set. Otherwise, just
             # mark it as successfully synced.
