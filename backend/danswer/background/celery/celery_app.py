@@ -82,9 +82,11 @@ _SYNC_BATCH_SIZE = 100
 # Cap on how many document-set syncs run at once. Each sync fans out
 # _NUM_THREADS (32) concurrent Vespa requests, so without a cap up to
 # worker-concurrency (10) syncs × 32 = ~320 simultaneous Vespa calls would
-# hammer the cluster. Bounding to 2 keeps Vespa load predictable while still
-# making steady progress; the rest wait and are picked up on later ticks.
-_MAX_CONCURRENT_DOCUMENT_SET_SYNCS = 2
+# hammer the cluster. 3 keeps Vespa load predictable (≈96 concurrent calls
+# across the 3 content nodes — measured to have headroom: ~2-2.5 cores/node,
+# no 429s/timeouts at 2) while draining the backlog a bit faster; the rest
+# wait and are picked up on later ticks.
+_MAX_CONCURRENT_DOCUMENT_SET_SYNCS = 3
 
 
 #####
