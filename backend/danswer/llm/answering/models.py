@@ -121,10 +121,17 @@ class PromptConfig(BaseModel):
     task_prompt: str
     datetime_aware: bool
     include_citations: bool
+    # When true, the answer-side prompts add the LANGUAGE_HINT directive
+    # so the LLM responds in the user's original language. Sourced from
+    # the persona's multilingual_query_expansion flag at construction.
+    multilingual_query_expansion: bool = False
 
     @classmethod
     def from_model(
-        cls, model: "Prompt", prompt_override: PromptOverride | None = None
+        cls,
+        model: "Prompt",
+        prompt_override: PromptOverride | None = None,
+        multilingual_query_expansion: bool = False,
     ) -> "PromptConfig":
         override_system_prompt = (
             prompt_override.system_prompt if prompt_override else None
@@ -136,6 +143,7 @@ class PromptConfig(BaseModel):
             task_prompt=override_task_prompt or model.task_prompt,
             datetime_aware=model.datetime_aware,
             include_citations=model.include_citations,
+            multilingual_query_expansion=multilingual_query_expansion,
         )
 
     # needed so that this can be passed into lru_cache funcs

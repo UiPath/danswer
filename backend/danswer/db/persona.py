@@ -81,6 +81,7 @@ def create_update_persona(
             llm_model_version_override=create_persona_request.llm_model_version_override,
             starter_messages=create_persona_request.starter_messages,
             is_public=create_persona_request.is_public,
+            multilingual_query_expansion=create_persona_request.multilingual_query_expansion,
             db_session=db_session,
         )
 
@@ -347,6 +348,7 @@ def upsert_persona(
     tool_ids: list[int] | None = None,
     persona_id: int | None = None,
     default_persona: bool = False,
+    multilingual_query_expansion: bool = False,
     commit: bool = True,
 ) -> Persona:
     if persona_id is not None:
@@ -399,6 +401,7 @@ def upsert_persona(
         persona.starter_messages = starter_messages
         persona.deleted = False  # Un-delete if previously deleted
         persona.is_public = is_public
+        persona.multilingual_query_expansion = multilingual_query_expansion
 
         # Do not delete any associations manually added unless
         # a new updated list is provided
@@ -431,6 +434,7 @@ def upsert_persona(
             llm_model_version_override=llm_model_version_override,
             starter_messages=starter_messages,
             tools=tools or [],
+            multilingual_query_expansion=multilingual_query_expansion,
         )
         db_session.add(persona)
 

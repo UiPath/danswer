@@ -33,6 +33,9 @@ class CreatePersonaRequest(BaseModel):
     # For Private Personas, who should be able to access these
     users: list[UUID] | None = None
     groups: list[int] | None = None
+    # Translate non-English queries to English for retrieval and
+    # answer in the user's original language. Off by default.
+    multilingual_query_expansion: bool = False
 
 
 class PersonaSnapshot(BaseModel):
@@ -55,6 +58,7 @@ class PersonaSnapshot(BaseModel):
     document_sets: list[DocumentSet]
     users: list[MinimalUserSnapshot]
     groups: list[int]
+    multilingual_query_expansion: bool
 
     @classmethod
     def from_model(
@@ -97,6 +101,7 @@ class PersonaSnapshot(BaseModel):
                 for user in persona.users
             ],
             groups=[user_group.id for user_group in persona.groups],
+            multilingual_query_expansion=persona.multilingual_query_expansion,
         )
 
 

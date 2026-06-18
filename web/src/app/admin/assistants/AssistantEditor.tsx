@@ -178,6 +178,8 @@ export function AssistantEditor({
     num_chunks: existingPersona?.num_chunks ?? null,
     include_citations: existingPersona?.prompts[0]?.include_citations ?? true,
     llm_relevance_filter: existingPersona?.llm_relevance_filter ?? false,
+    multilingual_query_expansion:
+      existingPersona?.multilingual_query_expansion ?? false,
     llm_model_provider_override:
       existingPersona?.llm_model_provider_override ?? null,
     llm_model_version_override:
@@ -213,6 +215,7 @@ export function AssistantEditor({
             num_chunks: Yup.number().nullable(),
             include_citations: Yup.boolean().required(),
             llm_relevance_filter: Yup.boolean().required(),
+            multilingual_query_expansion: Yup.boolean().required(),
             llm_model_version_override: Yup.string().nullable(),
             llm_model_provider_override: Yup.string().nullable(),
             starter_messages: Yup.array().of(
@@ -577,6 +580,14 @@ export function AssistantEditor({
                                     label="Apply LLM Relevance Filter"
                                     subtext={
                                       "If enabled, the LLM will filter out chunks that are not relevant to the user query."
+                                    }
+                                  />
+
+                                  <BooleanFormField
+                                    name="multilingual_query_expansion"
+                                    label="Enable multi-language support"
+                                    subtext={
+                                      "If enabled, non-English questions will be translated to English before retrieval, and the assistant will reply in the user's original language. Adds one extra LLM call per non-English query — leave off if your traffic is mostly English."
                                     }
                                   />
 

@@ -15,15 +15,18 @@ logger = setup_logger()
 def get_renamed_conversation_name(
     full_history: list[ChatMessage],
     llm: LLM,
+    use_language_hint: bool | None = None,
 ) -> str:
     history_str = combine_message_chain(
         messages=full_history, token_limit=GEN_AI_HISTORY_CUTOFF
     )
 
+    # Persona flag wins; otherwise fall back to the global env var.
+    if use_language_hint is None:
+        use_language_hint = bool(MULTILINGUAL_QUERY_EXPANSION)
+
     language_hint = (
-        f"\n{LANGUAGE_CHAT_NAMING_HINT.strip()}"
-        if bool(MULTILINGUAL_QUERY_EXPANSION)
-        else ""
+        f"\n{LANGUAGE_CHAT_NAMING_HINT.strip()}" if use_language_hint else ""
     )
 
     prompt_msgs = [

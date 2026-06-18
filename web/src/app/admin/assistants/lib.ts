@@ -16,6 +16,7 @@ interface PersonaCreationRequest {
   users?: string[];
   groups: number[];
   tool_ids: number[]; // Added tool_ids to the interface
+  multilingual_query_expansion: boolean;
 }
 
 interface PersonaUpdateRequest {
@@ -36,6 +37,7 @@ interface PersonaUpdateRequest {
   users?: string[];
   groups: number[];
   tool_ids: number[]; // Added tool_ids to the interface
+  multilingual_query_expansion: boolean;
 }
 
 function promptNameFromPersonaName(personaName: string) {
@@ -110,6 +112,7 @@ function buildPersonaAPIBody(
     groups,
     users,
     tool_ids, // Added tool_ids to the destructuring
+    multilingual_query_expansion,
   } = creationRequest;
 
   return {
@@ -128,6 +131,7 @@ function buildPersonaAPIBody(
     users,
     groups,
     tool_ids, // Added tool_ids to the return object
+    multilingual_query_expansion,
   };
 }
 

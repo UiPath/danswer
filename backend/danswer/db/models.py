@@ -1011,6 +1011,15 @@ class Persona(Base):
     # Enables using LLM to extract time and source type filters
     # Can also be admin disabled globally
     llm_filter_extraction: Mapped[bool] = mapped_column(Boolean)
+    # When true, non-English queries on this persona are translated to
+    # English before retrieval and the LLM is instructed to answer in
+    # the user's original language. Off by default since most traffic
+    # is English and turning it on incurs an extra LLM call per query.
+    # Behaves as an override of the global MULTILINGUAL_QUERY_EXPANSION
+    # env var: persona flag wins; if false, falls back to env var.
+    multilingual_query_expansion: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
     recency_bias: Mapped[RecencyBiasSetting] = mapped_column(
         Enum(RecencyBiasSetting, native_enum=False)
     )

@@ -14,6 +14,9 @@ from danswer.chat.models import LlmDoc
 from danswer.chat.models import LLMRelevanceFilterResponse
 from danswer.chat.models import QADocsResponse
 from danswer.chat.models import StreamingError
+from danswer.chat.multilingual_translation import detect_query_language
+from danswer.chat.multilingual_translation import language_name
+from danswer.chat.multilingual_translation import translate_answer_to_language
 from danswer.configs.chat_configs import CHAT_TARGET_CHUNK_PERCENTAGE
 from danswer.configs.chat_configs import DISABLE_LLM_CHOOSE_SEARCH
 from danswer.configs.chat_configs import MAX_CHUNKS_FED_TO_CHAT
@@ -93,11 +96,11 @@ def translate_citations(
     for db_doc in db_docs:
         if db_doc.document_id not in doc_id_to_saved_doc_id_map:
             doc_id_to_saved_doc_id_map[db_doc.document_id] = db_doc.id
-            #print(f'found doc id: {db_doc.id}')
+            # print(f'found doc id: {db_doc.id}')
 
     citation_to_saved_doc_id_map: dict[int, int] = {}
     for citation in citations_list:
-        #print(f'citation id {citation.document_id} for doc num {citation.citation_num}')
+        # print(f'citation id {citation.document_id} for doc num {citation.citation_num}')
         if citation.citation_num not in citation_to_saved_doc_id_map:
             citation_to_saved_doc_id_map[
                 citation.citation_num
@@ -406,15 +409,25 @@ def stream_chat_message_objects(
         if not final_msg.prompt:
             raise RuntimeError("No Prompt found")
 
+        # Persona may be None for legacy flows; treat the flag as off in
+        # that case. When persona exists, thread its flag through so the
+        # answer-side prompt builders add the LANGUAGE_HINT.
+        persona_multilingual = (
+            persona.multilingual_query_expansion if persona is not None else False
+        )
         prompt_config = (
             PromptConfig.from_model(
                 final_msg.prompt,
                 prompt_override=(
                     new_msg_req.prompt_override or chat_session.prompt_override
                 ),
+                multilingual_query_expansion=persona_multilingual,
             )
             if not persona
-            else PromptConfig.from_model(persona.prompts[0])
+            else PromptConfig.from_model(
+                persona.prompts[0],
+                multilingual_query_expansion=persona_multilingual,
+            )
         )
 
         # find out what tools to use
@@ -541,6 +554,22 @@ def stream_chat_message_objects(
         ai_message_files = None  # any files to associate with the AI message e.g. dall-e generated images
         dropped_indices = None
         tool_result = None
+
+        # Multi-language post-processing pass (option C in the design):
+        # when the persona has multilingual_query_expansion=True and the
+        # user's question is in a non-English language, the LLM tends
+        # to answer in English regardless of the LANGUAGE_HINT
+        # directive. We compensate by buffering DanswerAnswerPiece
+        # tokens during the stream and emitting a single translated
+        # piece at the end. Other packet types (citations, tool
+        # responses, image generation, etc.) still flow in real time.
+        translate_target = None
+        if persona_multilingual:
+            detected = detect_query_language(message_text)
+            if language_name(detected) is not None:
+                translate_target = detected
+        buffered_answer_pieces: list[str] = []
+
         for packet in answer.processed_streamed_output:
             if isinstance(packet, ToolResponse):
                 if packet.id == SEARCH_RESPONSE_SUMMARY_ID:
@@ -596,7 +625,34 @@ def stream_chat_message_objects(
             else:
                 if isinstance(packet, ToolCallFinalResult):
                     tool_result = packet
+                if (
+                    translate_target is not None
+                    and isinstance(packet, DanswerAnswerPiece)
+                    and packet.answer_piece
+                ):
+                    # Hold answer tokens back; we'll translate the full
+                    # answer at the end of the stream.
+                    buffered_answer_pieces.append(packet.answer_piece)
+                    continue
                 yield cast(ChatPacket, packet)
+
+        # End of stream. If we buffered for translation, do the second
+        # LLM pass now and emit the translated answer as one piece.
+        # `answer.llm_answer` reads from the same processed stream, so
+        # it already contains the full English text — we use that as
+        # the source of truth (more reliable than reassembling from
+        # buffered pieces, which may have None entries from end-of-
+        # stream sentinels).
+        translated_answer_text: str | None = None
+        if translate_target is not None:
+            english_answer = answer.llm_answer
+            translated_answer_text = translate_answer_to_language(
+                answer_text=english_answer,
+                target_language_code=translate_target,
+                llm=llm,
+            )
+            yield DanswerAnswerPiece(answer_piece=translated_answer_text)
+            yield DanswerAnswerPiece(answer_piece=None)
 
     except Exception as e:
         logger.exception("Failed to process chat message")
@@ -630,14 +686,24 @@ def stream_chat_message_objects(
             for tool in tool_list:
                 tool_name_to_tool_id[tool.name()] = tool_id
 
+        # If we translated, persist the user-facing translated text
+        # rather than the English intermediate. Citations are computed
+        # from the LLM's English output (where the [1]/[2] markers
+        # were emitted relative to retrieved docs); the translation
+        # prompt preserves those markers verbatim.
+        final_answer_text = (
+            translated_answer_text
+            if translated_answer_text is not None
+            else answer.llm_answer
+        )
         gen_ai_response_message = partial_response(
-            message=answer.llm_answer,
+            message=final_answer_text,
             rephrased_query=(
                 qa_docs_response.rephrased_query if qa_docs_response else None
             ),
             reference_docs=reference_db_search_docs,
             files=ai_message_files,
-            token_count=len(llm_tokenizer_encode_func(answer.llm_answer)),
+            token_count=len(llm_tokenizer_encode_func(final_answer_text)),
             citations=db_citations,
             error=None,
             tool_calls=[
