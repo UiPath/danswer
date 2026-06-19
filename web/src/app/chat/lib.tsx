@@ -325,6 +325,27 @@ export function getCitedDocumentsFromMessage(message: Message) {
   return documentsWithCitationKey;
 }
 
+// Cutoff timestamps (ISO) matching the date buckets in
+// groupSessionsByDateRange, for lazy-loading each bucket from the backend:
+//   today    (Today):              time_created >= oneDayAgo
+//   prev7    (Previous 7 Days):    sevenDaysAgo  <= time_created < oneDayAgo
+//   prev30   (Previous 30 Days):   thirtyDaysAgo <= time_created < sevenDaysAgo
+//   older    (Over 30 days ago):   time_created < thirtyDaysAgo
+export function getChatHistoryBoundaries(): {
+  oneDayAgo: string;
+  sevenDaysAgo: string;
+  thirtyDaysAgo: string;
+} {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const day = 1000 * 3600 * 24;
+  return {
+    oneDayAgo: new Date(today.getTime() - 1 * day).toISOString(),
+    sevenDaysAgo: new Date(today.getTime() - 7 * day).toISOString(),
+    thirtyDaysAgo: new Date(today.getTime() - 30 * day).toISOString(),
+  };
+}
+
 export function groupSessionsByDateRange(chatSessions: ChatSession[]) {
   const today = new Date();
   today.setHours(0, 0, 0, 0); // Set to start of today for accurate comparison

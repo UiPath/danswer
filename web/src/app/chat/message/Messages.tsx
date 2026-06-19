@@ -39,6 +39,7 @@ import Prism from "prismjs";
 import "prismjs/themes/prism-tomorrow.css";
 import "./custom-code-styles.css";
 import { Persona } from "@/app/admin/assistants/interfaces";
+import { assistantDisplayName } from "@/lib/assistants/displayName";
 import { Button } from "@tremor/react";
 import { AssistantIcon } from "@/components/assistants/AssistantIcon";
 
@@ -180,7 +181,7 @@ export const AIMessage = ({
 
             <div className="font-bold text-emphasis ml-2 my-auto">
               {alternativeAssistant
-                ? alternativeAssistant.name
+                ? assistantDisplayName(alternativeAssistant)
                 : personaName || "Darwin"}
             </div>
 
@@ -267,7 +268,11 @@ export const AIMessage = ({
                 {typeof content === "string" ? (
                   <ReactMarkdown
                     key={messageId}
-                    className="prose max-w-full"
+                    // dark:prose-invert flips ALL markdown elements (lists,
+                    // headings, bold, blockquotes, tables) to light colors in
+                    // dark mode — without it only <p> (forced text-default
+                    // below) was readable and everything else stayed prose-grey.
+                    className="prose dark:prose-invert max-w-full"
                     components={{
                       a: (props) => {
                         const { node, ...rest } = props;
@@ -567,7 +572,7 @@ export const HumanMessage = ({
                   </div>
                 </div>
               ) : typeof content === "string" ? (
-                <div className="flex flex-col preserve-lines prose max-w-full">
+                <div className="flex flex-col preserve-lines prose max-w-full text-default">
                   {content}
                 </div>
               ) : (

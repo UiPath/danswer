@@ -11,6 +11,7 @@ import { DraggableTable } from "@/components/table/DraggableTable";
 import { deletePersona, personaComparator } from "./lib";
 import { FiEdit2 } from "react-icons/fi";
 import { TrashIcon } from "@/components/icons/icons";
+import { Tooltip } from "@/components/tooltip/Tooltip";
 
 function PersonaTypeDisplay({ persona }: { persona: Persona }) {
   if (persona.default_persona) {
@@ -98,9 +99,21 @@ export function PersonasTable({ personas }: { personas: Persona[] }) {
                     }
                   />
                 )}
-                <p className="text font-medium whitespace-normal break-none">
-                  {persona.name}
-                </p>
+                <Tooltip
+                  content={
+                    persona.display_name && persona.display_name.trim()
+                      ? `Display name: ${persona.display_name.trim()}`
+                      : "Display name: none"
+                  }
+                >
+                  <p
+                    className={`text font-medium whitespace-normal break-none cursor-default ${
+                      !persona.document_sets?.length ? "text-error" : ""
+                    }`}
+                  >
+                    {persona.name}
+                  </p>
+                </Tooltip>
               </div>,
               <p
                 key="description"

@@ -18,6 +18,7 @@ import {
 import ChatInputOption from "./ChatInputOption";
 import { FaBrain } from "react-icons/fa";
 import { Persona } from "@/app/admin/assistants/interfaces";
+import { assistantDisplayName } from "@/lib/assistants/displayName";
 import { FilterManager, LlmOverrideManager } from "@/lib/hooks";
 import { SelectedFilterDisplay } from "./SelectedFilterDisplay";
 import { useChatContext } from "@/components/context/ChatContext";
@@ -52,6 +53,7 @@ export function ChatInputBar({
   setFiles,
   handleFileUpload,
   setConfigModalActiveTab,
+  configModalActiveTab,
   textAreaRef,
   alternativeAssistant,
 }: {
@@ -75,6 +77,7 @@ export function ChatInputBar({
   setFiles: (files: FileDescriptor[]) => void;
   handleFileUpload: (files: File[]) => void;
   setConfigModalActiveTab: (tab: string) => void;
+  configModalActiveTab: string | null;
   textAreaRef: React.RefObject<HTMLTextAreaElement>;
 }) {
   // handle re-sizing of the text area
@@ -244,7 +247,9 @@ export function ChatInputBar({
                       updateCurrentPersona(currentPersona);
                     }}
                   >
-                    <p className="font-bold ">{currentPersona.name}</p>
+                    <p className="font-bold ">
+                      {assistantDisplayName(currentPersona)}
+                    </p>
                     <p className="line-clamp-1">
                       {currentPersona.id == selectedAssistant.id &&
                         "(default) "}
@@ -300,7 +305,7 @@ export function ChatInputBar({
                 >
                   <AssistantIcon assistant={alternativeAssistant} border />
                   <p className="ml-3 text-strong my-auto">
-                    {alternativeAssistant.name}
+                    {assistantDisplayName(alternativeAssistant)}
                   </p>
                   <div className="flex gap-x-1 ml-auto ">
                     <Tooltip
@@ -401,7 +406,11 @@ export function ChatInputBar({
             <div className="flex items-center space-x-3 mr-12 px-4 pb-2 overflow-hidden">
               <ChatInputOption
                 flexPriority="shrink"
-                name={selectedAssistant ? selectedAssistant.name : "Assistants"}
+                name={
+                  selectedAssistant
+                    ? assistantDisplayName(selectedAssistant)
+                    : "Assistants"
+                }
                 icon={FaBrain}
                 onClick={() => setConfigModalActiveTab("assistants")}
               />
@@ -480,7 +489,11 @@ export function ChatInputBar({
                 }}
               />
             </div>
-            <div className="absolute bottom-2.5 right-10">
+            <div
+              className={`absolute bottom-2.5 right-10 ${
+                configModalActiveTab ? "invisible" : ""
+              }`}
+            >
               <div
                 className={
                   anyFilesUploading && !isStreaming
@@ -504,9 +517,13 @@ export function ChatInputBar({
               >
                 <FiSend
                   size={18}
-                  className={`text-emphasis w-9 h-9 p-2 rounded-lg ${
+                  className={`w-9 h-9 p-2 rounded-lg transition-colors ${
                     anyFilesUploading && !isStreaming ? "opacity-40 " : ""
-                  }${message ? "bg-blue-200" : ""}`}
+                  }${
+                    message
+                      ? "bg-accent text-white hover:bg-accent-hover"
+                      : "text-emphasis"
+                  }`}
                 />
               </div>
             </div>

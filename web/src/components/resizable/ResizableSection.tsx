@@ -94,9 +94,9 @@ export function ResizableSection({
         <div
           onMouseDown={startResizing}
           className={`
-          cursor-col-resize 
-          border-l 
-          border-border 
+          cursor-col-resize
+          border-l
+          border-transparent
           h-full
           w-full
           transition-all duration-300 ease-in hover:border-border-strong hover:border-l-2

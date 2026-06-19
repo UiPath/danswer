@@ -24,6 +24,7 @@ export default async function GalleryPage({
   const {
     user,
     chatSessions,
+    hasMoreChatSessions,
     availableSources,
     documentSets,
     assistants,
@@ -44,6 +45,7 @@ export default async function GalleryPage({
         value={{
           user,
           chatSessions,
+          hasMoreChatSessions,
           availableSources,
           availableDocumentSets: documentSets,
           availablePersonas: assistants,
@@ -56,6 +58,7 @@ export default async function GalleryPage({
         <div className="flex relative bg-background text-default overflow-x-hidden h-screen">
           <ChatSidebar
             existingChats={chatSessions}
+            hasMoreChats={hasMoreChatSessions}
             currentChatSession={null}
             folders={folders}
             openedFolders={openedFolders}

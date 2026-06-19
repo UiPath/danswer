@@ -24,6 +24,7 @@ export default async function Page({
   const {
     user,
     chatSessions,
+    hasMoreChatSessions,
     ccPairs,
     availableSources,
     documentSets,
@@ -52,6 +53,7 @@ export default async function Page({
         value={{
           user,
           chatSessions,
+          hasMoreChatSessions,
           availableSources,
           availableDocumentSets: documentSets,
           availablePersonas: assistants,

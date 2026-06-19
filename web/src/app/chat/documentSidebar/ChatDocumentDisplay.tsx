@@ -6,10 +6,7 @@ import { DocumentUpdatedAtBadge } from "@/components/search/DocumentUpdatedAtBad
 import { DanswerDocument } from "@/lib/search/interfaces";
 import { FiInfo, FiRadio } from "react-icons/fi";
 import { DocumentSelector } from "./DocumentSelector";
-import {
-  DocumentMetadataBlock,
-  buildDocumentSummaryDisplay,
-} from "@/components/search/DocumentDisplay";
+import { DocumentMetadataBlock } from "@/components/search/DocumentDisplay";
 
 interface DocumentDisplayProps {
   document: DanswerDocument;
@@ -103,7 +100,8 @@ export function ChatDocumentDisplay({
         </div>
       </div>
       <p className="pl-1 pt-2 pb-1 break-words">
-        {buildDocumentSummaryDisplay(document.match_highlights, document.blurb)}
+        {/* Keyword highlighting intentionally omitted — show the plain blurb. */}
+        {document.blurb}
       </p>
       <div className="mb-2">
         {/* 

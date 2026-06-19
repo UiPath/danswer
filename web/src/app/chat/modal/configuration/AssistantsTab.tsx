@@ -1,4 +1,5 @@
 import { Persona } from "@/app/admin/assistants/interfaces";
+import { assistantDisplayName } from "@/lib/assistants/displayName";
 import { Bubble } from "@/components/Bubble";
 import { AssistantIcon } from "@/components/assistants/AssistantIcon";
 import React, { useState } from "react";
@@ -20,6 +21,7 @@ export function AssistantsTab({
   const filteredAssistants = availableAssistants.filter(
     (assistant) =>
       !q ||
+      assistantDisplayName(assistant).toLowerCase().includes(q) ||
       assistant.name.toLowerCase().includes(q) ||
       (assistant.description?.toLowerCase().includes(q) ?? false)
   );
@@ -67,7 +69,7 @@ export function AssistantsTab({
             <div className="flex items-center mb-2">
               <AssistantIcon assistant={assistant} />
               <div className="ml-2 font-bold text-lg text-emphasis">
-                {assistant.name}
+                {assistantDisplayName(assistant)}
               </div>
             </div>
             {assistant.tools.length > 0 && (

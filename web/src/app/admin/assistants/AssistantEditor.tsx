@@ -171,6 +171,7 @@ export function AssistantEditor({
 
   const initialValues = {
     name: existingPersona?.name ?? "",
+    display_name: existingPersona?.display_name ?? "",
     description: existingPersona?.description ?? "",
     system_prompt: existingPrompt?.system_prompt ?? "",
     task_prompt: existingPrompt?.task_prompt ?? "",
@@ -407,6 +408,12 @@ export function AssistantEditor({
                     />
 
                     <TextFormField
+                      name="display_name"
+                      label="Display name (optional)"
+                      subtext="Friendly name shown to users in the chat interface. Leave blank to use the name above."
+                    />
+
+                    <TextFormField
                       name="description"
                       label="Description"
                       subtext="Provide a short descriptions which gives users a hint as to what they should use this Assistant for."
@@ -508,35 +515,81 @@ export function AssistantEditor({
                                 {documentSets.length > 0 ? (
                                   <FieldArray
                                     name="document_set_ids"
-                                    render={(arrayHelpers: ArrayHelpers) => (
-                                      <div>
-                                        <div className="mb-3 mt-2 flex gap-2 flex-wrap text-sm">
-                                          {documentSets.map((documentSet) => {
-                                            const ind =
-                                              values.document_set_ids.indexOf(
-                                                documentSet.id
-                                              );
-                                            let isSelected = ind !== -1;
-                                            return (
-                                              <DocumentSetSelectable
-                                                key={documentSet.id}
-                                                documentSet={documentSet}
-                                                isSelected={isSelected}
-                                                onSelect={() => {
-                                                  if (isSelected) {
-                                                    arrayHelpers.remove(ind);
-                                                  } else {
-                                                    arrayHelpers.push(
-                                                      documentSet.id
-                                                    );
-                                                  }
-                                                }}
-                                              />
-                                            );
-                                          })}
+                                    render={(arrayHelpers: ArrayHelpers) => {
+                                      const selectedDocumentSets =
+                                        documentSets.filter((ds) =>
+                                          values.document_set_ids.includes(ds.id)
+                                        );
+                                      const availableDocumentSets =
+                                        documentSets.filter(
+                                          (ds) =>
+                                            !values.document_set_ids.includes(
+                                              ds.id
+                                            )
+                                        );
+                                      return (
+                                        <div>
+                                          <div className="mt-2 mb-1 text-xs font-semibold text-default">
+                                            Selected (
+                                            {selectedDocumentSets.length})
+                                          </div>
+                                          {selectedDocumentSets.length > 0 ? (
+                                            <div className="mb-3 flex gap-2 flex-wrap text-sm">
+                                              {selectedDocumentSets.map(
+                                                (documentSet) => (
+                                                  <DocumentSetSelectable
+                                                    key={documentSet.id}
+                                                    documentSet={documentSet}
+                                                    isSelected={true}
+                                                    onSelect={() => {
+                                                      const ind =
+                                                        values.document_set_ids.indexOf(
+                                                          documentSet.id
+                                                        );
+                                                      if (ind !== -1) {
+                                                        arrayHelpers.remove(ind);
+                                                      }
+                                                    }}
+                                                  />
+                                                )
+                                              )}
+                                            </div>
+                                          ) : (
+                                            <Italic className="text-sm block mb-3">
+                                              None selected — pick from the
+                                              available sets below.
+                                            </Italic>
+                                          )}
+
+                                          <div className="mt-2 mb-1 text-xs font-semibold text-default">
+                                            Available (
+                                            {availableDocumentSets.length})
+                                          </div>
+                                          {availableDocumentSets.length > 0 ? (
+                                            <div className="mb-3 flex gap-2 flex-wrap text-sm">
+                                              {availableDocumentSets.map(
+                                                (documentSet) => (
+                                                  <DocumentSetSelectable
+                                                    key={documentSet.id}
+                                                    documentSet={documentSet}
+                                                    isSelected={false}
+                                                    onSelect={() =>
+                                                      arrayHelpers.push(
+                                                        documentSet.id
+                                                      )
+                                                    }
+                                                  />
+                                                )
+                                              )}
+                                            </div>
+                                          ) : (
+                                            <Italic className="text-sm block mb-3">
+                                              All document sets are selected.
+                                            </Italic>
+                                          )}
                                         </div>
-                                      </div>
-                                    )}
+                                      );
+                                    }}
                                   />
                                 ) : (
                                   <Italic className="text-sm">

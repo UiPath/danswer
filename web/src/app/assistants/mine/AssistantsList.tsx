@@ -423,7 +423,9 @@ function SortableAssistantRow(props: RowProps) {
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: props.assistant.id });
+    // String id: the default assistant has id 0, and a falsy numeric id trips
+    // up dnd-kit's drag pipeline (it can't be grabbed). "0" is truthy.
+  } = useSortable({ id: String(props.assistant.id) });
 
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
@@ -885,7 +887,7 @@ export function AssistantsList({ user, assistants }: AssistantsListProps) {
             modifiers={[restrictToVerticalAxis]}
           >
             <SortableContext
-              items={filteredVisible.map((a) => a.id)}
+              items={filteredVisible.map((a) => String(a.id))}
               strategy={verticalListSortingStrategy}
             >
               {filteredVisible.map((assistant) => (

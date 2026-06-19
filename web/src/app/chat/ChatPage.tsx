@@ -65,6 +65,7 @@ import { useChatContext } from "@/components/context/ChatContext";
 import { UserDropdown } from "@/components/UserDropdown";
 import { v4 as uuidv4 } from "uuid";
 import { orderAssistantsForUser } from "@/lib/assistants/orderAssistants";
+import { assistantDisplayName } from "@/lib/assistants/displayName";
 import { ChatPopup } from "./ChatPopup";
 import { ChatBanner } from "./ChatBanner";
 import { TbLayoutSidebarRightExpand } from "react-icons/tb";
@@ -89,6 +90,7 @@ export function ChatPage({
   let {
     user,
     chatSessions,
+    hasMoreChatSessions,
     availableSources,
     availableDocumentSets,
     availablePersonas,
@@ -140,10 +142,14 @@ export function ChatPage({
     chatSessionIdRef.current = existingChatSessionId;
     textAreaRef.current?.focus();
 
-    // only clear things if we're going from one chat session to another
-    const isChatSessionSwitch =
-      chatSessionIdRef.current !== null &&
-      existingChatSessionId !== priorChatSessionId;
+    // Clear per-session state whenever the active session actually changes —
+    // including when starting a brand-new chat (existingChatSessionId === null).
+    // The previous guard (`chatSessionIdRef.current !== null`) skipped the
+    // New Chat case, so selected documents / filters leaked into the next
+    // session; the stale search_doc_ids then belong to the old session and the
+    // backend rejects them ("Invalid reference doc, not from this chat
+    // session"), failing the next message.
+    const isChatSessionSwitch = existingChatSessionId !== priorChatSessionId;
     if (isChatSessionSwitch) {
       // de-select documents
       clearSelectedDocuments();
@@ -1003,7 +1009,7 @@ export function ChatPage({
       // a blank session with no explanation of why.
       setPopup({
         message:
-          `Started a new chat with "${persona.name}", as each chat is bound to a single assistant.` +
+          `Started a new chat with "${assistantDisplayName(persona)}", as each chat is bound to a single assistant.` +
           (hadFiles ? " Please re-upload any files you'd attached." : ""),
         type: "success",
       });
@@ -1181,6 +1187,7 @@ export function ChatPage({
       >
         <ChatSidebar
           existingChats={chatSessions}
+          hasMoreChats={hasMoreChatSessions}
           currentChatSession={selectedChatSession}
           folders={folders}
           openedFolders={openedFolders}
@@ -1241,7 +1248,7 @@ export function ChatPage({
                       !retrievalEnabled ? "pb-[111px]" : "pb-[140px]"
                     }
                       flex-auto transition-margin duration-300
-                      overflow-x-auto
+                      overflow-hidden
                       `}
                     {...getRootProps()}
                   >
@@ -1400,7 +1407,7 @@ export function ChatPage({
                                   content={message.message}
                                   files={message.files}
                                   query={messageHistory[i]?.query || undefined}
-                                  personaName={livePersona.name}
+                                  personaName={assistantDisplayName(livePersona)}
                                   citedDocuments={getCitedDocumentsFromMessage(
                                     message
                                   )}
@@ -1510,7 +1517,7 @@ export function ChatPage({
                                 <AIMessage
                                   currentPersona={livePersona}
                                   messageId={message.messageId}
-                                  personaName={livePersona.name}
+                                  personaName={assistantDisplayName(livePersona)}
                                   content={
                                     <p className="text-red-700 text-sm my-auto">
                                       {message.message}
@@ -1535,7 +1542,7 @@ export function ChatPage({
                                   selectedAssistant
                                 }
                                 messageId={null}
-                                personaName={livePersona.name}
+                                personaName={assistantDisplayName(livePersona)}
                                 content={
                                   <div className="text-sm my-auto">
                                     <ThreeDots
@@ -1657,6 +1664,7 @@ export function ChatPage({
                           setFiles={setCurrentMessageFiles}
                           handleFileUpload={handleImageUpload}
                           setConfigModalActiveTab={setConfigModalActiveTab}
+                          configModalActiveTab={configModalActiveTab}
                           textAreaRef={textAreaRef}
                         />
                       </div>

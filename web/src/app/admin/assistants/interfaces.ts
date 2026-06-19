@@ -21,6 +21,8 @@ export interface Prompt {
 export interface Persona {
   id: number;
   name: string;
+  // Optional user-friendly label shown in the chat UI; falls back to `name`.
+  display_name?: string | null;
   owner: MinimalUserSnapshot | null;
   is_visible: boolean;
   is_public: boolean;

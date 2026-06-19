@@ -72,13 +72,13 @@
 }
 
 /* A tight glow hugging ONLY the chat box on the empty landing — a small,
- * wide-but-short ellipse centered on the input (≈50% x / 56% y of the chat
+ * wide-but-short ellipse centered on the input (≈50% x / 51% y of the chat
  * area), fading quickly to the plain dark page background so everything else
  * (the heading, the corners, top and bottom) stays black. Pure CSS, no image
  * asset. The ::before layer breathes slowly for a subtle sense of life. */
 .chat-landing-bg {
   background: radial-gradient(
-    36% 18% at 50% 56%,
+    36% 18% at 50% 51%,
     rgba(99, 102, 241, 0.12),
     transparent 76%
   );
@@ -86,7 +86,7 @@
 }
 .dark .chat-landing-bg {
   background: radial-gradient(
-    36% 17% at 50% 56%,
+    36% 17% at 50% 51%,
     rgba(110, 114, 250, 0.38) 0%,
     rgba(76, 91, 232, 0.12) 52%,
     transparent 78%
@@ -99,9 +99,9 @@
   position: absolute;
   inset: 0;
   pointer-events: none;
-  transform-origin: 50% 56%;
+  transform-origin: 50% 51%;
   background: radial-gradient(
-    28% 13% at 50% 56%,
+    28% 13% at 50% 51%,
     rgba(132, 121, 255, 0.22),
     transparent 74%
   );
@@ -185,6 +185,21 @@ input[type="radio"] {
 ::-webkit-scrollbar {
   width: 8px; /* Vertical scrollbar width */
   height: 8px; /* Horizontal scrollbar height */
+}
+
+/* Dark mode: the custom scrollbar colors above are tuned for light mode and
+   render as a bright bar in dark mode — it looked like a thick white border
+   between the chat and the document panel (the chat scroll container's track
+   sits right on that boundary). Use a transparent track + a subtle dark thumb
+   so scrollbars stay usable without painting a light edge. */
+.dark ::-webkit-scrollbar-track {
+  background: transparent;
+}
+.dark ::-webkit-scrollbar-thumb {
+  background: #353b48; /* border-medium — subtle, visible on hover/scroll */
+}
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: #4a5160; /* border-strong */
 }
 
 /* Used to create alternatie to React Markdown */

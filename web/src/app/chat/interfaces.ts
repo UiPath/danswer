@@ -48,6 +48,10 @@ export interface ToolCallFinalResult {
   tool_result: Record<string, any>;
 }
 
+// Number of chat sessions loaded per "page" in the sidebar history. The first
+// page is rendered server-side; older pages are lazy-loaded on scroll.
+export const CHAT_SESSION_PAGE_SIZE = 30;
+
 export interface ChatSession {
   id: number;
   name: string;

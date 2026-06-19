@@ -1,6 +1,6 @@
 import "./globals.css";
 
-import { IBM_Plex_Sans, Fraunces } from "next/font/google";
+import { IBM_Plex_Sans } from "next/font/google";
 import { getCombinedSettings } from "@/components/settings/lib";
 import { CUSTOM_ANALYTICS_ENABLED } from "@/lib/constants";
 import { SettingsProvider } from "@/components/settings/SettingsProvider";
@@ -12,12 +12,6 @@ const plexSans = IBM_Plex_Sans({
   subsets: ["latin"],
   weight: ["400", "500", "600", "700"],
   variable: "--font-sans",
-});
-// Display: Fraunces — a warm, high-contrast serif for the assistant identity
-// and empty-state headline. Gives the product an editorial point of view.
-const fraunces = Fraunces({
-  subsets: ["latin"],
-  variable: "--font-display",
 });
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -47,13 +41,16 @@ export default async function RootLayout({
   const combinedSettings = await getCombinedSettings({});
 
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" className="dark" suppressHydrationWarning>
       <head>
-        {/* No-flash theme init: dark is the default everywhere; only an explicit
-            "light" choice opts out. Runs before paint so there's no flash. */}
+        {/* Dark is the server-rendered default (className="dark" above), so it
+            survives React hydration. This pre-paint script only OPTS OUT for an
+            explicit "light" choice — removing the class before paint (no flash).
+            (Previously the script *added* dark to a class-less <html>, which
+            React then clobbered on hydration, leaving prod stuck in light.) */}
         <script
           dangerouslySetInnerHTML={{
-            __html: `try{if(localStorage.getItem('darwin-theme')!=='light'){document.documentElement.classList.add('dark')}}catch(e){document.documentElement.classList.add('dark')}`,
+            __html: `try{if(localStorage.getItem('darwin-theme')==='light'){document.documentElement.classList.remove('dark')}}catch(e){}`,
           }}
         />
         {CUSTOM_ANALYTICS_ENABLED && combinedSettings.customAnalyticsScript && (
@@ -66,7 +63,7 @@ export default async function RootLayout({
         )}
       </head>
       <body
-        className={`${plexSans.variable} ${fraunces.variable} font-sans text-default bg-background`}
+        className={`${plexSans.variable} font-sans text-default bg-background`}
       >
         <SettingsProvider settings={combinedSettings}>
           {children}

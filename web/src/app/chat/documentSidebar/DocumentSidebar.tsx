@@ -88,7 +88,7 @@ export const DocumentSidebar = forwardRef<HTMLDivElement, DocumentSidebarProps>(
       <div
         style={{ width: initialWidth }}
         ref={ref}
-        className={`sidebar absolute right-0 h-screen border-l border-l-border`}
+        className={`sidebar absolute right-0 h-screen`}
       >
         <div
           className="w-full flex-initial 

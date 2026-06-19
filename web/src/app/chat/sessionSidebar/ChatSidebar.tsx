@@ -20,7 +20,6 @@ import {
 } from "@/lib/constants";
 
 import { ChatTab } from "./ChatTab";
-import { ChatThemeToggle } from "../ChatThemeToggle";
 import { Folder } from "../folders/interfaces";
 import { createFolder } from "../folders/FolderManagement";
 import { usePopup } from "@/components/admin/connectors/Popup";
@@ -33,11 +32,13 @@ import { HeaderTitle } from "@/components/header/Header";
 
 export const ChatSidebar = ({
   existingChats,
+  hasMoreChats,
   currentChatSession,
   folders,
   openedFolders,
 }: {
   existingChats: ChatSession[];
+  hasMoreChats: boolean;
   currentChatSession: ChatSession | null | undefined;
   folders: Folder[];
   openedFolders: { [key: number]: boolean };
@@ -84,12 +85,10 @@ export const ChatSidebar = ({
         w-64
         flex
         flex-none
-        bg-background-weak
+        bg-background
         3xl:w-72
-        border-r 
-        border-border 
-        flex 
-        flex-col 
+        flex
+        flex-col
         h-screen
         transition-transform`}
         id="chat-sidebar"
@@ -192,14 +191,11 @@ export const ChatSidebar = ({
           </BasicClickable>
         </div>
 
-        <div className="mt-2 mb-1 mx-3">
-          <ChatThemeToggle />
-        </div>
-
         <div className="border-b border-border pb-4 mx-3" />
 
         <ChatTab
           existingChats={existingChats}
+          hasMoreChats={hasMoreChats}
           currentChatId={currentChatId}
           folders={localFolders}
           openedFolders={openedFolders}
