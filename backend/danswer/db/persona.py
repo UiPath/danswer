@@ -10,11 +10,13 @@ from sqlalchemy import or_
 from sqlalchemy import select
 from sqlalchemy import update
 from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import selectinload
 from sqlalchemy.orm import Session
 
 from danswer.auth.schemas import UserRole
 from danswer.db.constants import SLACK_BOT_PERSONA_PREFIX
 from danswer.db.engine import get_sqlalchemy_engine
+from danswer.db.models import ConnectorCredentialPair
 from danswer.db.models import DocumentSet
 from danswer.db.models import Persona
 from danswer.db.models import Persona__User
@@ -69,6 +71,7 @@ def create_update_persona(
             persona_id=persona_id,
             user=user,
             name=create_persona_request.name,
+            display_name=create_persona_request.display_name,
             description=create_persona_request.description,
             num_chunks=create_persona_request.num_chunks,
             llm_relevance_filter=create_persona_request.llm_relevance_filter,
@@ -158,6 +161,30 @@ def get_prompts(
     return db_session.scalars(stmt).all()
 
 
+def _persona_snapshot_load_options() -> list:
+    """Eager-load every relationship PersonaSnapshot.from_model touches so
+    serializing personas (admin list, edit page) doesn't N+1 down
+    document_sets -> connector_credential_pairs -> connector/credential. Opt-in
+    via the `eager_load` flag — non-serializing callers (visibility toggle,
+    delete, slack matching) skip it and stay cheap.
+    """
+    return [
+        joinedload(Persona.user),
+        selectinload(Persona.prompts),
+        selectinload(Persona.tools),
+        selectinload(Persona.users),
+        selectinload(Persona.groups),
+        selectinload(Persona.document_sets)
+        .selectinload(DocumentSet.connector_credential_pairs)
+        .options(
+            joinedload(ConnectorCredentialPair.connector),
+            joinedload(ConnectorCredentialPair.credential),
+        ),
+        selectinload(Persona.document_sets).selectinload(DocumentSet.users),
+        selectinload(Persona.document_sets).selectinload(DocumentSet.groups),
+    ]
+
+
 def get_personas(
     # if user_id is `None` assume the user is an admin or auth is disabled
     user_id: UUID | None,
@@ -165,8 +192,11 @@ def get_personas(
     include_default: bool = True,
     include_slack_bot_personas: bool = False,
     include_deleted: bool = False,
+    eager_load: bool = False,
 ) -> Sequence[Persona]:
     stmt = select(Persona).distinct()
+    if eager_load:
+        stmt = stmt.options(*_persona_snapshot_load_options())
     if user_id is not None:
         # Subquery to find all groups the user belongs to
         user_groups_subquery = (
@@ -196,7 +226,9 @@ def get_personas(
     if not include_deleted:
         stmt = stmt.where(Persona.deleted.is_(False))
 
-    return db_session.scalars(stmt).all()
+    # .unique() is required when eager_load joins collection relationships;
+    # harmless otherwise (rows are already distinct).
+    return db_session.scalars(stmt).unique().all()
 
 
 def mark_persona_as_deleted(
@@ -344,6 +376,7 @@ def upsert_persona(
     is_public: bool,
     db_session: Session,
     rerank_enabled: bool = False,
+    display_name: str | None = None,
     prompt_ids: list[int] | None = None,
     document_set_ids: list[int] | None = None,
     tool_ids: list[int] | None = None,
@@ -390,6 +423,7 @@ def upsert_persona(
         check_user_can_edit_persona(user=user, persona=persona)
 
         persona.name = name
+        persona.display_name = display_name or name
         persona.description = description
         persona.num_chunks = num_chunks
         persona.llm_relevance_filter = llm_relevance_filter
@@ -422,6 +456,7 @@ def upsert_persona(
             user_id=user.id if user else None,
             is_public=is_public,
             name=name,
+            display_name=display_name or name,
             description=description,
             num_chunks=num_chunks,
             llm_relevance_filter=llm_relevance_filter,
@@ -574,8 +609,11 @@ def get_persona_by_id(
     db_session: Session,
     include_deleted: bool = False,
     is_for_edit: bool = True,  # NOTE: assume true for safety
+    eager_load: bool = False,
 ) -> Persona:
     stmt = select(Persona).where(Persona.id == persona_id)
+    if eager_load:
+        stmt = stmt.options(*_persona_snapshot_load_options())
 
     or_conditions = []
 
@@ -593,7 +631,9 @@ def get_persona_by_id(
     if not include_deleted:
         stmt = stmt.where(Persona.deleted.is_(False))
 
-    result = db_session.execute(stmt)
+    # .unique() is required when eager_load joins collection relationships;
+    # harmless otherwise.
+    result = db_session.execute(stmt).unique()
     persona = result.scalar_one_or_none()
 
     if persona is None:

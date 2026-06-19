@@ -77,6 +77,7 @@ def list_personas_admin(
             db_session=db_session,
             user_id=None,  # user_id = None -> give back all personas
             include_deleted=include_deleted,
+            eager_load=True,  # serialized via PersonaSnapshot -> avoid N+1
         )
     ]
 
@@ -187,6 +188,7 @@ def get_persona(
             user=user,
             db_session=db_session,
             is_for_edit=False,
+            eager_load=True,  # serialized via PersonaSnapshot -> avoid N+1
         )
     )
 

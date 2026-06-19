@@ -1,10 +1,12 @@
 import json
+import re
 from copy import deepcopy
 from typing import TypeVar
 
 from danswer.chat.models import (
     LlmDoc,
 )
+from danswer.configs.chat_configs import DOCS_VERSION_DEDUP_URL_SUBSTR
 from danswer.configs.chat_configs import PROTECTED_SOURCES
 from danswer.configs.chat_configs import SOURCE_DIVERSITY_RESERVED_SLOTS
 from danswer.configs.constants import IGNORE_FOR_QA
@@ -115,6 +117,93 @@ def ensure_source_diversity(docs: list[T]) -> list[T]:
     promoted = [docs[i] for i in promote_indices]
     rest = [doc for i, doc in enumerate(docs) if i not in promote_set]
     return promoted + rest
+
+
+_DOCS_VERSION_SEG_RE = re.compile(r"^(latest|\d+\.\d+)$")
+
+
+def _docs_page_and_version(url: str | None) -> tuple[str, str] | None:
+    """For a versioned documentation URL, return (page_key, version_token) where
+    page_key is the URL with the version path-segment stripped, so the SAME page
+    across product versions collapses to one key. Returns None for non-docs URLs
+    (other sources are left untouched) and for docs URLs with no recognizable
+    version segment. Scoped by DOCS_VERSION_DEDUP_URL_SUBSTR (empty = disabled).
+    """
+    if not url or not DOCS_VERSION_DEDUP_URL_SUBSTR:
+        return None
+    if DOCS_VERSION_DEDUP_URL_SUBSTR not in url:
+        return None
+    parts = url.split("/")
+    for i, seg in enumerate(parts):
+        if _DOCS_VERSION_SEG_RE.match(seg):
+            page_key = "/".join(parts[:i] + parts[i + 1 :])
+            return page_key, seg
+    return None
+
+
+def _docs_version_sort_key(token: str) -> tuple[int, int, int]:
+    """Order doc versions newest-first. Tiered so we never have to decode the
+    exact meaning of the post-migration 'N.YYMM' scheme — we only need it to
+    outrank the frozen old 'YYYY.M' scheme, which always holds once a product has
+    migrated:
+        tier 3: 'latest' alias        (always newest)
+        tier 2: new scheme  N.YYMM    e.g. 2.2510  (current)
+        tier 1: old scheme  YYYY.M    e.g. 2024.10 (frozen)
+        tier 0: unrecognized          (sorts last)
+    Within a tier, compare the numeric components.
+    """
+    if token == "latest":
+        return (3, 0, 0)
+    m = re.match(r"^(\d+)\.(\d+)$", token)
+    if not m:
+        return (0, 0, 0)
+    major, minor = int(m.group(1)), int(m.group(2))
+    if major >= 1000:  # YYYY.M (old scheme)
+        return (1, major, minor)
+    return (2, major, minor)  # N.YYMM (new scheme) -> ranks above all old
+
+
+def dedupe_doc_versions(
+    docs: list[LlmDoc], doc_relevance_list: list[bool] | None
+) -> tuple[list[LlmDoc], list[bool] | None]:
+    """Collapse the same documentation page repeated across product versions,
+    keeping only the newest version's chunk(s) so distinct pages aren't crowded
+    out of the LLM context. Only affects versioned docs URLs (see
+    DOCS_VERSION_DEDUP_URL_SUBSTR); every other source/doc passes through.
+    `doc_relevance_list` is filtered in lockstep (prune_documents requires the
+    two stay equal length).
+    """
+    parsed = [_docs_page_and_version(doc.link or doc.document_id) for doc in docs]
+
+    # Newest version token seen per docs page.
+    newest: dict[str, str] = {}
+    for pv in parsed:
+        if pv is None:
+            continue
+        page, ver = pv
+        if page not in newest or _docs_version_sort_key(
+            ver
+        ) > _docs_version_sort_key(newest[page]):
+            newest[page] = ver
+
+    kept_docs: list[LlmDoc] = []
+    kept_rel: list[bool] = []
+    dropped = 0
+    for i, doc in enumerate(docs):
+        pv = parsed[i]
+        # Keep non-docs / unversioned docs, and only the newest version per page.
+        if pv is None or pv[1] == newest[pv[0]]:
+            kept_docs.append(doc)
+            if doc_relevance_list is not None:
+                kept_rel.append(doc_relevance_list[i])
+        else:
+            dropped += 1
+
+    if dropped:
+        logger.info(
+            f"Deduped {dropped} older-version duplicate doc page(s) from the LLM context"
+        )
+    return kept_docs, (kept_rel if doc_relevance_list is not None else None)
 
 
 def _remove_docs_to_ignore(docs: list[LlmDoc]) -> list[LlmDoc]:
@@ -245,6 +334,10 @@ def prune_documents(
 ) -> list[LlmDoc]:
     if doc_relevance_list is not None:
         assert len(docs) == len(doc_relevance_list)
+
+    # Drop older-version duplicates of the same docs page before anything else,
+    # so the freed context slots get filled by distinct sources during pruning.
+    docs, doc_relevance_list = dedupe_doc_versions(docs, doc_relevance_list)
 
     doc_token_limit = _compute_limit(
         prompt_config=prompt_config,

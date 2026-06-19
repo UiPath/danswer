@@ -55,6 +55,18 @@ PROTECTED_SOURCES = [
 SOURCE_DIVERSITY_RESERVED_SLOTS = int(
     os.environ.get("SOURCE_DIVERSITY_RESERVED_SLOTS") or 2
 )
+# Versioned-docs dedup at final doc selection. Documentation sites publish the
+# SAME page under one URL per product version (e.g. docs.uipath.com/.../2024.10/…
+# and /.../2023.10/… and /.../2.2510/…). Retrieval then floods the LLM context
+# with many near-identical copies of one page, crowding out distinct sources and
+# (observed) making the LLM intermittently fail to cite -> DanswerBot skips the
+# answer. When enabled, for each docs page we keep only the newest version's
+# chunk(s) and drop the older-version duplicates, freeing context for diverse
+# pages. Scoped to URLs containing DOCS_VERSION_DEDUP_URL_SUBSTR — all other
+# sources are untouched. Set the substr empty to disable.
+DOCS_VERSION_DEDUP_URL_SUBSTR = (
+    os.environ.get("DOCS_VERSION_DEDUP_URL_SUBSTR") or "docs.uipath.com"
+)
 # Whether the LLM should be used to decide if a search would help given the chat history
 DISABLE_LLM_CHOOSE_SEARCH = (
     os.environ.get("DISABLE_LLM_CHOOSE_SEARCH", "").lower() == "true"

@@ -101,9 +101,19 @@ def translate_citations(
     for citation in citations_list:
         # print(f'citation id {citation.document_id} for doc num {citation.citation_num}')
         if citation.citation_num not in citation_to_saved_doc_id_map:
-            citation_to_saved_doc_id_map[
-                citation.citation_num
-            ] = doc_id_to_saved_doc_id_map[citation.document_id]
+            saved_doc_id = doc_id_to_saved_doc_id_map.get(citation.document_id)
+            if saved_doc_id is None:
+                # The LLM can cite a document that isn't in this turn's
+                # reference docs — e.g. it references a doc from earlier in the
+                # conversation, or when chatting with a subset of selected
+                # documents. Skip the stray citation instead of failing the
+                # entire response.
+                logger.warning(
+                    f"Citation {citation.citation_num} references unknown "
+                    f"document_id '{citation.document_id}'; skipping"
+                )
+                continue
+            citation_to_saved_doc_id_map[citation.citation_num] = saved_doc_id
 
     return citation_to_saved_doc_id_map
 

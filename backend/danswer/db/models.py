@@ -998,6 +998,10 @@ class Persona(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[UUID | None] = mapped_column(ForeignKey("user.id"), nullable=True)
     name: Mapped[str] = mapped_column(String)
+    # User-friendly label shown in the chat UI. The immutable `name` stays the
+    # identifier; `display_name` is presentational only and admin-editable.
+    # Backfilled to `name`; chat falls back to `name` if blank.
+    display_name: Mapped[str | None] = mapped_column(String, nullable=True)
     description: Mapped[str] = mapped_column(String)
     # Currently stored but unused, all flows use hybrid
     search_type: Mapped[SearchType] = mapped_column(
@@ -1145,6 +1149,22 @@ class SlackBotConfig(Base):
     )
 
     persona: Mapped[Persona | None] = relationship("Persona")
+
+
+class SlackBotResponseBlocklist(Base):
+    """Senders (by email) whose Slack messages should NOT trigger a Darwin
+    response. DB-driven so the list can be managed without a redeploy. Checked
+    early in danswerbot/slack/handlers/handle_message.py::handle_message."""
+
+    __tablename__ = "slack_bot_response_blocklist"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    # Stored lowercase; matched case-insensitively against the Slack sender's
+    # profile email.
+    email: Mapped[str] = mapped_column(String, unique=True, index=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
 
 class UserSlackPersona(Base):

@@ -17,6 +17,8 @@ logger = setup_logger()
 
 class CreatePersonaRequest(BaseModel):
     name: str
+    # Optional user-friendly label shown in chat; defaults to `name` if omitted.
+    display_name: str | None = None
     description: str
     num_chunks: float
     llm_relevance_filter: bool
@@ -42,6 +44,7 @@ class PersonaSnapshot(BaseModel):
     id: int
     owner: MinimalUserSnapshot | None
     name: str
+    display_name: str | None
     is_visible: bool
     is_public: bool
     display_priority: int | None
@@ -74,6 +77,7 @@ class PersonaSnapshot(BaseModel):
         return PersonaSnapshot(
             id=persona.id,
             name=persona.name,
+            display_name=persona.display_name,
             owner=(
                 MinimalUserSnapshot(id=persona.user.id, email=persona.user.email)
                 if persona.user

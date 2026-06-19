@@ -1,5 +1,6 @@
 import io
 import uuid
+from datetime import datetime
 from typing import cast
 
 from fastapi import APIRouter
@@ -131,18 +132,40 @@ def _reject_if_text_too_long(text: str, filename: str | None) -> None:
 
 @router.get("/get-user-chat-sessions")
 def get_user_chat_sessions(
+    limit: int | None = None,
+    offset: int = 0,
+    start_time: datetime | None = None,
+    end_time: datetime | None = None,
     user: User | None = Depends(current_user),
     db_session: Session = Depends(get_session),
 ) -> ChatSessionsResponse:
     user_id = user.id if user is not None else None
 
+    # The sidebar loads one time bucket at a time, newest-first: it passes a
+    # [start_time, end_time) window plus `limit`/`offset` to page within that
+    # bucket. When `limit` is omitted the endpoint keeps its legacy behavior and
+    # returns every session. To report whether more (older) sessions remain in
+    # the window, fetch one extra row and trim it off.
+    fetch_limit = limit + 1 if limit is not None else None
+
     try:
         chat_sessions = get_chat_sessions_by_user(
-            user_id=user_id, deleted=False, db_session=db_session
+            user_id=user_id,
+            deleted=False,
+            db_session=db_session,
+            limit=fetch_limit,
+            offset=offset,
+            start_time=start_time,
+            end_time=end_time,
         )
 
     except ValueError:
         raise ValueError("Chat session does not exist or has been deleted")
+
+    has_more = False
+    if limit is not None and len(chat_sessions) > limit:
+        has_more = True
+        chat_sessions = chat_sessions[:limit]
 
     return ChatSessionsResponse(
         sessions=[
@@ -156,7 +179,8 @@ def get_user_chat_sessions(
                 current_alternate_model=chat.current_alternate_model,
             )
             for chat in chat_sessions
-        ]
+        ],
+        has_more=has_more,
     )
 
 

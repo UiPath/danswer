@@ -163,6 +163,9 @@ class ChatSessionDetails(BaseModel):
 
 class ChatSessionsResponse(BaseModel):
     sessions: list[ChatSessionDetails]
+    # True when more (older) sessions exist beyond this page. Omitted/False
+    # means the caller has reached the end of the history.
+    has_more: bool = False
 
 
 class SearchFeedbackRequest(BaseModel):

@@ -21,6 +21,7 @@ from danswer.configs.app_configs import CC_PAIR_INFO_CACHE_TTL_SECONDS
 from danswer.configs.app_configs import ENABLED_CONNECTOR_TYPES
 from danswer.configs.constants import DocumentSource
 from danswer.configs.constants import FileOrigin
+from danswer.connectors.highspot.sync import sync_highspot_spots_to_connectors
 from danswer.connectors.gmail.connector_auth import delete_gmail_service_account_key
 from danswer.connectors.gmail.connector_auth import delete_google_app_gmail_cred
 from danswer.connectors.gmail.connector_auth import get_gmail_auth_url
@@ -589,6 +590,27 @@ def create_connector_from_model(
         return create_connector(connector_data, db_session)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/admin/connector/highspot/sync-spots")
+def sync_highspot_spots_endpoint(
+    credential_id: int,
+    _: User = Depends(current_admin_user),
+    db_session: Session = Depends(get_session),
+) -> StatusResponse[list[int]]:
+    """Create a per-Spot connector (named after the Spot) for every Highspot
+    Spot the given credential can see, on a monthly schedule. Idempotent — safe
+    to re-run to pick up newly added Spots. See connectors/highspot/sync.py.
+    """
+    try:
+        created = sync_highspot_spots_to_connectors(credential_id, db_session)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return StatusResponse(
+        success=True,
+        message=f"Created {len(created)} Highspot connector(s)",
+        data=created,
+    )
 
 
 @router.patch("/admin/connector/{connector_id}")

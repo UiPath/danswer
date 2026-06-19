@@ -50,6 +50,9 @@ from danswer.db.models import Persona
 from danswer.db.models import SlackBotConfig
 from danswer.db.models import SlackBotResponseType
 from danswer.db.persona import fetch_persona_by_id
+from danswer.db.slack_response_blocklist import (
+    get_slack_response_blocklisted_emails,
+)
 from danswer.db.persona import get_persona_with_docset_and_prompts
 from danswer.db.persona import get_personas
 from danswer.db.users import add_slack_persona_for_user
@@ -228,6 +231,38 @@ def handle_message(
     is_bot_msg = message_info.is_bot_msg
     is_bot_dm = message_info.is_bot_dm
     persona_name = None
+
+    # Suppress responses for senders on the DB-driven blocklist (e.g. people whose
+    # messages should never trigger Darwin). Only hit the Slack API for the
+    # sender's email when the blocklist is non-empty, so the common case adds no
+    # per-message API call.
+    if sender_id:
+        try:
+            with Session(get_sqlalchemy_engine()) as db_session:
+                blocklisted_emails = get_slack_response_blocklisted_emails(
+                    db_session
+                )
+        except Exception:
+            # Fail open: if the blocklist can't be read (e.g. the table doesn't
+            # exist yet mid-migration, or a transient DB error), respond as
+            # normal rather than dropping the message.
+            blocklisted_emails = set()
+            logger.warning("Could not load Slack response blocklist; proceeding")
+        if blocklisted_emails:
+            sender_email: str | None = None
+            try:
+                sender_email = (
+                    client.users_info(user=sender_id)
+                    .data["user"]["profile"]  # type: ignore
+                    .get("email")
+                )
+            except Exception:
+                logger.warning("Unable to fetch sender email for blocklist check")
+            if sender_email and sender_email.lower() in blocklisted_emails:
+                logger.info(
+                    f"Ignoring Slack message from blocklisted sender {sender_email}"
+                )
+                return False
 
     # Check if channel config has JIRA integration enabled and title filter
     if channel_config and channel_config.channel_config:
