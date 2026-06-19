@@ -31,6 +31,13 @@
 #   docker push $REGISTRY/danswer-backend:vha-N
 #   docker push $REGISTRY/danswer-web-server:vha-M
 #
+# Apple Silicon: the web image is NEVER built locally. Its `next build` step
+# SIGSEGVs under linux/amd64 emulation on arm64 Macs, so on Apple Silicon this
+# script builds web on darwinacr (native amd64 ACR build agents) and imports the
+# result into the prod registry — automatically, no flags needed. Backend still
+# builds locally (pure Python, no native build step). Force the old local web
+# build with FORCE_LOCAL_WEB_BUILD=1 (only useful on an amd64 host).
+#
 # Safety:
 #   - `deploy` refuses unless the kubectl context is the prod cluster
 #     ($PROD_CONTEXT) — the prod overlay targets it. Override with FORCE=1.
@@ -73,6 +80,18 @@ img_context()      { case "$1" in backend) echo "$REPO_ROOT/backend";; web) echo
 img_build_extra()  { case "$1" in web) echo "--load";; *) echo "";; esac; }
 # which live deployment to read the running tag from, for `verify`
 img_verify_deploy(){ case "$1" in backend) echo api-server-deployment;; web) echo web-server-deployment;; esac; }
+
+# ---- Apple Silicon / web build routing ------------------------------------
+# The web image's `next build` step SIGSEGVs when built for linux/amd64 under
+# emulation on Apple Silicon (the only way to produce an amd64 image locally on
+# an arm64 Mac). So on Apple Silicon we NEVER build web locally — we build it on
+# darwinacr's native-amd64 ACR build agents and import the result into the prod
+# registry. Backend is pure Python (no native build step) and builds fine under
+# emulation, so it stays local. Escape hatch: FORCE_LOCAL_WEB_BUILD=1.
+CLOUD_BUILD_REGISTRY="darwinacr"                                # native amd64 build agents
+NODE_BASE_MIRROR="darwinacr.azurecr.io/library/node:20-alpine"  # avoids docker.io pulls in ACR build
+is_apple_silicon()      { [ "$(uname -s)" = "Darwin" ] && [ "$(uname -m)" = "arm64" ]; }
+web_uses_cloud_build()  { is_apple_silicon && [ "${FORCE_LOCAL_WEB_BUILD:-0}" != "1" ]; }
 
 # ---- logging --------------------------------------------------------------
 log()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
@@ -235,11 +254,50 @@ for c in "${COMPONENTS[@]}"; do
   printf '    %-8s %s -> %s\n' "$c" "$cur" "$(next_tag "$cur")"
 done
 
+# Build the web image on the cloud (darwinacr, native amd64). Used on Apple
+# Silicon, where a local amd64 `next build` SIGSEGVs under emulation. CWD is
+# $REPO_ROOT (set in the build section), so ./web + web/Dockerfile resolve.
+cloud_build_web_image() {
+  local tag="$1"
+  run az acr build --registry "$CLOUD_BUILD_REGISTRY" \
+      --image "danswer/danswer-web-server:$tag" \
+      --build-arg NODE_BASE="$NODE_BASE_MIRROR" \
+      --file web/Dockerfile ./web \
+    || die "cloud web build failed on $CLOUD_BUILD_REGISTRY (az acr build)"
+}
+
+# Copy a cloud-built web image from darwinacr into the prod registry. darwinacr
+# and the prod registry are in DIFFERENT subscriptions, so we transfer by
+# pull -> retag -> push rather than `az acr import` (cross-sub import auth is
+# unreliable here). This is a pure blob copy on the Mac — no `next`/V8 executes,
+# so no SIGSEGV; the digest is preserved. Prod push uses the docker login from
+# registry_login (ACR_USERNAME/ACR_PASSWORD); the darwinacr pull needs an
+# `az acr login` (PIM Contributor).
+import_web_to_prod() {
+  local tag="$1"
+  local src="$CLOUD_BUILD_REGISTRY.azurecr.io/danswer/danswer-web-server:$tag"
+  local dst="$REGISTRY/danswer-web-server:$tag"
+  run az acr login --name "$CLOUD_BUILD_REGISTRY" \
+    || die "az acr login to $CLOUD_BUILD_REGISTRY failed — activate PIM Contributor and retry"
+  run docker pull --platform linux/amd64 "$src" || die "pull $src failed"
+  run docker tag "$src" "$dst"
+  run docker push "$dst" || die "push $dst failed"
+}
+
 # ---- build ----------------------------------------------------------------
 ensure_disk_space
 log "BUILD (linux/amd64)"
 cd "$REPO_ROOT"
 for c in "${COMPONENTS[@]}"; do
+  # On Apple Silicon the web image is built on the cloud (native amd64) and
+  # never locally — see web_uses_cloud_build / the routing comment above.
+  if [ "$c" = "web" ] && web_uses_cloud_build; then
+    log "build web on $CLOUD_BUILD_REGISTRY (cloud, native amd64) — local 'next build' SIGSEGVs under Apple Silicon emulation"
+    cloud_build_web_image "$(component_next_tag web)"
+    WEB_CLOUD_BUILT=1
+    ok "built web on $CLOUD_BUILD_REGISTRY"
+    continue
+  fi
   local_tag="$(img_local "$c"):latest"
   log "build $c -> $local_tag"
   # shellcheck disable=SC2046,SC2086
@@ -253,6 +311,15 @@ done
 log "PUSH -> $REGISTRY"
 registry_login   # docker login using $ACR_USERNAME/$ACR_PASSWORD (see helper)
 for c in "${COMPONENTS[@]}"; do
+  # Cloud-built web (Apple Silicon) is already in darwinacr — import it into the
+  # prod registry instead of docker-pushing a local image that doesn't exist.
+  if [ "$c" = "web" ] && [ "${WEB_CLOUD_BUILT:-0}" = "1" ]; then
+    web_tag="$(component_next_tag web)"
+    log "import web $web_tag: $CLOUD_BUILD_REGISTRY -> $REGISTRY_HOST"
+    import_web_to_prod "$web_tag"
+    ok "imported $REGISTRY/danswer-web-server:$web_tag"
+    continue
+  fi
   local_tag="$(img_local "$c"):latest"
   remote_tag="$REGISTRY/$(img_logical "$c"):$(component_next_tag "$c")"
   run docker tag "$local_tag" "$remote_tag"

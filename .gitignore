@@ -28,7 +28,6 @@ requestdata.json
 # Playwright MCP session artifacts (console logs, page snapshots, ad-hoc
 # screenshots) written during local UI debugging. Not source.
 .playwright-mcp/
-model-picker-open.png
 
 # Live cluster dumps from `kubectl get -o yaml > …`. NEVER commit:
 # Darwin's ConfigMap currently contains real secrets in plaintext (Slack
