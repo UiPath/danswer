@@ -55,6 +55,17 @@ PROTECTED_SOURCES = [
 SOURCE_DIVERSITY_RESERVED_SLOTS = int(
     os.environ.get("SOURCE_DIVERSITY_RESERVED_SLOTS") or 2
 )
+# Source-reserved RETRIEVAL (recall guarantee). SOURCE_DIVERSITY_RESERVED_SLOTS
+# above only reserves FINAL-prompt slots among docs retrieval already surfaced —
+# it cannot help when a chatty source (e.g. Slack) saturates the entire top-N and
+# a curated PROTECTED_SOURCES doc (web/KB/OutSystems) never makes the candidate set
+# at all. This runs ONE extra source-scoped retrieval pass (reusing the same ACL +
+# persona doc-set fence) to guarantee up to N PROTECTED_SOURCES docs land in the
+# candidate set, then the diversity reservation above carries them into the prompt.
+# 0 = disabled (single-query behavior). Set per environment.
+SOURCE_RESERVED_RETRIEVAL_SLOTS = int(
+    os.environ.get("SOURCE_RESERVED_RETRIEVAL_SLOTS") or 0
+)
 # Versioned-docs dedup at final doc selection. Documentation sites publish the
 # SAME page under one URL per product version (e.g. docs.uipath.com/.../2024.10/…
 # and /.../2023.10/… and /.../2.2510/…). Retrieval then floods the LLM context
