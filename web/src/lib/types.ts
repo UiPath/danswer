@@ -1,7 +1,12 @@
 import { Persona } from "@/app/admin/assistants/interfaces";
 
 export interface UserPreferences {
+  // Order / pinned-default of the user's assistants. Visibility is governed by
+  // `hidden_assistants`, NOT membership here.
   chosen_assistants: number[] | null;
+  // Assistants the user has explicitly hidden. Opt-out: anything not listed is
+  // visible by default, so new assistants appear for everyone automatically.
+  hidden_assistants?: number[] | null;
 }
 
 export enum UserStatus {

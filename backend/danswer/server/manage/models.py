@@ -34,6 +34,7 @@ class AuthTypeResponse(BaseModel):
 
 class UserPreferences(BaseModel):
     chosen_assistants: list[int] | None
+    hidden_assistants: list[int] | None = None
 
 
 class UserInfo(BaseModel):
@@ -54,7 +55,12 @@ class UserInfo(BaseModel):
             is_superuser=user.is_superuser,
             is_verified=user.is_verified,
             role=user.role,
-            preferences=(UserPreferences(chosen_assistants=user.chosen_assistants)),
+            preferences=(
+                UserPreferences(
+                    chosen_assistants=user.chosen_assistants,
+                    hidden_assistants=user.hidden_assistants or [],
+                )
+            ),
         )
 
 

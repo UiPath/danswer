@@ -51,9 +51,9 @@ import { AssistantIcon } from "@/components/assistants/AssistantIcon";
 import { Bubble } from "@/components/Bubble";
 import { usePopup } from "@/components/admin/connectors/Popup";
 import {
-  addAssistantToList,
-  reorderAssistantList,
-  removeAssistantFromList,
+  hideAssistant,
+  unhideAssistant,
+  setHiddenAssistants,
 } from "@/lib/assistants/updateAssistantPreferences";
 import { checkUserOwnsAssistant } from "@/lib/assistants/checkOwnership";
 import { AssistantsPageTitle } from "../AssistantsPageTitle";
@@ -381,16 +381,13 @@ export function AssistantsGallery({
   };
   const { popup, setPopup } = usePopup();
 
-  // Mirrors the Manage page: no preference = every accessible assistant
-  // is "in the picker" by default.
-  const initialChosen: number[] =
-    user?.preferences?.chosen_assistants ?? assistants.map((a) => a.id);
-  const [chosenAssistants, setChosenAssistants] =
-    useState<number[]>(initialChosen);
-  const chosenSet = useMemo(
-    () => new Set(chosenAssistants),
-    [chosenAssistants]
+  // Opt-out model: an assistant is "added" (in the picker) unless the user has
+  // explicitly hidden it. So new assistants are added for everyone by default.
+  const [hiddenIds, setHiddenIds] = useState<number[]>(
+    user?.preferences?.hidden_assistants ?? []
   );
+  const hiddenSet = useMemo(() => new Set(hiddenIds), [hiddenIds]);
+  const isAdded = (id: number) => !hiddenSet.has(id);
 
   // ---- filter / sort state -------------------------------------------------
 
@@ -416,8 +413,8 @@ export function AssistantsGallery({
           .toLowerCase();
         if (!hay.includes(q)) return false;
       }
-      if (availability === "added" && !chosenSet.has(a.id)) return false;
-      if (availability === "available" && chosenSet.has(a.id)) return false;
+      if (availability === "added" && hiddenSet.has(a.id)) return false;
+      if (availability === "available" && !hiddenSet.has(a.id)) return false;
       return true;
     });
 
@@ -430,7 +427,7 @@ export function AssistantsGallery({
     }
     // "featured" = preserve API order (admins curate via display_priority).
     return out;
-  }, [assistants, search, availability, sortMode, chosenSet]);
+  }, [assistants, search, availability, sortMode, hiddenSet]);
 
   // ---- derived: sections ---------------------------------------------------
 
@@ -492,26 +489,26 @@ export function AssistantsGallery({
         if (!hay.includes(q)) continue;
       }
       all++;
-      if (chosenSet.has(a.id)) added++;
+      if (!hiddenSet.has(a.id)) added++;
       else available++;
     }
     return { all, added, available };
-  }, [assistants, search, chosenSet]);
+  }, [assistants, search, hiddenSet]);
 
   // ---- optimistic add/remove (mirrors Manage page persistOrder) -----------
 
-  const persistChosen = async (
+  const persistHidden = async (
     next: number[],
     {
       successMsg,
-      undoToOrder,
-    }: { successMsg?: string; undoToOrder?: number[] } = {}
+      undoToHidden,
+    }: { successMsg?: string; undoToHidden?: number[] } = {}
   ): Promise<boolean> => {
-    const prev = chosenAssistants;
-    setChosenAssistants(next);
-    const ok = await reorderAssistantList(next);
+    const prev = hiddenIds;
+    setHiddenIds(next);
+    const ok = await setHiddenAssistants(next);
     if (!ok) {
-      setChosenAssistants(prev);
+      setHiddenIds(prev);
       setPopup({
         message: "Couldn't update your assistant list — please try again.",
         type: "error",
@@ -523,10 +520,10 @@ export function AssistantsGallery({
         message: successMsg,
         type: "success",
         undo:
-          undoToOrder !== undefined
+          undoToHidden !== undefined
             ? {
                 onClick: async () => {
-                  await persistChosen(undoToOrder);
+                  await persistHidden(undoToHidden);
                 },
               }
             : undefined,
@@ -536,18 +533,16 @@ export function AssistantsGallery({
     return true;
   };
 
+  // Add = unhide (remove from hidden_assistants).
   const handleAdd = async (a: Persona) => {
     if (!user) return;
-    if (chosenSet.has(a.id)) return; // already added — no-op
-    const prev = chosenAssistants;
-    const next = [...prev, a.id];
-    // Use addAssistantToList specifically (idempotent) rather than the
-    // generic reorder helper — both PATCH the same endpoint, but this
-    // signals intent at the call-site.
-    setChosenAssistants(next);
-    const ok = await addAssistantToList(a.id, prev);
+    if (isAdded(a.id)) return; // already visible — no-op
+    const prev = hiddenIds;
+    const next = prev.filter((id) => id !== a.id);
+    setHiddenIds(next);
+    const ok = await unhideAssistant(a.id, prev);
     if (!ok) {
-      setChosenAssistants(prev);
+      setHiddenIds(prev);
       setPopup({
         message: `Couldn't add "${a.name}". Try again?`,
         type: "error",
@@ -559,16 +554,18 @@ export function AssistantsGallery({
       type: "success",
       undo: {
         onClick: async () => {
-          await persistChosen(prev);
+          await persistHidden(prev);
         },
       },
     });
     router.refresh();
   };
 
+  // Remove = hide (add to hidden_assistants). Keep at least one visible.
   const handleRemove = async (a: Persona) => {
     if (!user) return;
-    if (chosenAssistants.length === 1 && chosenAssistants[0] === a.id) {
+    const visibleCount = assistants.filter((x) => !hiddenSet.has(x.id)).length;
+    if (visibleCount <= 1 && isAdded(a.id)) {
       setPopup({
         message:
           "You need at least one visible assistant — can't remove the last one.",
@@ -576,12 +573,12 @@ export function AssistantsGallery({
       });
       return;
     }
-    const prev = chosenAssistants;
-    const next = prev.filter((id) => id !== a.id);
-    setChosenAssistants(next);
-    const ok = await removeAssistantFromList(a.id, prev);
+    const prev = hiddenIds;
+    const next = [...prev, a.id];
+    setHiddenIds(next);
+    const ok = await hideAssistant(a.id, prev);
     if (!ok) {
-      setChosenAssistants(prev);
+      setHiddenIds(prev);
       setPopup({
         message: `Couldn't remove "${a.name}". Try again?`,
         type: "error",
@@ -593,7 +590,7 @@ export function AssistantsGallery({
       type: "success",
       undo: {
         onClick: async () => {
-          await persistChosen(prev);
+          await persistHidden(prev);
         },
       },
     });
@@ -777,7 +774,7 @@ export function AssistantsGallery({
                   key={assistant.id}
                   assistant={assistant}
                   user={user}
-                  isAdded={chosenSet.has(assistant.id)}
+                  isAdded={isAdded(assistant.id)}
                   onAdd={handleAdd}
                   onRemove={handleRemove}
                 />

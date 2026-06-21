@@ -116,10 +116,19 @@ class User(SQLAlchemyBaseUserTableUUID, Base):
     putting here for simpicity
     """
 
-    # if specified, controls the assistants that are shown to the user + their order
-    # if not specified, all assistants are shown
+    # if specified, controls the ORDER (and pinned default = position 0) of the
+    # assistants shown to the user. Visibility is governed by `hidden_assistants`
+    # below, NOT by membership here. If not specified, the natural order is used.
     chosen_assistants: Mapped[list[int]] = mapped_column(
         postgresql.ARRAY(Integer), nullable=True
+    )
+
+    # Assistants the user has explicitly hidden from their picker. Opt-OUT model:
+    # every accessible assistant is visible by default — so a newly created
+    # (e.g. admin) assistant appears for all users automatically — and a user
+    # removes the ones they don't want here. Empty list = nothing hidden.
+    hidden_assistants: Mapped[list[int]] = mapped_column(
+        postgresql.ARRAY(Integer), nullable=False, server_default="{}"
     )
 
     # relationships

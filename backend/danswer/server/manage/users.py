@@ -298,3 +298,35 @@ def update_user_assistant_list(
         .values(chosen_assistants=request.chosen_assistants)
     )
     db_session.commit()
+
+
+class HiddenAssistantsRequest(BaseModel):
+    hidden_assistants: list[int]
+
+
+@router.patch("/user/hidden-assistants")
+def update_user_hidden_assistants(
+    request: HiddenAssistantsRequest,
+    user: User | None = Depends(current_user),
+    db_session: Session = Depends(get_session),
+) -> None:
+    # Opt-out visibility: the assistants a user has explicitly hidden from their
+    # picker. Everything not in this list is visible by default (so new admin
+    # assistants surface for everyone). Mirrors `update_user_assistant_list`.
+    if user is None:
+        if AUTH_TYPE == AuthType.DISABLED:
+            store = get_dynamic_config_store()
+
+            no_auth_user = fetch_no_auth_user(store)
+            no_auth_user.preferences.hidden_assistants = request.hidden_assistants
+            set_no_auth_user_preferences(store, no_auth_user.preferences)
+            return
+        else:
+            raise RuntimeError("This should never happen")
+
+    db_session.execute(
+        update(User)
+        .where(User.id == user.id)  # type: ignore
+        .values(hidden_assistants=request.hidden_assistants)
+    )
+    db_session.commit()
