@@ -91,12 +91,10 @@ def build_authoritative_sources_reminder() -> str:
         return ""
     listed = ", ".join(names)
     return (
-        f"\n\nThe authoritative systems of record are: {listed}. End your answer with a "
-        f"'Sources' section containing two labelled groups: 'Authoritative sources' — "
-        f"the citation markers (e.g. [1], [2]) for documents from those systems that "
-        f"support your answer — and 'Other sources' — the remaining cited documents "
-        f"(e.g. chat discussions). Omit a group that would be empty, and never list a "
-        f"document that does not actually support the answer."
+        f"\n\n{listed} are authoritative systems of record. When one of these documents "
+        f"supports a point in your answer, prefer citing it over a non-authoritative "
+        f"source (e.g. chat discussions) that makes the same point. Only cite sources "
+        f"that actually support your answer."
     )
 
 
