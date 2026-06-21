@@ -191,6 +191,16 @@ export function CCPairIndexingStatusTable({
     lastIndexedSort,
   ]);
 
+  // Keep the status filter in sync with the ?status= deep-link. The sidebar
+  // tabs (Existing Connectors / Indexing Activity / Failed Indexing) are the
+  // same route with different ?status= values; navigating between them is
+  // client-side and does NOT remount this component, so without this the URL
+  // changes but statusFilter (seeded once on mount) never updates — the click
+  // appears to do nothing.
+  useEffect(() => {
+    setStatusFilter(initialStatusFilter);
+  }, [initialStatusFilter]);
+
   // Reset page + selection when any filter changes so we never act on hidden rows.
   useEffect(() => {
     setPage(1);
