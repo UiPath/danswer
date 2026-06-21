@@ -91,12 +91,12 @@ def build_authoritative_sources_reminder() -> str:
         return ""
     listed = ", ".join(names)
     return (
-        f"\n\n{listed} are the authoritative systems of record. When a document from "
-        f"one of these authoritative sources supports a statement in your answer, you "
-        f"MUST cite that authoritative document for the statement — even if a chat "
-        f"discussion (e.g. Slack) makes the same point. Cite chat discussions ONLY for "
-        f"statements that no authoritative document supports. Never cite a source that "
-        f"does not actually support the statement."
+        f"\n\nThe authoritative systems of record are: {listed}. End your answer with a "
+        f"'Sources' section containing two labelled groups: 'Authoritative sources' — "
+        f"the citation markers (e.g. [1], [2]) for documents from those systems that "
+        f"support your answer — and 'Other sources' — the remaining cited documents "
+        f"(e.g. chat discussions). Omit a group that would be empty, and never list a "
+        f"document that does not actually support the answer."
     )
 
 
