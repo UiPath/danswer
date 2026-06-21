@@ -348,6 +348,24 @@ for c in "${COMPONENTS[@]}"; do
   APPLIED+=("$c=$nxt")
   ok "kustomization newTag $(img_logical "$c") -> $nxt"
 done
+
+# Safety gate: never `kubectl apply` a manifest that points at an image which
+# isn't actually in the registry. An interrupted/killed run (e.g. a backgrounded
+# deploy whose build/push was SIGKILLed) can leave the tag bumped without the
+# image pushed; applying that rolls the deployment onto an unpullable tag ->
+# ImagePullBackOff, and for the dask scheduler it cascades the whole indexing
+# pipeline down. Verify each tag we're about to apply first (docker is already
+# logged in to $REGISTRY from the push stage).
+log "verify target images exist in $REGISTRY before applying"
+for entry in "${APPLIED[@]}"; do
+  c="${entry%%=*}"; tag="${entry##*=}"
+  ref="$REGISTRY/$(img_logical "$c"):$tag"
+  if ! docker manifest inspect "$ref" >/dev/null 2>&1; then
+    die "image $ref is NOT in the registry — refusing to apply (would cause ImagePullBackOff). Re-run the 'push' stage (the manifest is bumped but the cluster is untouched)."
+  fi
+  ok "registry has $ref"
+done
+
 log "kubectl apply -k $OVERLAY_DIR  (ns=$NAMESPACE, context=$ctx)"
 run kubectl apply -k "$OVERLAY_DIR"
 ok "applied. Rollout status:"
