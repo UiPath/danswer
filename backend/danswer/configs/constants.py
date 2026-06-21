@@ -107,6 +107,7 @@ class DocumentSource(str, Enum):
     GOOGLE_CLOUD_STORAGE = "google_cloud_storage"
     OCI_STORAGE = "oci_storage"
     HIGHSPOT = "highspot"
+    OUTSYSTEMS = "outsystems"
 
 
 class BlobType(str, Enum):

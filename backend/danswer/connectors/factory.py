@@ -24,6 +24,7 @@ from danswer.connectors.google_site.connector import GoogleSitesConnector
 from danswer.connectors.guru.connector import GuruConnector
 from danswer.connectors.highspot.connector import HighspotConnector
 from danswer.connectors.hubspot.connector import HubSpotConnector
+from danswer.connectors.outsystems.connector import OutSystemsConnector
 from danswer.connectors.interfaces import BaseConnector
 from danswer.connectors.interfaces import EventConnector
 from danswer.connectors.interfaces import LoadConnector
@@ -110,6 +111,7 @@ def identify_connector_class(
         DocumentSource.GOOGLE_CLOUD_STORAGE: BlobStorageConnector,
         DocumentSource.OCI_STORAGE: BlobStorageConnector,
         DocumentSource.HIGHSPOT: HighspotConnector,
+        DocumentSource.OUTSYSTEMS: OutSystemsConnector,
     }
     connector_by_source = connector_map.get(source, {})
 

@@ -66,7 +66,8 @@ export type ValidSources =
   | "r2"
   | "google_cloud_storage"
   | "oci_storage"
-  | "highspot";
+  | "highspot"
+  | "outsystems";
 
 export type ValidInputTypes = "load_state" | "poll" | "event";
 export type ValidStatuses =
@@ -171,6 +172,11 @@ export interface SfKbArticlesConfig {
 
 export interface HighspotConfig {
   spot_names?: string[];
+}
+
+export interface OutSystemsConfig {
+  page_id_start?: number;
+  page_id_end?: number;
 }
 
 export interface SharepointConfig {
@@ -380,6 +386,20 @@ export interface HighspotCredentialJson {
   highspot_key: string;
   highspot_secret: string;
   highspot_url?: string;
+}
+
+// INTERIM: short-lived browser session (cookie + csrf + apiVersion) captured
+// from DevTools. Swaps to a service-account credential later. See the
+// outsystems connector.
+export interface OutSystemsCredentialJson {
+  outsystems_cookie: string;
+  outsystems_csrf: string;
+  outsystems_api_version: string;
+  // Optional: enables downloading attached files (PDFs etc). The file action's
+  // apiVersion (from an ActionFileMetadata_Get request), distinct from the page
+  // apiVersion. Absent => page text only.
+  outsystems_file_api_version?: string;
+  outsystems_base_url?: string;
 }
 
 export interface SlackCredentialJson {

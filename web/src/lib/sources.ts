@@ -157,6 +157,11 @@ const SOURCE_METADATA_MAP: SourceMap = {
     displayName: "Highspot",
     category: SourceCategory.AppConnection,
   },
+  outsystems: {
+    icon: GlobeIcon,
+    displayName: "OutSystems",
+    category: SourceCategory.AppConnection,
+  },
   document360: {
     icon: Document360Icon,
     displayName: "Document360",
