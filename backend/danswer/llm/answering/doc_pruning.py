@@ -1,5 +1,6 @@
 import json
 import re
+from collections import defaultdict
 from copy import deepcopy
 from typing import TypeVar
 
@@ -7,6 +8,7 @@ from danswer.chat.models import (
     LlmDoc,
 )
 from danswer.configs.chat_configs import DOCS_VERSION_DEDUP_URL_SUBSTR
+from danswer.configs.chat_configs import MAX_PROMPT_DOCS_PER_SOURCE
 from danswer.configs.chat_configs import PROTECTED_SOURCES
 from danswer.configs.chat_configs import SOURCE_DIVERSITY_RESERVED_SLOTS
 from danswer.configs.constants import IGNORE_FOR_QA
@@ -119,6 +121,30 @@ def ensure_source_diversity(docs: list[T]) -> list[T]:
     return promoted + rest
 
 
+def cap_docs_per_source(docs: list[T]) -> list[T]:
+    """Cap how many docs any single source contributes to the prompt, preserving
+    order (so the highest-ranked / source-diversity-promoted docs per source
+    survive and the rest are dropped). Prevents a chatty source from monopolizing
+    the context — and therefore the citations — when diverse sources are present.
+    No-op when disabled (cap <= 0). Run AFTER ensure_source_diversity so promoted
+    curated docs are kept.
+    """
+    cap = MAX_PROMPT_DOCS_PER_SOURCE
+    if cap <= 0:
+        return docs
+
+    counts: dict[str, int] = defaultdict(int)
+    capped: list[T] = []
+    for doc in docs:
+        source = doc.source_type
+        key = (source.value if hasattr(source, "value") else str(source)).lower()
+        if counts[key] >= cap:
+            continue
+        counts[key] += 1
+        capped.append(doc)
+    return capped
+
+
 _DOCS_VERSION_SEG_RE = re.compile(r"^(latest|\d+\.\d+)$")
 
 
@@ -227,6 +253,8 @@ def _apply_pruning(
     docs = _remove_docs_to_ignore(docs=docs)
     # guarantee curated KB/web docs aren't crowded out before the token-budget cut
     docs = ensure_source_diversity(docs)
+    # cap any single source so a chatty one can't monopolize the prompt + citations
+    docs = cap_docs_per_source(docs)
 
     tokens_per_doc: list[int] = []
     final_doc_ind = None

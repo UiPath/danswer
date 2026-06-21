@@ -66,6 +66,15 @@ SOURCE_DIVERSITY_RESERVED_SLOTS = int(
 SOURCE_RESERVED_RETRIEVAL_SLOTS = int(
     os.environ.get("SOURCE_RESERVED_RETRIEVAL_SLOTS") or 0
 )
+# Per-source cap on the FINAL LLM prompt. A chatty source (e.g. a busy Slack
+# channel) can contribute dozens of docs and monopolize what the LLM grounds in
+# and CITES, drowning out curated sources even when those are present and
+# front-ranked. This keeps the top-N (highest-ranked, after source-diversity
+# promotion) docs per source and drops the rest before the token-budget cut, so
+# the model sees a balanced set and cites across sources. 0 = disabled (no cap).
+# Generic: applies to every assistant + both flows, and only binds when one
+# source dominates (single-source assistants are unaffected).
+MAX_PROMPT_DOCS_PER_SOURCE = int(os.environ.get("MAX_PROMPT_DOCS_PER_SOURCE") or 0)
 # Versioned-docs dedup at final doc selection. Documentation sites publish the
 # SAME page under one URL per product version (e.g. docs.uipath.com/.../2024.10/…
 # and /.../2023.10/… and /.../2.2510/…). Retrieval then floods the LLM context
