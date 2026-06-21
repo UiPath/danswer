@@ -360,8 +360,7 @@ class SearchPipeline:
 
         # Restrict to protected sources, intersected with any existing source filter
         # so we never widen scope. ACL + document_set fence are preserved as-is.
-        supp_query = self.search_query.copy(deep=True)
-        existing_src = supp_query.filters.source_type
+        existing_src = self.search_query.filters.source_type
         allowed = (
             [s for s in protected_ds if s in existing_src]
             if existing_src
@@ -369,8 +368,12 @@ class SearchPipeline:
         )
         if not allowed:
             return chunks
-        supp_query.filters.source_type = allowed
-        supp_query.num_hits = max(reserved * 4, 10)
+        # SearchQuery / IndexFilters are immutable (frozen pydantic) — rebuild via
+        # copy(update=...) rather than mutating in place.
+        supp_filters = self.search_query.filters.copy(update={"source_type": allowed})
+        supp_query = self.search_query.copy(
+            update={"filters": supp_filters, "num_hits": max(reserved * 4, 10)}
+        )
 
         supp_chunks = retrieve_chunks(
             query=supp_query,
