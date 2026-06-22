@@ -35,11 +35,11 @@ def test_returns_authoritative_when_none_cited():
     assert [d.document_id for d in out] == ["os1", "w1"]
 
 
-def test_gate_skips_when_any_authoritative_already_cited():
-    # If the answer already cites ANY authoritative source, do nothing (no candidates).
+def test_surfaces_uncited_authoritative_even_when_another_is_cited():
+    # Citing one authoritative doc must NOT suppress a different uncited one.
     docs = [doc("os1", "outsystems"), doc("os2", "outsystems"), doc("w1", "web")]
     out = ar.select_authoritative_candidates(docs, already_cited_doc_ids={"os2"})
-    assert out == []
+    assert [d.document_id for d in out] == ["os1", "w1"]  # os2 cited; os1, w1 surfaced
 
 
 def test_dedupes_same_document_id():

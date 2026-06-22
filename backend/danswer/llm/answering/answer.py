@@ -512,11 +512,11 @@ class Answer:
                     cited_doc_ids.add(packet.document_id)
                 yield packet
 
-            # Verify-then-retain: if the answer cited NO authoritative source, a
-            # single batched call checks whether any promoted authoritative doc
-            # supports it; supporting ones are appended as an "Authoritative
-            # sources" footer. No-op (and no LLM call) when an authoritative source
-            # was already cited or none are present.
+            # Verify-then-retain: for any relevant authoritative doc the LLM left
+            # UNCITED, a single batched call checks whether it's a relevant
+            # authoritative reference; relevant ones are appended as an
+            # "Authoritative sources" footer. No-op (and no LLM call) when there are
+            # no uncited authoritative docs in context.
             if AUTHORITATIVE_CITATION_RETENTION_ENABLED and final_context_docs:
                 footer = retained_authoritative_footer(
                     answer="".join(answer_parts),

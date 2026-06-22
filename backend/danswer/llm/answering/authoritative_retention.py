@@ -57,28 +57,24 @@ def select_authoritative_candidates(
     final_context_docs: list[LlmDoc],
     already_cited_doc_ids: set[str],
 ) -> list[LlmDoc]:
-    """Candidate authoritative docs to consider retaining — but ONLY when the answer
-    is missing authoritative sources entirely.
+    """Authoritative (PROTECTED_SOURCES) docs in the prompt that the LLM did NOT
+    cite — candidates for the relevance-verify step.
 
-    Gate: if the LLM already cited ANY authoritative (PROTECTED_SOURCES) doc, the
-    answer is already grounded in an authoritative source, so we do nothing (return
-    [] → no verify call). Only when NO authoritative source was cited do we return
-    the authoritative docs that were in the prompt (deduped by document_id, link
-    required) as candidates. Pure (no I/O)."""
+    We surface a relevant authoritative doc the LLM left out **even if it cited some
+    other authoritative source** — citing one KB article shouldn't suppress a
+    different, relevant docs/web page the answer also draws on. (We tried a tighter
+    "skip if any authoritative was cited" gate to save the verify call, but it hid
+    exactly these docs, so it was loosened.) Deduped by document_id; link required;
+    pure (no I/O). Empty → no verify call."""
     protected = set(PROTECTED_SOURCES)
-    authoritative = [
-        doc
-        for doc in final_context_docs
-        if _source_value(doc) in protected and doc.link
-    ]
-    # The answer already has an authoritative citation → leave it alone.
-    if any(doc.document_id in already_cited_doc_ids for doc in authoritative):
-        return []
-
     out: list[LlmDoc] = []
     seen: set[str] = set()
-    for doc in authoritative:
-        if doc.document_id in seen:
+    for doc in final_context_docs:
+        if _source_value(doc) not in protected:
+            continue
+        if doc.document_id in already_cited_doc_ids or doc.document_id in seen:
+            continue
+        if not doc.link:
             continue
         seen.add(doc.document_id)
         out.append(doc)
