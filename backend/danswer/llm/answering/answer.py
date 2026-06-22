@@ -14,7 +14,7 @@ from danswer.chat.models import DanswerAnswerPiece
 from danswer.chat.models import LlmDoc
 from danswer.configs.chat_configs import AUTHORITATIVE_CITATION_RETENTION_ENABLED
 from danswer.llm.answering.authoritative_retention import (
-    retained_authoritative_citations,
+    retained_authoritative_footer,
 )
 from danswer.configs.chat_configs import QA_PROMPT_OVERRIDE
 from danswer.file_store.utils import InMemoryChatFile
@@ -514,18 +514,18 @@ class Answer:
 
             # Verify-then-retain: if the answer cited NO authoritative source, a
             # single batched call checks whether any promoted authoritative doc
-            # supports it; supporting ones are injected as citations into the SAME
-            # "Sources" section (at the top, since they sit at context positions
-            # 1-3). No-op (and no LLM call) when an authoritative source was already
-            # cited or none are present.
+            # supports it; supporting ones are appended as an "Authoritative
+            # sources" footer. No-op (and no LLM call) when an authoritative source
+            # was already cited or none are present.
             if AUTHORITATIVE_CITATION_RETENTION_ENABLED and final_context_docs:
-                for citation in retained_authoritative_citations(
+                footer = retained_authoritative_footer(
                     answer="".join(answer_parts),
                     final_context_docs=final_context_docs,
                     already_cited_doc_ids=cited_doc_ids,
                     llm=self.llm,
-                ):
-                    yield citation
+                )
+                if footer:
+                    yield DanswerAnswerPiece(answer_piece=footer)
 
         processed_stream = []
         for processed_packet in _process_stream(output_generator):

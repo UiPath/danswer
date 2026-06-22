@@ -19,7 +19,6 @@ which renders in both the chat UI and Slack.
 import json
 import re
 
-from danswer.chat.models import CitationInfo
 from danswer.chat.models import LlmDoc
 from danswer.configs.chat_configs import PROTECTED_SOURCES
 from danswer.llm.interfaces import LLM
@@ -133,45 +132,38 @@ def verify_supporting_docs(
     return []
 
 
-def _context_position_map(final_context_docs: list[LlmDoc]) -> dict[str, int]:
-    """document_id -> 1-based position in the prompt = the citation number the
-    citation processor uses (context_docs[n-1]). First occurrence wins (matches
-    translate_citations, which always uses the first instance of a document_id)."""
-    pos: dict[str, int] = {}
-    for i, doc in enumerate(final_context_docs):
-        if doc.document_id not in pos:
-            pos[doc.document_id] = i + 1
-    return pos
+def build_authoritative_footer(docs: list[LlmDoc]) -> str:
+    """Markdown footer of verified authoritative sources (renders in chat + Slack).
+
+    Rendered as its own labelled block rather than merged into the numbered Sources
+    cards: citation numbers ARE context positions and the LLM already owns the low
+    ones, so injecting into that list either collides (de-duped away) or can't be
+    placed at the top without renumbering the LLM's inline citations. A footer
+    sidesteps that and surfaces the link unambiguously."""
+    if not docs:
+        return ""
+    lines = "\n".join(f"- [{d.semantic_identifier}]({d.link})" for d in docs)
+    return f"\n\n**Authoritative sources:**\n{lines}"
 
 
-def retained_authoritative_citations(
+def retained_authoritative_footer(
     answer: str,
     final_context_docs: list[LlmDoc],
     already_cited_doc_ids: set[str],
     llm: LLM,
-) -> list[CitationInfo]:
-    """candidates → verify → CitationInfo. Returns the citations to inject into the
-    SAME "Sources" section (no separate footer). citation_num is the doc's prompt
-    position — and since authoritative docs are promoted to the front (positions
-    1-3), they sort to the top of the section. Empty (and NO LLM call) when the
+) -> str:
+    """candidates → verify → footer. Returns "" (and makes NO LLM call) when the
     answer already cites an authoritative source or none are present."""
     candidates = select_authoritative_candidates(
         final_context_docs, already_cited_doc_ids
     )
     if not candidates:
-        return []
+        return ""
     supporting = verify_supporting_docs(answer, candidates, llm)
-    if not supporting:
-        return []
-    pos = _context_position_map(final_context_docs)
-    citations = [
-        CitationInfo(citation_num=pos[d.document_id], document_id=d.document_id)
-        for d in supporting
-        if d.document_id in pos
-    ]
-    logger.info(
-        "authoritative retention: injected %d source(s) into Sources: %s",
-        len(citations),
-        [d.semantic_identifier for d in supporting],
-    )
-    return citations
+    if supporting:
+        logger.info(
+            "authoritative retention: appended %d source(s): %s",
+            len(supporting),
+            [d.semantic_identifier for d in supporting],
+        )
+    return build_authoritative_footer(supporting)

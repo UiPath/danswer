@@ -127,26 +127,21 @@ def test_verify_noop_without_candidates_or_answer():
     assert ar.verify_supporting_docs("   ", [doc("os1", "outsystems")], _StubLLM("[1]")) == []
 
 
-# ---- retained_authoritative_citations (merge into Sources, stub LLM) -----------
+# ---- retained_authoritative_footer (footer block, stub LLM) --------------------
 
-def test_injects_verified_doc_with_context_position_as_citation_num():
-    # OutSystems promoted to positions 1,2; slack at 3. None cited.
-    fcd = [doc("os1", "outsystems", "Forma"), doc("os2", "outsystems", "Tax"), doc("s1", "slack")]
-    out = ar.retained_authoritative_citations("ans", fcd, set(), _StubLLM("[1]"))
-    assert len(out) == 1
-    assert out[0].document_id == "os1"
-    assert out[0].citation_num == 1  # context position 1 -> sorts to top of Sources
+def test_footer_appended_for_verified_doc():
+    fcd = [doc("os1", "outsystems", "Forma", link="http://f"), doc("s1", "slack")]
+    out = ar.retained_authoritative_footer("ans", fcd, set(), _StubLLM("[1]"))
+    assert "Authoritative sources" in out and "[Forma](http://f)" in out
 
 
-def test_no_citation_and_no_llm_call_when_authoritative_already_cited():
+def test_footer_empty_and_no_llm_call_when_authoritative_already_cited():
     fcd = [doc("os1", "outsystems"), doc("s1", "slack")]
     llm = _BoomLLM()  # would raise if the verify call ran
-    out = ar.retained_authoritative_citations("ans", fcd, {"os1"}, llm)
-    assert out == []
+    assert ar.retained_authoritative_footer("ans", fcd, {"os1"}, llm) == ""
     assert llm.calls == 0  # gated out before any LLM call
 
 
-def test_no_citation_when_verify_rejects():
+def test_footer_empty_when_verify_rejects():
     fcd = [doc("os1", "outsystems"), doc("s1", "slack")]
-    out = ar.retained_authoritative_citations("ans", fcd, set(), _StubLLM("[]"))
-    assert out == []
+    assert ar.retained_authoritative_footer("ans", fcd, set(), _StubLLM("[]")) == ""
