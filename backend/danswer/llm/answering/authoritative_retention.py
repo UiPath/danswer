@@ -29,8 +29,8 @@ logger = setup_logger()
 
 
 _VERIFY_PROMPT = """\
-You are checking which authoritative reference documents actually support an answer \
-that was already written.
+You are selecting authoritative reference documents to surface as sources for an \
+answer that was already written.
 
 ANSWER:
 {answer}
@@ -38,10 +38,13 @@ ANSWER:
 CANDIDATE AUTHORITATIVE DOCUMENTS:
 {docs}
 
-For EACH candidate, decide whether it directly supports at least one factual \
-statement in the ANSWER above — being on the same topic is NOT enough. Respond with \
-ONLY a JSON array of the numbers of the documents that genuinely support the answer \
-(e.g. [1, 3]). If none do, respond with [].
+For EACH candidate, decide whether it is a RELEVANT authoritative reference for this \
+answer — i.e. it addresses the same subject or scenario and a reader would find it a \
+useful source for this answer. It does NOT need to literally restate or directly \
+support the answer; a relevant guide, setup doc, or reference on the same subject \
+counts. Exclude only documents that are off-topic or about a different subject. \
+Respond with ONLY a JSON array of the numbers of the relevant documents (e.g. \
+[1, 3]); if none are relevant, respond with [].
 """
 
 
@@ -108,9 +111,11 @@ def verify_supporting_docs(
     snippet_chars: int = 600,
     max_attempts: int = 2,
 ) -> list[LlmDoc]:
-    """One batched LLM call: which candidates support the answer? Retries once on a
-    transient failure (the gateway non-streaming completion occasionally times out),
-    then fails closed (returns [] → no footer) so we never append on a real error."""
+    """One batched LLM call: which candidates are relevant authoritative references
+    for the answer (same subject/scenario; need not literally restate it)? Retries
+    once on a transient failure (the gateway non-streaming completion occasionally
+    times out), then fails closed (returns [] → no footer) so we never append on a
+    real error."""
     if not candidates or not answer.strip():
         return []
     docs_str = "\n".join(
