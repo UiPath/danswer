@@ -12,6 +12,10 @@ from danswer.chat.models import AnswerQuestionPossibleReturn
 from danswer.chat.models import CitationInfo
 from danswer.chat.models import DanswerAnswerPiece
 from danswer.chat.models import LlmDoc
+from danswer.configs.chat_configs import AUTHORITATIVE_CITATION_RETENTION_ENABLED
+from danswer.llm.answering.authoritative_retention import (
+    retained_authoritative_footer,
+)
 from danswer.configs.chat_configs import QA_PROMPT_OVERRIDE
 from danswer.file_store.utils import InMemoryChatFile
 from danswer.llm.answering.models import AnswerStyleConfig
@@ -497,7 +501,29 @@ class Answer:
                     yield cast(str, message)
                 yield from cast(Iterator[str], stream)
 
-            yield from process_answer_stream_fn(_stream())
+            # Accumulate the answer text + which docs the LLM cited, so we can run
+            # the (additive, deduped) authoritative-citation retention afterwards.
+            answer_parts: list[str] = []
+            cited_doc_ids: set[str] = set()
+            for packet in process_answer_stream_fn(_stream()):
+                if isinstance(packet, DanswerAnswerPiece) and packet.answer_piece:
+                    answer_parts.append(packet.answer_piece)
+                elif isinstance(packet, CitationInfo):
+                    cited_doc_ids.add(packet.document_id)
+                yield packet
+
+            # Verify-then-retain: append authoritative-source links the LLM didn't
+            # cite but that a single batched call confirms support the answer. No-op
+            # (and no LLM call) unless an uncited authoritative doc is in context.
+            if AUTHORITATIVE_CITATION_RETENTION_ENABLED and final_context_docs:
+                footer = retained_authoritative_footer(
+                    answer="".join(answer_parts),
+                    final_context_docs=final_context_docs,
+                    already_cited_doc_ids=cited_doc_ids,
+                    llm=self.llm,
+                )
+                if footer:
+                    yield DanswerAnswerPiece(answer_piece=footer)
 
         processed_stream = []
         for processed_packet in _process_stream(output_generator):
