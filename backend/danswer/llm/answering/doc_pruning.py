@@ -4,6 +4,9 @@ from collections import defaultdict
 from copy import deepcopy
 from typing import TypeVar
 
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
 from danswer.chat.models import (
     LlmDoc,
 )
@@ -13,6 +16,7 @@ from danswer.configs.chat_configs import PROTECTED_SOURCES
 from danswer.configs.chat_configs import SOURCE_DIVERSITY_RESERVED_SLOTS
 from danswer.configs.constants import IGNORE_FOR_QA
 from danswer.configs.model_configs import DOC_EMBEDDING_CONTEXT_SIZE
+from danswer.db.models import Document
 from danswer.llm.answering.models import DocumentPruningConfig
 from danswer.llm.answering.models import PromptConfig
 from danswer.llm.answering.prompts.citations_prompt import compute_max_document_tokens
@@ -165,6 +169,68 @@ def _docs_page_and_version(url: str | None) -> tuple[str, str] | None:
             page_key = "/".join(parts[:i] + parts[i + 1 :])
             return page_key, seg
     return None
+
+
+def _versioned_url_parts(url: str | None) -> tuple[str, str, str] | None:
+    """(prefix, version, suffix) for a versioned docs URL, else None. The page is
+    identified by prefix + suffix (version segment stripped); any version's URL is
+    rebuilt as f"{prefix}/{version}/{suffix}". Scoped by DOCS_VERSION_DEDUP_URL_SUBSTR."""
+    if not url or not DOCS_VERSION_DEDUP_URL_SUBSTR:
+        return None
+    if DOCS_VERSION_DEDUP_URL_SUBSTR not in url:
+        return None
+    parts = url.split("/")
+    for i, seg in enumerate(parts):
+        if _DOCS_VERSION_SEG_RE.match(seg):
+            return "/".join(parts[:i]), seg, "/".join(parts[i + 1 :])
+    return None
+
+
+def rewrite_docs_links_to_latest(docs: list[LlmDoc], db_session: Session) -> None:
+    """Rewrite each versioned docs link to the NEWEST version of that SAME page that
+    exists in the index (same URL with the version path-segment stripped; slug kept).
+
+    Query-time fix for retrieval surfacing a stale version when newer ones are
+    indexed: the version dedup only collapses versions that were *retrieved*, so a
+    page whose only retrieved chunk is an old version stays old. Here we look up the
+    newest indexed version of that page and rewrite the link to it. Mutates `docs`
+    in place; no-op for non-docs links and when no newer indexed version exists.
+    """
+    pages: set[tuple[str, str]] = set()
+    for doc in docs:
+        pv = _versioned_url_parts(doc.link)
+        if pv:
+            pages.add((pv[0], pv[2]))
+    if not pages:
+        return
+
+    # Newest indexed version per (prefix, suffix) page. One prefix-scan per distinct
+    # prefix (PK-indexed LIKE 'prefix%'), then match the exact page in Python.
+    latest: dict[tuple[str, str], tuple[str, str]] = {}
+    for prefix in {p for p, _ in pages}:
+        rows = db_session.execute(
+            select(Document.id).where(Document.id.like(f"{prefix}/%"))
+        ).all()
+        for (doc_id,) in rows:
+            pv = _versioned_url_parts(doc_id)
+            if pv is None:
+                continue
+            key = (pv[0], pv[2])
+            if key not in pages:
+                continue
+            cur = latest.get(key)
+            if cur is None or _docs_version_sort_key(pv[1]) > _docs_version_sort_key(
+                cur[0]
+            ):
+                latest[key] = (pv[1], doc_id)
+
+    for doc in docs:
+        pv = _versioned_url_parts(doc.link)
+        if pv is None:
+            continue
+        best = latest.get((pv[0], pv[2]))
+        if best and _docs_version_sort_key(best[0]) > _docs_version_sort_key(pv[1]):
+            doc.link = best[1]
 
 
 def _docs_version_sort_key(token: str) -> tuple[int, int, int]:
