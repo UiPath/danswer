@@ -91,9 +91,15 @@ def parse_supporting_indices(raw: str, n: int) -> list[int]:
 
 
 def verify_supporting_docs(
-    answer: str, candidates: list[LlmDoc], llm: LLM, snippet_chars: int = 600
+    answer: str,
+    candidates: list[LlmDoc],
+    llm: LLM,
+    snippet_chars: int = 600,
+    max_attempts: int = 2,
 ) -> list[LlmDoc]:
-    """One batched LLM call: which candidates support the answer? Fail-closed."""
+    """One batched LLM call: which candidates support the answer? Retries once on a
+    transient failure (the gateway non-streaming completion occasionally times out),
+    then fails closed (returns [] → no footer) so we never append on a real error."""
     if not candidates or not answer.strip():
         return []
     docs_str = "\n".join(
@@ -101,12 +107,18 @@ def verify_supporting_docs(
         for i, d in enumerate(candidates)
     )
     prompt = _VERIFY_PROMPT.format(answer=answer.strip(), docs=docs_str)
-    try:
-        raw = message_to_string(llm.invoke(prompt))
-    except Exception as e:
-        logger.warning("authoritative retention: verify call failed: %s", e)
-        return []
-    return [candidates[i] for i in parse_supporting_indices(raw, len(candidates))]
+    for attempt in range(1, max_attempts + 1):
+        try:
+            raw = message_to_string(llm.invoke(prompt))
+            return [candidates[i] for i in parse_supporting_indices(raw, len(candidates))]
+        except Exception as e:
+            logger.warning(
+                "authoritative retention: verify call failed (attempt %d/%d): %s",
+                attempt,
+                max_attempts,
+                e,
+            )
+    return []
 
 
 def build_authoritative_footer(docs: list[LlmDoc]) -> str:

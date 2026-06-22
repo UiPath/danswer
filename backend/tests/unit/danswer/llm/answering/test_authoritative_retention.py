@@ -75,7 +75,23 @@ class _StubLLM:
 
 
 class _BoomLLM:
-    def invoke(self, prompt): raise RuntimeError("llm down")
+    def __init__(self): self.calls = 0
+    def invoke(self, prompt):
+        self.calls += 1
+        raise RuntimeError("llm down")
+
+
+class _FlakyLLM:
+    """Fails the first N invokes, then returns `reply`."""
+    def __init__(self, fail_times, reply):
+        self._fail_times = fail_times
+        self._reply = reply
+        self.calls = 0
+    def invoke(self, prompt):
+        self.calls += 1
+        if self.calls <= self._fail_times:
+            raise RuntimeError("transient timeout")
+        return SimpleNamespace(content=self._reply)
 
 
 def test_verify_returns_supporting_docs():
@@ -84,9 +100,19 @@ def test_verify_returns_supporting_docs():
     assert [d.document_id for d in out] == ["os1"]
 
 
-def test_verify_fail_closed_on_llm_error():
+def test_verify_fail_closed_after_exhausting_retries():
     cands = [doc("os1", "outsystems")]
-    assert ar.verify_supporting_docs("answer", cands, _BoomLLM()) == []
+    llm = _BoomLLM()
+    assert ar.verify_supporting_docs("answer", cands, llm, max_attempts=2) == []
+    assert llm.calls == 2  # tried twice, then gave up
+
+
+def test_verify_retries_then_succeeds_on_transient_failure():
+    cands = [doc("os1", "outsystems"), doc("os2", "outsystems")]
+    llm = _FlakyLLM(fail_times=1, reply="[2]")  # first call times out, retry works
+    out = ar.verify_supporting_docs("answer", cands, llm, max_attempts=2)
+    assert [d.document_id for d in out] == ["os2"]
+    assert llm.calls == 2
 
 
 def test_verify_noop_without_candidates_or_answer():
