@@ -13,8 +13,9 @@ from danswer.chat.models import LlmDoc
 from danswer.db.models import Persona
 from danswer.db.models import User
 from danswer.dynamic_configs.interface import JSON_ro
+from danswer.llm.answering.doc_pruning import parse_question_doc_version
 from danswer.llm.answering.doc_pruning import prune_documents
-from danswer.llm.answering.doc_pruning import rewrite_docs_links_to_latest
+from danswer.llm.answering.doc_pruning import rewrite_docs_links
 from danswer.llm.answering.models import DocumentPruningConfig
 from danswer.llm.answering.models import PreviousMessage
 from danswer.llm.answering.models import PromptConfig
@@ -274,9 +275,14 @@ class SearchTool(Tool):
             question=query,
             document_pruning_config=self.pruning_config,
         )
-        # Rewrite stale versioned-docs links to the newest indexed version of the
-        # same page (retrieval can surface an old version when newer ones exist).
-        rewrite_docs_links_to_latest(final_context_documents, self.db_session)
+        # Rewrite versioned-docs links to the right version of the same page: the
+        # version the question asked about if it named one, else the newest indexed
+        # (retrieval can surface an arbitrary/stale version when several exist).
+        rewrite_docs_links(
+            final_context_documents,
+            self.db_session,
+            target_version=parse_question_doc_version(query),
+        )
         yield ToolResponse(id=FINAL_CONTEXT_DOCUMENTS, response=final_context_documents)
 
     def final_result(self, *args: ToolResponse) -> JSON_ro:

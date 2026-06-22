@@ -49,14 +49,14 @@ def test_versioned_url_parts():
 def test_rewrites_to_latest_indexed_version():
     index = [f"{BASE}/2023.4/{PAGE}", f"{BASE}/2023.10/{PAGE}", f"{BASE}/2025.10/{PAGE}"]
     docs = [ldoc(f"{BASE}/2023.4/{PAGE}")]
-    dp.rewrite_docs_links_to_latest(docs, _FakeDB(index))
+    dp.rewrite_docs_links(docs, _FakeDB(index))
     assert docs[0].link == f"{BASE}/2025.10/{PAGE}"
 
 
 def test_noop_when_already_latest():
     index = [f"{BASE}/2023.10/{PAGE}", f"{BASE}/2025.10/{PAGE}"]
     docs = [ldoc(f"{BASE}/2025.10/{PAGE}")]
-    dp.rewrite_docs_links_to_latest(docs, _FakeDB(index))
+    dp.rewrite_docs_links(docs, _FakeDB(index))
     assert docs[0].link == f"{BASE}/2025.10/{PAGE}"
 
 
@@ -65,7 +65,7 @@ def test_does_not_cross_slug_variants():
     other = "installation-guide/is-maintenance-considerations"
     index = [f"{BASE}/2025.10/{other}", f"{BASE}/2023.4/{PAGE}"]
     docs = [ldoc(f"{BASE}/2023.4/{PAGE}")]
-    dp.rewrite_docs_links_to_latest(docs, _FakeDB(index))
+    dp.rewrite_docs_links(docs, _FakeDB(index))
     # no newer version of THIS slug -> unchanged
     assert docs[0].link == f"{BASE}/2023.4/{PAGE}"
 
@@ -73,7 +73,7 @@ def test_does_not_cross_slug_variants():
 def test_non_docs_link_untouched():
     docs = [ldoc("https://Product.slack.com/archives/C1/p123")]
     db = _FakeDB([])
-    dp.rewrite_docs_links_to_latest(docs, db)
+    dp.rewrite_docs_links(docs, db)
     assert docs[0].link == "https://Product.slack.com/archives/C1/p123"
     assert db.calls == 0  # no docs pages -> no query
 
@@ -81,5 +81,32 @@ def test_non_docs_link_untouched():
 def test_new_scheme_outranks_old():
     index = [f"{BASE}/2025.10/{PAGE}", f"{BASE}/2.2510/{PAGE}"]  # 2.2510 = new scheme
     docs = [ldoc(f"{BASE}/2025.10/{PAGE}")]
-    dp.rewrite_docs_links_to_latest(docs, _FakeDB(index))
+    dp.rewrite_docs_links(docs, _FakeDB(index))
     assert docs[0].link == f"{BASE}/2.2510/{PAGE}"
+
+
+# ---- version-aware targeting ---------------------------------------------------
+
+def test_parse_question_doc_version():
+    assert dp.parse_question_doc_version("is this supported in 23.10?") == "2023.10"
+    assert dp.parse_question_doc_version("on Orchestrator 2024.10 standalone") == "2024.10"
+    # multiple versions -> ambiguous -> None (fall back to latest)
+    assert dp.parse_question_doc_version("upgrade from 23.10 to 25.10") is None
+    # no version
+    assert dp.parse_question_doc_version("how many records can AuditLogEntities hold") is None
+    # not confused by '2.9 million'
+    assert dp.parse_question_doc_version("the table has 2.9 million records") is None
+
+
+def test_targets_requested_version_even_if_older():
+    index = [f"{BASE}/2023.10/{PAGE}", f"{BASE}/2025.10/{PAGE}"]
+    docs = [ldoc(f"{BASE}/2025.10/{PAGE}")]  # retrieved latest
+    dp.rewrite_docs_links(docs, _FakeDB(index), target_version="2023.10")
+    assert docs[0].link == f"{BASE}/2023.10/{PAGE}"  # downgraded to the asked version
+
+
+def test_target_version_not_indexed_leaves_link_as_is():
+    index = [f"{BASE}/2023.10/{PAGE}", f"{BASE}/2025.10/{PAGE}"]
+    docs = [ldoc(f"{BASE}/2025.10/{PAGE}")]
+    dp.rewrite_docs_links(docs, _FakeDB(index), target_version="2022.4")  # not indexed
+    assert docs[0].link == f"{BASE}/2025.10/{PAGE}"  # unchanged

@@ -186,15 +186,39 @@ def _versioned_url_parts(url: str | None) -> tuple[str, str, str] | None:
     return None
 
 
-def rewrite_docs_links_to_latest(docs: list[LlmDoc], db_session: Session) -> None:
-    """Rewrite each versioned docs link to the NEWEST version of that SAME page that
-    exists in the index (same URL with the version path-segment stripped; slug kept).
+# Version mentioned in a user question: "23.10", "2023.10", "24.10", etc. We treat
+# a 2-digit year as 20YY ("23.10" -> "2023.10").
+_QUESTION_VERSION_RE = re.compile(r"\b(20\d{2}|\d{2})\.(\d{1,2})\b")
 
-    Query-time fix for retrieval surfacing a stale version when newer ones are
-    indexed: the version dedup only collapses versions that were *retrieved*, so a
-    page whose only retrieved chunk is an old version stays old. Here we look up the
-    newest indexed version of that page and rewrite the link to it. Mutates `docs`
-    in place; no-op for non-docs links and when no newer indexed version exists.
+
+def parse_question_doc_version(question: str | None) -> str | None:
+    """Return a normalized docs version token (e.g. '2023.10') IFF the question names
+    exactly ONE version; None when zero or multiple are mentioned (ambiguous — e.g.
+    'upgrade from 23.10 to 25.10' — so we don't guess and fall back to latest)."""
+    found: set[str] = set()
+    for m in _QUESTION_VERSION_RE.finditer(question or ""):
+        year = m.group(1)
+        if len(year) == 2:
+            year = "20" + year
+        found.add(f"{year}.{int(m.group(2))}")  # int() drops any leading zero in minor
+    return next(iter(found)) if len(found) == 1 else None
+
+
+def rewrite_docs_links(
+    docs: list[LlmDoc], db_session: Session, target_version: str | None = None
+) -> None:
+    """Rewrite each versioned docs link to the right version of that SAME page (same
+    URL with the version path-segment stripped; slug kept):
+
+    - `target_version` set (the question named one version): rewrite to THAT version
+      if it's indexed for the page — even if it's older than what was retrieved
+      (answering 'is X supported in 23.10' must point at the 23.10 doc, not latest).
+      If that version isn't indexed for the page, leave the link as-is.
+    - `target_version` None (version-agnostic question): rewrite to the NEWEST indexed
+      version, and only when it's newer than what was retrieved.
+
+    Mutates `docs` in place; no-op for non-docs links. One PK-indexed prefix-scan per
+    distinct page-prefix.
     """
     pages: set[tuple[str, str]] = set()
     for doc in docs:
@@ -204,9 +228,8 @@ def rewrite_docs_links_to_latest(docs: list[LlmDoc], db_session: Session) -> Non
     if not pages:
         return
 
-    # Newest indexed version per (prefix, suffix) page. One prefix-scan per distinct
-    # prefix (PK-indexed LIKE 'prefix%'), then match the exact page in Python.
-    latest: dict[tuple[str, str], tuple[str, str]] = {}
+    # (prefix, suffix) page -> {version_token: full_url} of every indexed version.
+    page_versions: dict[tuple[str, str], dict[str, str]] = defaultdict(dict)
     for prefix in {p for p, _ in pages}:
         rows = db_session.execute(
             select(Document.id).where(Document.id.like(f"{prefix}/%"))
@@ -216,21 +239,24 @@ def rewrite_docs_links_to_latest(docs: list[LlmDoc], db_session: Session) -> Non
             if pv is None:
                 continue
             key = (pv[0], pv[2])
-            if key not in pages:
-                continue
-            cur = latest.get(key)
-            if cur is None or _docs_version_sort_key(pv[1]) > _docs_version_sort_key(
-                cur[0]
-            ):
-                latest[key] = (pv[1], doc_id)
+            if key in pages:
+                page_versions[key][pv[1]] = doc_id
 
     for doc in docs:
         pv = _versioned_url_parts(doc.link)
         if pv is None:
             continue
-        best = latest.get((pv[0], pv[2]))
-        if best and _docs_version_sort_key(best[0]) > _docs_version_sort_key(pv[1]):
-            doc.link = best[1]
+        versions = page_versions.get((pv[0], pv[2]))
+        if not versions:
+            continue
+        if target_version is not None:
+            if target_version in versions:
+                doc.link = versions[target_version]  # exact match (may be older)
+            # else: requested version not indexed for this page -> leave as-is
+        else:
+            newest = max(versions, key=_docs_version_sort_key)
+            if _docs_version_sort_key(newest) > _docs_version_sort_key(pv[1]):
+                doc.link = versions[newest]
 
 
 def _docs_version_sort_key(token: str) -> tuple[int, int, int]:
