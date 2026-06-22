@@ -24,15 +24,22 @@ def _cfg(monkeypatch):
 
 # ---- select_authoritative_candidates -------------------------------------------
 
-def test_selects_only_uncited_protected_docs():
+def test_returns_authoritative_when_none_cited():
     docs = [
         doc("os1", "outsystems"),
         doc("s1", "slack"),            # not protected
-        doc("os2", "outsystems"),
         doc("w1", "web"),
     ]
+    out = ar.select_authoritative_candidates(docs, already_cited_doc_ids={"s1"})
+    # slack cited is fine (not authoritative); both authoritative docs are candidates
+    assert [d.document_id for d in out] == ["os1", "w1"]
+
+
+def test_gate_skips_when_any_authoritative_already_cited():
+    # If the answer already cites ANY authoritative source, do nothing (no candidates).
+    docs = [doc("os1", "outsystems"), doc("os2", "outsystems"), doc("w1", "web")]
     out = ar.select_authoritative_candidates(docs, already_cited_doc_ids={"os2"})
-    assert [d.document_id for d in out] == ["os1", "w1"]  # os2 already cited, slack dropped
+    assert out == []
 
 
 def test_dedupes_same_document_id():
@@ -120,9 +127,26 @@ def test_verify_noop_without_candidates_or_answer():
     assert ar.verify_supporting_docs("   ", [doc("os1", "outsystems")], _StubLLM("[1]")) == []
 
 
-# ---- footer --------------------------------------------------------------------
+# ---- retained_authoritative_citations (merge into Sources, stub LLM) -----------
 
-def test_footer_lists_links_and_is_empty_when_none():
-    assert ar.build_authoritative_footer([]) == ""
-    out = ar.build_authoritative_footer([doc("os1", "outsystems", "Forma", link="http://f")])
-    assert "Authoritative sources" in out and "[Forma](http://f)" in out
+def test_injects_verified_doc_with_context_position_as_citation_num():
+    # OutSystems promoted to positions 1,2; slack at 3. None cited.
+    fcd = [doc("os1", "outsystems", "Forma"), doc("os2", "outsystems", "Tax"), doc("s1", "slack")]
+    out = ar.retained_authoritative_citations("ans", fcd, set(), _StubLLM("[1]"))
+    assert len(out) == 1
+    assert out[0].document_id == "os1"
+    assert out[0].citation_num == 1  # context position 1 -> sorts to top of Sources
+
+
+def test_no_citation_and_no_llm_call_when_authoritative_already_cited():
+    fcd = [doc("os1", "outsystems"), doc("s1", "slack")]
+    llm = _BoomLLM()  # would raise if the verify call ran
+    out = ar.retained_authoritative_citations("ans", fcd, {"os1"}, llm)
+    assert out == []
+    assert llm.calls == 0  # gated out before any LLM call
+
+
+def test_no_citation_when_verify_rejects():
+    fcd = [doc("os1", "outsystems"), doc("s1", "slack")]
+    out = ar.retained_authoritative_citations("ans", fcd, set(), _StubLLM("[]"))
+    assert out == []

@@ -19,6 +19,7 @@ which renders in both the chat UI and Slack.
 import json
 import re
 
+from danswer.chat.models import CitationInfo
 from danswer.chat.models import LlmDoc
 from danswer.configs.chat_configs import PROTECTED_SOURCES
 from danswer.llm.interfaces import LLM
@@ -54,17 +55,28 @@ def select_authoritative_candidates(
     final_context_docs: list[LlmDoc],
     already_cited_doc_ids: set[str],
 ) -> list[LlmDoc]:
-    """Authoritative-source docs that are in the prompt but the LLM did NOT cite.
-    Deduped by document_id; only docs with a renderable link. Pure (no I/O)."""
+    """Candidate authoritative docs to consider retaining — but ONLY when the answer
+    is missing authoritative sources entirely.
+
+    Gate: if the LLM already cited ANY authoritative (PROTECTED_SOURCES) doc, the
+    answer is already grounded in an authoritative source, so we do nothing (return
+    [] → no verify call). Only when NO authoritative source was cited do we return
+    the authoritative docs that were in the prompt (deduped by document_id, link
+    required) as candidates. Pure (no I/O)."""
     protected = set(PROTECTED_SOURCES)
+    authoritative = [
+        doc
+        for doc in final_context_docs
+        if _source_value(doc) in protected and doc.link
+    ]
+    # The answer already has an authoritative citation → leave it alone.
+    if any(doc.document_id in already_cited_doc_ids for doc in authoritative):
+        return []
+
     out: list[LlmDoc] = []
     seen: set[str] = set()
-    for doc in final_context_docs:
-        if _source_value(doc) not in protected:
-            continue
-        if doc.document_id in already_cited_doc_ids or doc.document_id in seen:
-            continue
-        if not doc.link:
+    for doc in authoritative:
+        if doc.document_id in seen:
             continue
         seen.add(doc.document_id)
         out.append(doc)
@@ -121,32 +133,45 @@ def verify_supporting_docs(
     return []
 
 
-def build_authoritative_footer(docs: list[LlmDoc]) -> str:
-    """Markdown footer of verified authoritative sources (renders in chat + Slack)."""
-    if not docs:
-        return ""
-    lines = "\n".join(f"- [{d.semantic_identifier}]({d.link})" for d in docs)
-    return f"\n\n**Authoritative sources:**\n{lines}"
+def _context_position_map(final_context_docs: list[LlmDoc]) -> dict[str, int]:
+    """document_id -> 1-based position in the prompt = the citation number the
+    citation processor uses (context_docs[n-1]). First occurrence wins (matches
+    translate_citations, which always uses the first instance of a document_id)."""
+    pos: dict[str, int] = {}
+    for i, doc in enumerate(final_context_docs):
+        if doc.document_id not in pos:
+            pos[doc.document_id] = i + 1
+    return pos
 
 
-def retained_authoritative_footer(
+def retained_authoritative_citations(
     answer: str,
     final_context_docs: list[LlmDoc],
     already_cited_doc_ids: set[str],
     llm: LLM,
-) -> str:
-    """candidates → verify → footer. Returns "" when there's nothing to add (and
-    makes NO LLM call in that case)."""
+) -> list[CitationInfo]:
+    """candidates → verify → CitationInfo. Returns the citations to inject into the
+    SAME "Sources" section (no separate footer). citation_num is the doc's prompt
+    position — and since authoritative docs are promoted to the front (positions
+    1-3), they sort to the top of the section. Empty (and NO LLM call) when the
+    answer already cites an authoritative source or none are present."""
     candidates = select_authoritative_candidates(
         final_context_docs, already_cited_doc_ids
     )
     if not candidates:
-        return ""
+        return []
     supporting = verify_supporting_docs(answer, candidates, llm)
-    if supporting:
-        logger.info(
-            "authoritative retention: appended %d source(s): %s",
-            len(supporting),
-            [d.semantic_identifier for d in supporting],
-        )
-    return build_authoritative_footer(supporting)
+    if not supporting:
+        return []
+    pos = _context_position_map(final_context_docs)
+    citations = [
+        CitationInfo(citation_num=pos[d.document_id], document_id=d.document_id)
+        for d in supporting
+        if d.document_id in pos
+    ]
+    logger.info(
+        "authoritative retention: injected %d source(s) into Sources: %s",
+        len(citations),
+        [d.semantic_identifier for d in supporting],
+    )
+    return citations
