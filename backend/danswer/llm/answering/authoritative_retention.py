@@ -30,22 +30,21 @@ logger = setup_logger()
 
 _VERIFY_PROMPT = """\
 You are selecting authoritative reference documents to surface as sources for an \
-answer that was already written.
+answer that was already written. For each candidate you are given the PASSAGE from \
+that document that the search actually matched — judge from that passage.
 
 ANSWER:
 {answer}
 
-CANDIDATE AUTHORITATIVE DOCUMENTS:
+CANDIDATE AUTHORITATIVE DOCUMENTS (matched passage shown):
 {docs}
 
-For EACH candidate, decide whether it is genuinely about the SAME SPECIFIC topic or \
-feature the answer addresses, such that a reader would treat it as a real reference \
-for THIS answer. It need not literally restate the answer, but it must be about the \
-same specific subject. Being from the same product or product area is NOT enough — a \
-document about a different feature, component, or service is NOT a relevant reference \
-even if it mentions the same product. When unsure, exclude. Respond with ONLY a JSON \
-array of the numbers of the genuinely relevant documents (e.g. [1, 3]); if none \
-qualify, respond with [].
+For EACH candidate, use its matched passage to decide whether the document genuinely \
+addresses the subject of this answer and would be a useful authoritative reference \
+for it. Include it when the passage is about the same topic the answer addresses; \
+exclude it when the passage is about a different feature, component, or topic (being \
+from the same product is not enough). Respond with ONLY a JSON array of the numbers \
+of the relevant documents (e.g. [1, 3]); if none qualify, respond with [].
 """
 
 
@@ -105,18 +104,21 @@ def verify_supporting_docs(
     answer: str,
     candidates: list[LlmDoc],
     llm: LLM,
-    snippet_chars: int = 600,
+    snippet_chars: int = 4000,
     max_attempts: int = 2,
 ) -> list[LlmDoc]:
     """One batched LLM call: which candidates are relevant authoritative references
-    for the answer (same subject/scenario; need not literally restate it)? Retries
-    once on a transient failure (the gateway non-streaming completion occasionally
-    times out), then fails closed (returns [] → no footer) so we never append on a
-    real error."""
+    for the answer? The judgment is made against each doc's MATCHED PASSAGE (the
+    retrieved chunk that scored against the query, i.e. LlmDoc.content) rather than a
+    short title/prefix — this is the reliable signal for relevance, so we pass the
+    full passage (capped generously). The candidate list is small (1-3 after the
+    gate/dedupe), so the extra tokens are bounded. Retries once on a transient
+    failure (the gateway non-streaming completion occasionally times out), then
+    fails closed (returns [] → no footer) so we never append on a real error."""
     if not candidates or not answer.strip():
         return []
-    docs_str = "\n".join(
-        f"{i + 1}. {d.semantic_identifier}: {d.content[:snippet_chars]}"
+    docs_str = "\n\n".join(
+        f"[{i + 1}] {d.semantic_identifier}\nMatched passage: {d.content[:snippet_chars]}"
         for i, d in enumerate(candidates)
     )
     prompt = _VERIFY_PROMPT.format(answer=answer.strip(), docs=docs_str)
