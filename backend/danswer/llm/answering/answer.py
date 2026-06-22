@@ -523,6 +523,7 @@ class Answer:
                     final_context_docs=final_context_docs,
                     already_cited_doc_ids=cited_doc_ids,
                     llm=self.llm,
+                    question=self.question,
                 )
                 if footer:
                     yield DanswerAnswerPiece(answer_piece=footer)

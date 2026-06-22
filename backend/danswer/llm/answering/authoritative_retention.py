@@ -30,21 +30,25 @@ logger = setup_logger()
 
 _VERIFY_PROMPT = """\
 You are selecting authoritative reference documents to surface as sources for an \
-answer that was already written. For each candidate you are given the PASSAGE from \
-that document that the search actually matched — judge from that passage.
+answer to a user's QUESTION. For each candidate you are given the PASSAGE from that \
+document that the search actually matched — judge from that passage.
 
-ANSWER:
+QUESTION:
+{question}
+
+ANSWER GIVEN:
 {answer}
 
 CANDIDATE AUTHORITATIVE DOCUMENTS (matched passage shown):
 {docs}
 
 For EACH candidate, use its matched passage to decide whether the document genuinely \
-addresses the subject of this answer and would be a useful authoritative reference \
-for it. Include it when the passage is about the same topic the answer addresses; \
-exclude it when the passage is about a different feature, component, or topic (being \
-from the same product is not enough). Respond with ONLY a JSON array of the numbers \
-of the relevant documents (e.g. [1, 3]); if none qualify, respond with [].
+helps answer THIS QUESTION — it must address the specific subject the question is \
+about. Sharing a keyword, product, or service name is NOT enough: exclude a document \
+that is really about a different feature, or about troubleshooting a specific error, \
+when that is not what the question asks about. When in doubt, exclude. Respond with \
+ONLY a JSON array of the numbers of the genuinely relevant documents (e.g. [1, 3]); \
+if none qualify, respond with [].
 """
 
 
@@ -104,6 +108,7 @@ def verify_supporting_docs(
     answer: str,
     candidates: list[LlmDoc],
     llm: LLM,
+    question: str = "",
     snippet_chars: int = 4000,
     max_attempts: int = 2,
 ) -> list[LlmDoc]:
@@ -121,7 +126,9 @@ def verify_supporting_docs(
         f"[{i + 1}] {d.semantic_identifier}\nMatched passage: {d.content[:snippet_chars]}"
         for i, d in enumerate(candidates)
     )
-    prompt = _VERIFY_PROMPT.format(answer=answer.strip(), docs=docs_str)
+    prompt = _VERIFY_PROMPT.format(
+        question=(question or "(not provided)").strip(), answer=answer.strip(), docs=docs_str
+    )
     for attempt in range(1, max_attempts + 1):
         try:
             raw = message_to_string(llm.invoke(prompt))
@@ -155,15 +162,18 @@ def retained_authoritative_footer(
     final_context_docs: list[LlmDoc],
     already_cited_doc_ids: set[str],
     llm: LLM,
+    question: str = "",
 ) -> str:
-    """candidates → verify → footer. Returns "" (and makes NO LLM call) when the
-    answer already cites an authoritative source or none are present."""
+    """candidates → verify → footer. Returns "" (and makes NO LLM call) when there
+    are no uncited authoritative candidates. `question` anchors the relevance check
+    to what was actually asked (so docs that merely share a keyword/service with the
+    answer are excluded)."""
     candidates = select_authoritative_candidates(
         final_context_docs, already_cited_doc_ids
     )
     if not candidates:
         return ""
-    supporting = verify_supporting_docs(answer, candidates, llm)
+    supporting = verify_supporting_docs(answer, candidates, llm, question=question)
     if supporting:
         logger.info(
             "authoritative retention: appended %d source(s): %s",
