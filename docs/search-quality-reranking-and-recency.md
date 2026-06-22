@@ -21,7 +21,9 @@ answer quality:
    second, source-filtered Vespa query and merges it, but because Vespa's
    `normalize_linear` scoring is *relative to each query's candidate set*, the
    narrow second query's scores are inflated and `web`/`sfkbarticles` get lifted
-   to the top regardless of true relevance. Default-on for every query.
+   to the top regardless of true relevance. Default-on for every query. (This was
+   removed — but the *recall* goal it served was later restored with a bounded,
+   scope-safe pass that doesn't depend on the inflation artifact; see §5.1.)
 3. **Recency is only a gentle decay** (and the `auto` setting is effectively
    dead — see §4), so there's no real "prefer recent" behavior.
 4. There was **no way to roll any of this out gradually** or compare old vs new.
@@ -146,38 +148,101 @@ from the rerank rollout, and measure independently.
 
 ---
 
-## 5. Source diversity: keeping KB/web from getting lost
+## 5. Source prioritization & authoritative citations
 
-**The requirement:** if a chatty source (e.g. Slack) produces the
-highest-relevance chunks, it shouldn't crowd authoritative **KB/web doc**
-content out of the ~10 chunks that reach the LLM.
+**The requirement:** a chatty source (e.g. a busy Slack channel) shouldn't crowd
+authoritative **curated** content (`web`/docs, `sfkbarticles`, `highspot`,
+`outsystems`) out of the answer — neither out of the prompt nor out of the
+**citations** the user sees.
 
-**What the fork used to do (removed on this branch):** `_query_vespa` ran **two**
-queries and merged them — an all-sources query plus a second, source-filtered
-query — to force `web`/`sfkbarticles` in. That was the wrong mechanism: the rank
-profile uses `normalize_linear(...)`, which is min-max **relative to each query's
-own candidate set**, so the narrow second query's top docs normalized near the
-ceiling **regardless of absolute relevance**. Result: prioritized sources were
-*over-promoted* by a normalization artifact, and because rerank/relevance only
-see the **top-N candidate window**, the inflated ordering polluted what those
-stages got to evaluate.
+This is a **layered pipeline**, all global + config-gated (no per-assistant knob),
+all keyed off **`PROTECTED_SOURCES`** (prod: `web,sfkbarticles,highspot,outsystems`).
+Each layer was added because the prior one was necessary-but-insufficient — they
+move a doc from *retrieved* → *in the prompt* → *cited*. Everything below applies to
+**both** the chat and Slack flows (they share `SearchPipeline` and the `Answer`
+object) and **every** assistant.
 
-**What we do instead:** `_query_vespa` now issues a **single, comparably-scored
-query**, and source diversity is enforced at **final doc selection** —
-`ensure_source_diversity` in `llm/answering/doc_pruning.py` (called from
-`_apply_pruning`, after the relevance reorder, before the token-budget cut):
+> Historical note: the fork once ran a **two-query union** in `_query_vespa` (an
+> all-sources query plus a source-filtered one). It was removed because the rank
+> profile's `normalize_linear(...)` is min-max **relative to each query's candidate
+> set**, so the narrow second query over-promoted its docs regardless of true
+> relevance. The *recall goal* it served is now met by §5.1 — without that bug.
 
-- It promotes up to **`SOURCE_DIVERSITY_RESERVED_SLOTS`** (default **2**) of the
-  highest-ranked **`PROTECTED_SOURCES`** (default `web,sfkbarticles`) docs to the
-  front, preserving the rest of the order. Actual promotion is
-  `min(reserved, #protected docs present)`.
-- It's **always-on and globally configured** (env), operates on the **single
-  comparably-scored** candidate set (no inflation, plays correctly with rerank),
-  and is **not a per-assistant decision** — so it doesn't add an assistant knob.
-- Disable with `SOURCE_DIVERSITY_RESERVED_SLOTS=0`.
+### 5.1 Recall — `SOURCE_RESERVED_RETRIEVAL_SLOTS` (retrieval)
+Final-selection promotion (§5.2) can only reorder docs retrieval already returned.
+When a chatty source saturates the top-`NUM_RETURNED_HITS=50`, a relevant curated
+doc may not be in the candidate set at all. `SearchPipeline._supplement_protected_sources`
+(pure core `protected_source_topup`) runs **one extra source-scoped retrieval** when
+fewer than N protected-source chunks are present, and merges the top results in. It
+reuses the **same filters** as the main query (ACL + persona document-set fence) and
+only **adds** a `source_type` restriction — so it never widens scope; it guarantees
+**presence** (ordering is §5.2, so it doesn't rely on the old normalize artifact).
+prod `=6`, code default `0` (off). *Note: 6 because a relevant protected doc can rank
+#4 among protected sources and miss a smaller cut.*
 
-So the *goal* of the old prioritized-source hack is preserved (KB/web aren't
-lost), without the score-inflation bug and without a per-assistant toggle.
+### 5.2 Prompt position — `SOURCE_DIVERSITY_RESERVED_SLOTS` (final selection)
+`ensure_source_diversity` in `doc_pruning.py` (in `_apply_pruning`, after the
+relevance reorder, before the token cut) promotes up to N of the highest-ranked
+`PROTECTED_SOURCES` docs to the **front** of the prompt, preserving the rest of the
+order. prod `=3` (was 2). Disable with `=0`.
+
+### 5.3 Prompt balance — `MAX_PROMPT_DOCS_PER_SOURCE` (final selection)
+Even with curated docs at the front, a prompt of `3 curated + 49 Slack` lets the LLM
+ground every claim in the dominant source. `cap_docs_per_source` (in `_apply_pruning`,
+after `ensure_source_diversity`) keeps the top-N docs **per source** and drops the
+rest before the token cut. prod `=8`, code default `0`. Only binds when a source
+dominates (single-source assistants unaffected).
+
+### 5.4 Citation preference — authoritative-sources nudge (prompt)
+A soft, global instruction (`build_authoritative_sources_reminder` in
+`prompt_utils.py`, appended to the shared `CITATION_REMINDER` via
+`build_task_prompt_reminders`, derived from `PROTECTED_SOURCES`) asks the model to
+prefer citing authoritative sources over chat discussions when they support the
+point. Soft — it nudges, it doesn't guarantee.
+
+### 5.5 Citation guarantee — verify-then-retain (`AUTHORITATIVE_CITATION_RETENTION_ENABLED`)
+**The hard lesson:** presence/position/balance (5.1–5.3) reliably get curated docs
+*into the prompt and into the answer's content*, but **citation attribution is a
+separate, harder problem**. With curated docs at prompt positions [1][2][3], the LLM
+still cited the near-duplicate Slack threads — and *no* prompt lever (soft nudge,
+mandatory "you MUST cite", grouped output) reliably flipped it (the grouped variant
+even mislabeled). Citations are the LLM's output; a prompt is a request it can ignore.
+
+So we add a **deterministic post-generation step** in `Answer._process_stream`
+(`authoritative_retention.py`): for any **uncited** authoritative doc in context, one
+batched LLM call checks whether it's relevant, and relevant ones are appended as an
+**"Authoritative sources" footer** (markdown links; renders in chat + Slack). It is:
+- **additive** (the LLM's own inline citations are untouched);
+- **gated** to *uncited* authoritative docs — citing one KB doesn't suppress surfacing
+  another relevant docs/web page;
+- **verified on the matched chunk** (`LlmDoc.content`, the retrieved passage, passed
+  whole) against **both the question and the answer** — relevance to the *question*
+  (not just the answer) is what excludes topically-adjacent docs (e.g. an Azure-SignalR
+  or "Automation Cloud cannot be accessed" KB on an "is there AI?" question), while a
+  same-subject doc with a scary "error" title (e.g. a "Migration failed … on upgrade"
+  KB whose body is about pre-upgrade table cleanup) is correctly kept;
+- **conditional + bounded** — at most ONE extra call, only when an uncited
+  authoritative doc is present; retries once on a transient gateway timeout; fail-closed.
+
+> Why a footer and not merged into the numbered "Sources" cards: `citation_num` is
+> the doc's context position and the LLM already owns the low numbers, so injecting a
+> retained doc collides (de-duped away by `translate_citations`, first-wins) and can't
+> be placed "at the top" without renumbering the LLM's inline `[[n]]`. The footer
+> sidesteps that. The footer/`final_context` links *are* rewritten (§5.6); the LLM's
+> inline citation **cards** come from the reference-doc snapshot and are left as-is.
+
+### 5.6 Docs versioning — `rewrite_docs_links` (version-aware)
+The docs.uipath.com connector indexes ~6 versions of every page (2022.4 … 2025.10,
+plus slug variants), with near-identical content — so which version gets retrieved is
+~arbitrary, and the query-time version dedup (`dedupe_doc_versions`) only collapses
+versions that were *retrieved*. `rewrite_docs_links` (in `doc_pruning.py`, called from
+`search_tool` after prune) resolves each versioned docs link to the right version of
+the same page (URL with the version segment stripped, slug kept):
+- if the question names exactly one version (`parse_question_doc_version`: "23.10" →
+  `2023.10`; multiple = ambiguous → None), resolve to **that** version even if older —
+  "is X supported in 23.10?" must point at the 23.10 doc;
+- otherwise resolve to the **newest indexed** version.
+One PK-indexed prefix-scan per page; no reindex.
 
 ---
 
@@ -220,9 +285,12 @@ automatic and globally configured.
 - **LLM relevance filter** is a **single listwise call on the main LLM**
   (`llm_eval_chunks_listwise`, fails open on parse/error), not 15 fast-LLM
   calls. It needs **no GPU**, so it's a cheaper quality tier on its own.
-- **Source diversity** (KB/web protected from being crowded out) is handled
-  automatically at doc selection — global env (`PROTECTED_SOURCES`,
-  `SOURCE_DIVERSITY_RESERVED_SLOTS`), no per-assistant or chat decision (§5).
+- **Source prioritization & authoritative citations** (§5) is **not** a per-assistant
+  knob either — it's the global, always-on layered pipeline (`PROTECTED_SOURCES` +
+  `SOURCE_RESERVED_RETRIEVAL_SLOTS`, `SOURCE_DIVERSITY_RESERVED_SLOTS`,
+  `MAX_PROMPT_DOCS_PER_SOURCE`, the authoritative nudge,
+  `AUTHORITATIVE_CITATION_RETENTION_ENABLED`, and the version-aware docs rewrite). No
+  per-assistant or chat decision.
 - **Resolution precedence** for the two knobs: chat per-conversation toggle (if
   the request set it) → assistant flag → default. Slack/one-shot always use the
   assistant flag.
@@ -325,10 +393,24 @@ LLM relevance filter (independent gate, one-shot, main LLM):
 - `search/pipeline.py` — relevance filter now uses the **main** llm (not fast).
 - `search/postprocessing/postprocessing.py` — `filter_chunks` → listwise call.
 
-Source diversity (automatic, global — replaces the old two-query prioritization):
-- `configs/chat_configs.py` — `PROTECTED_SOURCES`, `SOURCE_DIVERSITY_RESERVED_SLOTS`.
-- `llm/answering/doc_pruning.py` — `ensure_source_diversity`, called in
-  `_apply_pruning` after the relevance reorder.
+Source prioritization & authoritative citations (automatic, global — §5):
+- `configs/chat_configs.py` — `PROTECTED_SOURCES`, `SOURCE_DIVERSITY_RESERVED_SLOTS`,
+  `SOURCE_RESERVED_RETRIEVAL_SLOTS`, `MAX_PROMPT_DOCS_PER_SOURCE`,
+  `AUTHORITATIVE_CITATION_RETENTION_ENABLED`.
+- `search/pipeline.py` — `_supplement_protected_sources` + pure
+  `protected_source_topup` (recall, §5.1).
+- `llm/answering/doc_pruning.py` — `ensure_source_diversity` (§5.2),
+  `cap_docs_per_source` (§5.3); `rewrite_docs_links` + `parse_question_doc_version`
+  + `_versioned_url_parts` (version-aware docs links, §5.6); `dedupe_doc_versions` /
+  `_docs_version_sort_key` (version dedup).
+- `prompts/prompt_utils.py` — `build_authoritative_sources_reminder` (nudge, §5.4),
+  appended in `build_task_prompt_reminders`.
+- `llm/answering/authoritative_retention.py` — verify-then-retain footer
+  (`select_authoritative_candidates`, `verify_supporting_docs`,
+  `retained_authoritative_footer`), hooked in `llm/answering/answer.py`
+  `_process_stream` (§5.5).
+- `tools/search/search_tool.py` — calls `rewrite_docs_links(...,
+  parse_question_doc_version(query))` after `prune_documents`.
 
 Chat per-conversation toggles + TEI serving:
 - `server/query_and_chat/models.py` — `use_reranking` / `use_relevance_filter`
@@ -357,6 +439,13 @@ Tests:
   — the two gating matrices.
 - `tests/unit/.../test_listwise_chunk_filter.py` — listwise parser.
 - `tests/unit/.../test_source_diversity.py` — diversity promotion / caps / disable.
+- `tests/unit/.../test_source_reserved_topup.py` — recall top-up / dedupe / scope.
+- `tests/unit/.../test_cap_docs_per_source.py` — per-source cap.
+- `tests/unit/.../test_authoritative_sources.py` — the nudge text from PROTECTED_SOURCES.
+- `tests/unit/.../test_authoritative_retention.py` — candidate gate, chunk-based
+  verify, fail-closed/retry, footer.
+- `tests/unit/.../test_docs_version_rewrite.py` — version parse + version-aware /
+  latest rewrite.
 - `tests/integration/` — TEI rerank transport (mocked), **real CPU cross-encoder
   reordering** (MiniLM), and `filter_chunks` with a stub LLM.
 
@@ -373,8 +462,11 @@ Tests:
    once into its PVC-backed cache.
 3. Per assistant (admin editor): toggle **Rerank results** and/or **Apply LLM
    Relevance Filter**. Or use the **chat-page toggles** to A/B per conversation.
-   Compare answers, then flip the defaults once satisfied. Source diversity is
-   automatic (tune via `PROTECTED_SOURCES` / `SOURCE_DIVERSITY_RESERVED_SLOTS`).
+   Compare answers, then flip the defaults once satisfied. Source prioritization &
+   authoritative citations (§5) are automatic and already on in prod —
+   `PROTECTED_SOURCES=web,sfkbarticles,highspot,outsystems`,
+   `SOURCE_RESERVED_RETRIEVAL_SLOTS=6`, `SOURCE_DIVERSITY_RESERVED_SLOTS=3`,
+   `MAX_PROMPT_DOCS_PER_SOURCE=8`, `AUTHORITATIVE_CITATION_RETENTION_ENABLED=true`.
 
 Reranking needs the GPU node; the **relevance filter alone needs no GPU**. Local
 exercises reranking in-process (no GPU) for dev.
@@ -398,3 +490,19 @@ exercises reranking in-process (no GPU) for dev.
   chat sessions; candidate for a cap.
 - Consider a **stronger/larger reranker** or hosted (Cohere) if `bge-reranker-v2-m3`
   isn't enough — reindex-free either way.
+- **Externalize the tuned prompts to a configmap** (verify prompt §5.5, nudge §5.4)
+  so prompt iteration doesn't need an image rebuild — file-mounted configmap, read
+  with the in-code default as fallback (hot-reload via mounted-file sync). Scoped but
+  not yet built; only worth it for the actively-tuned prompts, and watch for
+  config-vs-git drift (repo file stays canonical).
+- **Authoritative citation: only the footer / `final_context` docs links are
+  version-rewritten (§5.6); the LLM's inline citation cards (reference-doc snapshot)
+  are not** — deliberate, but means inline cards can show a different version than
+  the footer. Revisit only if that inconsistency matters.
+- **Indexed-content freshness:** relevance (and the answer) are judged against the
+  *indexed* copy of a doc; an edited KB/docs page can diverge from what we indexed,
+  so a citation may point to a live doc whose current content differs. Connector
+  re-sync cadence, not a verify-logic issue.
+- **DB-backed / admin-editable prompts** — the "real" version of prompt
+  externalization if tuning becomes frequent or multi-owner; bigger build (table +
+  endpoints + UI), not warranted yet.
