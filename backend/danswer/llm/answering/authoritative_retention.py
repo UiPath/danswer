@@ -30,25 +30,22 @@ logger = setup_logger()
 
 _VERIFY_PROMPT = """\
 You are selecting authoritative reference documents to surface as sources for an \
-answer to a user's QUESTION. For each candidate you are given the PASSAGE from that \
-document that the search actually matched — judge from that passage.
+answer to a user's question. For each candidate you are given the passage that the \
+search matched.
 
 QUESTION:
 {question}
 
-ANSWER GIVEN:
+ANSWER:
 {answer}
 
-CANDIDATE AUTHORITATIVE DOCUMENTS (matched passage shown):
+CANDIDATE DOCUMENTS (matched passage shown):
 {docs}
 
-For EACH candidate, use its matched passage to decide whether the document genuinely \
-helps answer THIS QUESTION — it must address the specific subject the question is \
-about. Sharing a keyword, product, or service name is NOT enough: exclude a document \
-that is really about a different feature, or about troubleshooting a specific error, \
-when that is not what the question asks about. When in doubt, exclude. Respond with \
-ONLY a JSON array of the numbers of the genuinely relevant documents (e.g. [1, 3]); \
-if none qualify, respond with [].
+For EACH candidate, decide whether its matched passage is genuinely relevant to BOTH \
+the question and the answer. If it is, include it; otherwise exclude it. Respond with \
+ONLY a JSON array of the numbers of the relevant documents (e.g. [1, 3]); if none \
+qualify, respond with [].
 """
 
 
