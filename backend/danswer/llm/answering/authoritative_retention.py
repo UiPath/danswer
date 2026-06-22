@@ -38,15 +38,14 @@ ANSWER:
 CANDIDATE AUTHORITATIVE DOCUMENTS:
 {docs}
 
-For EACH candidate, decide whether it is genuinely about the SPECIFIC topic or \
-feature this answer is about, such that a reader would treat it as a real reference \
-for THIS answer. It need not literally restate the answer, but it MUST address the \
-same specific subject. Being from the same product or product area is NOT enough: \
-exclude a document about a different feature, service, or component even if it \
-mentions the same product (for example, a messaging/transport or infrastructure doc \
-is NOT a relevant reference for an answer about AI capabilities). When unsure, \
-exclude. Respond with ONLY a JSON array of the numbers of the genuinely relevant \
-documents (e.g. [1, 3]); if none qualify, respond with [].
+For EACH candidate, decide whether it is genuinely about the SAME SPECIFIC topic or \
+feature the answer addresses, such that a reader would treat it as a real reference \
+for THIS answer. It need not literally restate the answer, but it must be about the \
+same specific subject. Being from the same product or product area is NOT enough — a \
+document about a different feature, component, or service is NOT a relevant reference \
+even if it mentions the same product. When unsure, exclude. Respond with ONLY a JSON \
+array of the numbers of the genuinely relevant documents (e.g. [1, 3]); if none \
+qualify, respond with [].
 """
 
 
