@@ -11,7 +11,7 @@ import {
   User,
   ValidSources,
 } from "@/lib/types";
-import { ChatSession } from "@/app/chat/interfaces";
+import { ChatSession, CHAT_SESSION_PAGE_SIZE } from "@/app/chat/interfaces";
 import { Persona } from "@/app/admin/assistants/interfaces";
 import { FullEmbeddingModelResponse } from "@/app/admin/models/embedding/embeddingModels";
 import { Settings } from "@/app/admin/settings/interfaces";
@@ -27,6 +27,9 @@ import { fetchAssistantsSS } from "../assistants/fetchAssistantsSS";
 interface FetchChatDataResult {
   user: User | null;
   chatSessions: ChatSession[];
+  // True when older sessions exist beyond the first (recent) page, so the
+  // sidebar knows to keep lazy-loading on scroll.
+  hasMoreChatSessions: boolean;
   ccPairs: CCPairBasicInfo[];
   availableSources: ValidSources[];
   documentSets: DocumentSet[];
@@ -41,6 +44,18 @@ interface FetchChatDataResult {
   shouldDisplaySourcesIncompleteModal: boolean;
 }
 
+// Start of the "Today" window (midnight 1 day ago), matching the sidebar's
+// Today bucket in groupSessionsByDateRange. Returned as an ISO string for the
+// chat-sessions query: only Today loads on first paint; every other bucket
+// (Previous 7 Days / 30 Days / Over 30 days ago) is collapsed and lazy-loads
+// when expanded. Computed server-side for the initial paint; the client
+// recomputes the same cutoffs for the older buckets.
+function todayWindowStart(): string {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return new Date(today.getTime() - 1 * 24 * 3600 * 1000).toISOString();
+}
+
 export async function fetchChatData(searchParams: {
   [key: string]: string;
 }): Promise<FetchChatDataResult | { redirect: string }> {
@@ -50,13 +65,25 @@ export async function fetchChatData(searchParams: {
     fetchSS("/manage/indexing-status"),
     fetchSS("/manage/document-set"),
     fetchAssistantsSS(),
-    fetchSS("/chat/get-user-chat-sessions"),
+    // Only the Today window. Every older bucket (Previous 7 Days / 30 Days /
+    // Over 30 days ago) is collapsed by default and lazy-loads in the sidebar
+    // when expanded, so history beyond today never loads on first paint.
+    fetchSS(
+      `/chat/get-user-chat-sessions?limit=${CHAT_SESSION_PAGE_SIZE}` +
+        `&start_time=${encodeURIComponent(todayWindowStart())}`
+    ),
     fetchSS("/query/valid-tags"),
     fetchLLMProvidersSS(),
     fetchSS("/folder"),
   ];
 
-  let results: (
+  // Use allSettled (not Promise.all) so that ONE failing fetch — e.g. a
+  // backend 500 whose body isn't valid JSON — degrades only that piece instead
+  // of rejecting the whole batch and nulling everything (which previously
+  // crashed the entire /chat server render with "object null is not iterable"
+  // when results[4] was destructured).
+  const settled = await Promise.allSettled(tasks);
+  const results: (
     | User
     | Response
     | AuthTypeMetadata
@@ -65,21 +92,26 @@ export async function fetchChatData(searchParams: {
     | LLMProviderDescriptor[]
     | [Persona[], string | null]
     | null
-  )[] = [null, null, null, null, null, null, null, null, null, null];
-  try {
-    results = await Promise.all(tasks);
-  } catch (e) {
-    console.log(`Some fetch failed for the main search page - ${e}`);
-  }
+  )[] = settled.map((outcome, i) => {
+    if (outcome.status === "fulfilled") {
+      return outcome.value;
+    }
+    console.log(
+      `Some fetch failed for the main chat page (task ${i}) - ${outcome.reason}`
+    );
+    return null;
+  });
 
   const authTypeMetadata = results[0] as AuthTypeMetadata | null;
   const user = results[1] as User | null;
   const ccPairsResponse = results[2] as Response | null;
   const documentSetsResponse = results[3] as Response | null;
-  const [rawAssistantsList, assistantsFetchError] = results[4] as [
-    Persona[],
-    string | null,
-  ];
+  // results[4] is fetchAssistantsSS()'s [assistants, error] tuple — but it's
+  // null if that fetch failed, so guard the destructure (this exact spot was
+  // the crash).
+  const assistantsResult = results[4] as [Persona[], string | null] | null;
+  const rawAssistantsList: Persona[] = assistantsResult?.[0] ?? [];
+  const assistantsFetchError: string | null = assistantsResult?.[1] ?? null;
   const chatSessionsResponse = results[5] as Response | null;
   const tagsResponse = results[6] as Response | null;
   const llmProviders = (results[7] || []) as LLMProviderDescriptor[];
@@ -108,8 +140,11 @@ export async function fetchChatData(searchParams: {
   });
 
   let chatSessions: ChatSession[] = [];
+  let hasMoreChatSessions = false;
   if (chatSessionsResponse?.ok) {
-    chatSessions = (await chatSessionsResponse.json()).sessions;
+    const chatSessionsBody = await chatSessionsResponse.json();
+    chatSessions = chatSessionsBody.sessions;
+    hasMoreChatSessions = chatSessionsBody.has_more ?? false;
   } else {
     console.log(
       `Failed to fetch chat sessions - ${chatSessionsResponse?.text()}`
@@ -117,6 +152,40 @@ export async function fetchChatData(searchParams: {
   }
   // Larger ID -> created later
   chatSessions.sort((a, b) => (a.id > b.id ? -1 : 1));
+
+  // The sidebar only loads the recent page, but the page may be opened on an
+  // OLDER chat (deep link / reload of ?chatId=<old>). ChatPage derives the
+  // resumed chat's persona + model override from this list (selectedChatSession
+  // -> existingChatSessionPersonaId / llmOverrideManager), so if the open chat
+  // falls outside the recent page we fetch it explicitly and prepend it.
+  // Otherwise resuming an old chat would silently load the wrong assistant.
+  const currentChatIdRaw = searchParams["chatId"];
+  const currentChatId = currentChatIdRaw ? parseInt(currentChatIdRaw) : null;
+  if (
+    currentChatId !== null &&
+    !Number.isNaN(currentChatId) &&
+    !chatSessions.some((session) => session.id === currentChatId)
+  ) {
+    try {
+      const currentSessionResponse = await fetchSS(
+        `/chat/get-chat-session/${currentChatId}`
+      );
+      if (currentSessionResponse.ok) {
+        const detail = await currentSessionResponse.json();
+        chatSessions.unshift({
+          id: detail.chat_session_id,
+          name: detail.description,
+          persona_id: detail.persona_id,
+          time_created: detail.time_created,
+          shared_status: detail.shared_status,
+          folder_id: null,
+          current_alternate_model: detail.current_alternate_model ?? "",
+        });
+      }
+    } catch (e) {
+      console.log(`Failed to fetch current chat session ${currentChatId} - ${e}`);
+    }
+  }
 
   let documentSets: DocumentSet[] = [];
   if (documentSetsResponse?.ok) {
@@ -189,6 +258,7 @@ export async function fetchChatData(searchParams: {
   return {
     user,
     chatSessions,
+    hasMoreChatSessions,
     ccPairs,
     availableSources,
     documentSets,

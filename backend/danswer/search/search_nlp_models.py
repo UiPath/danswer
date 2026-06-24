@@ -13,6 +13,7 @@ from danswer.search.enums import EmbedTextType
 from danswer.utils.logger import setup_logger
 from shared_configs.configs import MODEL_SERVER_HOST
 from shared_configs.configs import MODEL_SERVER_PORT
+from shared_configs.configs import RERANK_SERVER_URL
 from shared_configs.model_server_models import EmbedRequest
 from shared_configs.model_server_models import EmbedResponse
 from shared_configs.model_server_models import IntentRequest
@@ -128,19 +129,43 @@ class CrossEncoderEnsembleModel:
         self,
         model_server_host: str = MODEL_SERVER_HOST,
         model_server_port: int = MODEL_SERVER_PORT,
+        rerank_server_url: str = RERANK_SERVER_URL,
     ) -> None:
+        # When a TEI rerank server is configured, talk to it directly (its
+        # /rerank API). Otherwise fall back to our model server's
+        # /cross-encoder-scores (sentence-transformers) path.
+        self.tei_rerank_endpoint = (
+            f"{rerank_server_url}/rerank" if rerank_server_url else None
+        )
         model_server_url = build_model_server_url(model_server_host, model_server_port)
         self.rerank_server_endpoint = model_server_url + "/encoder/cross-encoder-scores"
 
     def predict(self, query: str, passages: list[str]) -> list[list[float]]:
-        rerank_request = RerankRequest(query=query, documents=passages)
+        if self.tei_rerank_endpoint:
+            return [self._predict_tei(query, passages)]
 
+        rerank_request = RerankRequest(query=query, documents=passages)
         response = requests.post(
             self.rerank_server_endpoint, json=rerank_request.dict()
         )
         response.raise_for_status()
-
         return RerankResponse(**response.json()).scores
+
+    def _predict_tei(self, query: str, passages: list[str]) -> list[float]:
+        """Call a Hugging Face TEI /rerank server and return scores in the SAME
+        order as `passages`. TEI returns [{index, score}, ...] sorted by score,
+        so we scatter them back to the input order. raw_scores=true keeps the
+        cross-encoder logits (the downstream normalization expects a logit-like
+        scale, not a 0-1 probability)."""
+        response = requests.post(
+            self.tei_rerank_endpoint,
+            json={"query": query, "texts": passages, "raw_scores": True},
+        )
+        response.raise_for_status()
+        scores = [0.0] * len(passages)
+        for item in response.json():
+            scores[item["index"]] = item["score"]
+        return scores
 
 
 class IntentModel:

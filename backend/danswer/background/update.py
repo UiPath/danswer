@@ -18,7 +18,9 @@ from danswer.configs.app_configs import CLEANUP_INDEXING_JOBS_TIMEOUT
 from danswer.configs.app_configs import DASK_JOB_CLIENT_ENABLED
 from danswer.configs.app_configs import DISABLE_INDEX_UPDATE_ON_SWAP
 from danswer.configs.app_configs import NUM_INDEXING_WORKERS
+from danswer.configs.indexing_concurrency import cap_for_source
 from danswer.configs.indexing_concurrency import PER_SOURCE_CAP
+from danswer.configs.indexing_concurrency import PER_SOURCE_CAP_OVERRIDES
 from danswer.db.connector import fetch_connectors
 from danswer.db.embedding_model import get_current_db_embedding_model
 from danswer.db.embedding_model import get_secondary_db_embedding_model
@@ -272,6 +274,7 @@ def _build_running_view(
     in_progress_rows: list[IndexAttempt],
     dispatched_pre_completion_rows: list[IndexAttempt],
     per_source_cap: int,
+    cap_overrides: dict[str, int] | None = None,
 ) -> tuple[dict[str, int], set[tuple[int | None, int | None, int]]]:
     """Build the scheduler's running-attempt view.
 
@@ -288,6 +291,7 @@ def _build_running_view(
     once despite cap=1" + "lower-priority attempt running while a
     higher-priority attempt sits NOT_STARTED".
     """
+    overrides = cap_overrides or {}
     running_per_source: dict[str, int] = {}
     in_progress_cc_pair_keys: set[tuple[int | None, int | None, int]] = set()
     accounted: set[int] = set()
@@ -300,8 +304,8 @@ def _build_running_view(
         in_progress_cc_pair_keys.add(
             (ip.connector_id, ip.credential_id, ip.embedding_model_id)
         )
-        if per_source_cap > 0:
-            key = ip.connector.source.value
+        key = ip.connector.source.value
+        if cap_for_source(key, per_source_cap, overrides) > 0:
             running_per_source[key] = running_per_source.get(key, 0) + 1
     for d in dispatched_pre_completion_rows:
         if d.id in accounted:
@@ -312,8 +316,8 @@ def _build_running_view(
         in_progress_cc_pair_keys.add(
             (d.connector_id, d.credential_id, d.embedding_model_id)
         )
-        if per_source_cap > 0:
-            key = d.connector.source.value
+        key = d.connector.source.value
+        if cap_for_source(key, per_source_cap, overrides) > 0:
             running_per_source[key] = running_per_source.get(key, 0) + 1
     return running_per_source, in_progress_cc_pair_keys
 
@@ -323,6 +327,7 @@ def _evaluate_dispatch_for_attempt(
     running_per_source: dict[str, int],
     in_progress_cc_pair_keys: set[tuple[int | None, int | None, int]],
     per_source_cap: int,
+    cap_overrides: dict[str, int] | None = None,
 ) -> str:
     """Pure decision: should this attempt dispatch now, or defer?
 
@@ -339,9 +344,10 @@ def _evaluate_dispatch_for_attempt(
     )
     if cc_pair_key in in_progress_cc_pair_keys:
         return _DEFER_CC_PAIR
-    if per_source_cap > 0:
-        source_key = attempt.connector.source.value
-        if running_per_source.get(source_key, 0) >= per_source_cap:
+    source_key = attempt.connector.source.value
+    source_cap = cap_for_source(source_key, per_source_cap, cap_overrides or {})
+    if source_cap > 0:
+        if running_per_source.get(source_key, 0) >= source_cap:
             return _DEFER_SOURCE_CAP
         running_per_source[source_key] = running_per_source.get(source_key, 0) + 1
     in_progress_cc_pair_keys.add(cc_pair_key)
@@ -400,6 +406,7 @@ def kickoff_indexing_jobs(
             in_progress_rows,
             dispatched_pre_completion_rows,
             PER_SOURCE_CAP,
+            PER_SOURCE_CAP_OVERRIDES,
         )
 
     logger.info(f"Found {len(new_indexing_attempts)} new indexing tasks.")
@@ -437,6 +444,7 @@ def kickoff_indexing_jobs(
             running_per_source,
             in_progress_cc_pair_keys,
             PER_SOURCE_CAP,
+            PER_SOURCE_CAP_OVERRIDES,
         )
         if decision == _DEFER_CC_PAIR:
             logger.info(
@@ -450,7 +458,9 @@ def kickoff_indexing_jobs(
                 f"Deferring indexing attempt {attempt.id} for connector "
                 f"'{attempt.connector.name}' "
                 f"(source={attempt.connector.source.value}): "
-                f"cap of {PER_SOURCE_CAP} reached. "
+                f"cap of "
+                f"{cap_for_source(attempt.connector.source.value, PER_SOURCE_CAP, PER_SOURCE_CAP_OVERRIDES)}"
+                f" reached. "
                 "Will retry on next scheduler tick."
             )
             continue

@@ -16,6 +16,8 @@ import { Folder } from "@/app/chat/folders/interfaces";
 interface ChatContextProps {
   user: User | null;
   chatSessions: ChatSession[];
+  // Whether older sessions exist beyond the initially-loaded recent page.
+  hasMoreChatSessions: boolean;
   availableSources: ValidSources[];
   availableDocumentSets: DocumentSet[];
   availablePersonas: Persona[];

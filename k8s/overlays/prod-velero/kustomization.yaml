@@ -1,0 +1,52 @@
+# Velero (self-managed) apply target for PROD — deliberately SEPARATE from the
+# app overlay, exactly like k8s/overlays/prod-vespa.
+#
+#   kubectl apply -k k8s/overlays/prod-velero          # context: darwin
+#
+# `kubectl apply -k k8s/overlays/prod` does NOT touch Velero. This tree owns the
+# Velero install, its backup schedule, and the failure alerts — nothing else.
+#
+# Backs up ONLY the PVCs labeled `backup=vespa` in the `darwin` namespace
+# (the Vespa index + configserver state). See README.md for the why, the
+# one-time CRD bootstrap, and the required SP-secret step.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: velero
+
+resources:
+  - namespace.yaml
+  - rbac.yaml
+  - deployment.yaml
+  - service.yaml
+  - backupstoragelocation.yaml
+  - volumesnapshotlocation.yaml
+  - schedule.yaml
+  - servicemonitor.yaml
+  - prometheusrule.yaml
+  - notifier.yaml
+
+# Image pins (bump deliberately; keep velero <-> azure-plugin compatible:
+# velero 1.13.x <-> plugin-for-microsoft-azure 1.9.x).
+images:
+  - name: velero/velero
+    newTag: v1.13.2
+  - name: velero/velero-plugin-for-microsoft-azure
+    newTag: v1.9.2
+
+# cloud-credentials: the Azure SP credentials Velero authenticates with. Built
+# from the gitignored `credentials-velero` file (copy credentials-velero.example
+# and fill in a FRESH client secret for app 155fae3c — see README). Same name +
+# key (`cloud`) the deployment mounts. Hash suffix disabled so the static
+# secretName resolves.
+secretGenerator:
+  - name: cloud-credentials
+    files:
+      - cloud=credentials-velero
+  # slack-notify: bot token + channel for the post-backup notifier CronJob.
+  # Built from the gitignored slack-notify.env (copy slack-notify.env.example).
+  - name: slack-notify
+    envs:
+      - slack-notify.env
+generatorOptions:
+  disableNameSuffixHash: true

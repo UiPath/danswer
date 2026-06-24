@@ -110,7 +110,7 @@ export function FiltersTab({
                 <div className="mt-3">
                   <input
                     ref={docSetInputRef}
-                    className="w-96 border border-border py-1 px-2 rounded text-sm h-9"
+                    className="w-96 border border-border bg-background text-default placeholder:text-subtle py-1 px-2 rounded text-sm h-9"
                     placeholder={`Find a knowledge set (${availableDocumentSets.length} available, ${filterManager.selectedDocumentSets.length} selected)`}
                     value={docSetFilter}
                     onChange={(e) => setDocSetFilter(e.target.value)}

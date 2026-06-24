@@ -95,7 +95,10 @@ interface BaseProps<T extends Yup.AnyObject> {
     isSuccess: boolean,
     responseJson: Connector<T> | undefined
   ) => void;
-  refreshFreq?: number;
+  // number => fixed default refresh; undefined => one-time, refresh_freq=0
+  // (legacy default); null => one-time with refresh_freq=None, i.e. never
+  // auto-re-indexed (used by connectors whose credential is short-lived).
+  refreshFreq?: number | null;
   pruneFreq?: number;
   // If specified, then we will create an empty credential and associate
   // the connector with it. If credentialId is specified, then this will be ignored
@@ -134,7 +137,8 @@ export function ConnectorForm<T extends Yup.AnyObject>({
   const [selectedRefreshFreq, setSelectedRefreshFreq] = useState<number>(
     DEFAULT_REFRESH_FREQ_SECS
   );
-  const showRefreshFreqSelector = refreshFreq !== undefined;
+  const showRefreshFreqSelector =
+    refreshFreq !== undefined && refreshFreq !== null;
 
   // only show this option for EE, since groups are not supported in CE
   const showNonPublicOption = usePaidEnterpriseFeaturesEnabled();
@@ -207,7 +211,9 @@ export function ConnectorForm<T extends Yup.AnyObject>({
             // e.g. file-upload, ingestion API).
             refresh_freq: showRefreshFreqSelector
               ? selectedRefreshFreq
-              : refreshFreq || 0,
+              : refreshFreq === null
+                ? null
+                : refreshFreq || 0,
             prune_freq: pruneFreq ?? null,
             disabled: false,
           });

@@ -7,6 +7,9 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from danswer.configs.chat_configs import MULTILINGUAL_QUERY_EXPANSION
+from danswer.configs.chat_configs import PROTECTED_SOURCES
+from danswer.configs.chat_configs import SOURCE_RESERVED_RETRIEVAL_SLOTS
+from danswer.configs.constants import DocumentSource
 from danswer.db.embedding_model import get_current_db_embedding_model
 from danswer.db.models import User
 from danswer.document_index.factory import get_default_document_index
@@ -23,7 +26,44 @@ from danswer.search.models import SearchRequest
 from danswer.search.postprocessing.postprocessing import search_postprocessing
 from danswer.search.preprocessing.preprocessing import retrieval_preprocessing
 from danswer.search.retrieval.search_runner import retrieve_chunks
+from danswer.utils.logger import setup_logger
 from danswer.utils.threadpool_concurrency import run_functions_tuples_in_parallel
+
+
+logger = setup_logger()
+
+
+def protected_source_topup(
+    existing: list[InferenceChunk],
+    candidates: list[InferenceChunk],
+    reserved: int,
+    protected_sources: set[DocumentSource],
+) -> list[InferenceChunk]:
+    """Pick up to `reserved` protected-source chunks from `candidates` that are not
+    already present in `existing`, to top the candidate set up to the reservation.
+
+    Pure (no I/O) so it's unit-testable. Returns only the chunks to ADD (callers
+    append them). De-dupes by `unique_id` against `existing` and within the result.
+    """
+    if reserved <= 0 or not protected_sources:
+        return []
+    present = sum(1 for c in existing if c.source_type in protected_sources)
+    need = reserved - present
+    if need <= 0:
+        return []
+
+    seen = {c.unique_id for c in existing}
+    added: list[InferenceChunk] = []
+    for c in candidates:
+        if len(added) >= need:
+            break
+        if c.source_type not in protected_sources:
+            continue
+        if c.unique_id in seen:
+            continue
+        seen.add(c.unique_id)
+        added.append(c)
+    return added
 
 
 class ChunkRange(BaseModel):
@@ -273,7 +313,7 @@ class SearchPipeline:
         if self._retrieved_chunks is not None:
             return self._retrieved_chunks
 
-        self._retrieved_chunks = retrieve_chunks(
+        chunks = retrieve_chunks(
             query=self.search_query,
             document_index=self.document_index,
             db_session=self.db_session,
@@ -282,7 +322,78 @@ class SearchPipeline:
             retrieval_metrics_callback=self.retrieval_metrics_callback,
         )
 
+        # Recall guarantee for curated sources (see SOURCE_RESERVED_RETRIEVAL_SLOTS).
+        chunks = self._supplement_protected_sources(chunks)
+
+        self._retrieved_chunks = chunks
         return cast(list[InferenceChunk], self._retrieved_chunks)
+
+    def _supplement_protected_sources(
+        self, chunks: list[InferenceChunk]
+    ) -> list[InferenceChunk]:
+        """Ensure up to SOURCE_RESERVED_RETRIEVAL_SLOTS chunks from PROTECTED_SOURCES
+        are in the candidate set. A chatty source (e.g. Slack) can otherwise fill
+        every top hit, starving curated sources (web/KB/OutSystems) that retrieval
+        would surface only on a source-scoped query — so we run ONE extra retrieval
+        restricted to the protected sources and merge the top results in.
+
+        Scope-safe: the supplemental query reuses the SAME filters as the main query
+        (ACL + persona document-set fence) and only ADDS a source_type restriction
+        (intersected with any existing source filter), so nothing outside the
+        query's existing scope is ever introduced. Universal — runs for every
+        persona in both the chat and Slack flows, since both funnel through here.
+        """
+        reserved = SOURCE_RESERVED_RETRIEVAL_SLOTS
+        if reserved <= 0 or not PROTECTED_SOURCES:
+            return chunks
+
+        # Map configured source strings -> DocumentSource (skip any unknowns).
+        valid = DocumentSource._value2member_map_
+        protected_ds = [valid[s] for s in PROTECTED_SOURCES if s in valid]
+        if not protected_ds:
+            return chunks
+        protected_set = set(protected_ds)
+
+        # Cheap exit if the reservation is already satisfied.
+        if sum(1 for c in chunks if c.source_type in protected_set) >= reserved:
+            return chunks
+
+        # Restrict to protected sources, intersected with any existing source filter
+        # so we never widen scope. ACL + document_set fence are preserved as-is.
+        existing_src = self.search_query.filters.source_type
+        allowed = (
+            [s for s in protected_ds if s in existing_src]
+            if existing_src
+            else protected_ds
+        )
+        if not allowed:
+            return chunks
+        # SearchQuery / IndexFilters are immutable (frozen pydantic) — rebuild via
+        # copy(update=...) rather than mutating in place.
+        supp_filters = self.search_query.filters.copy(update={"source_type": allowed})
+        supp_query = self.search_query.copy(
+            update={"filters": supp_filters, "num_hits": max(reserved * 4, 10)}
+        )
+
+        supp_chunks = retrieve_chunks(
+            query=supp_query,
+            document_index=self.document_index,
+            db_session=self.db_session,
+            hybrid_alpha=self.search_request.hybrid_alpha,
+            multilingual_expansion_str=MULTILINGUAL_QUERY_EXPANSION,
+            retrieval_metrics_callback=self.retrieval_metrics_callback,
+        )
+
+        added = protected_source_topup(chunks, supp_chunks, reserved, protected_set)
+        if added:
+            logger.info(
+                "Source-reserved retrieval: injected %d protected-source chunk(s) "
+                "from %s (reservation=%d)",
+                len(added),
+                [c.source_type.value for c in added],
+                reserved,
+            )
+        return chunks + added
 
     @property
     def retrieved_sections(self) -> list[InferenceSection]:
@@ -300,7 +411,10 @@ class SearchPipeline:
         self._postprocessing_generator = search_postprocessing(
             search_query=self.search_query,
             retrieved_chunks=self.retrieved_chunks,
-            llm=self.fast_llm,  # use fast_llm for relevance, since it is a relatively easier task
+            # Use the MAIN llm (not fast_llm) for the relevance filter: it now
+            # judges all chunks in one listwise call, and the main model is more
+            # reliable at that structured multi-item judgment.
+            llm=self.llm,
             rerank_metrics_callback=self.rerank_metrics_callback,
         )
         self._reranked_chunks = cast(

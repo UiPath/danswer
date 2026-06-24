@@ -6,10 +6,7 @@ import { DocumentUpdatedAtBadge } from "@/components/search/DocumentUpdatedAtBad
 import { DanswerDocument } from "@/lib/search/interfaces";
 import { FiInfo, FiRadio } from "react-icons/fi";
 import { DocumentSelector } from "./DocumentSelector";
-import {
-  DocumentMetadataBlock,
-  buildDocumentSummaryDisplay,
-} from "@/components/search/DocumentDisplay";
+import { DocumentMetadataBlock } from "@/components/search/DocumentDisplay";
 
 interface DocumentDisplayProps {
   document: DanswerDocument;
@@ -57,7 +54,7 @@ export function ChatDocumentDisplay({
             {isAIPick && (
               <div className="w-4 h-4 my-auto mr-1 flex flex-col">
                 <HoverPopup
-                  mainContent={<FiRadio className="text-gray-500 my-auto" />}
+                  mainContent={<FiRadio className="text-subtle my-auto" />}
                   popupContent={
                     <div className="text-xs text-gray-300 w-36 flex">
                       <div className="flex mx-auto">
@@ -103,7 +100,8 @@ export function ChatDocumentDisplay({
         </div>
       </div>
       <p className="pl-1 pt-2 pb-1 break-words">
-        {buildDocumentSummaryDisplay(document.match_highlights, document.blurb)}
+        {/* Keyword highlighting intentionally omitted — show the plain blurb. */}
+        {document.blurb}
       </p>
       <div className="mb-2">
         {/* 

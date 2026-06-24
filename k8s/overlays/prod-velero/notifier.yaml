@@ -1,0 +1,119 @@
+# Post-backup notifier: every week, AFTER the backup window, read the latest
+# vespa-weekly backup's status and post the outcome (success AND failure) to
+# #darwin-devs via the Slack bot token. This is the "did the weekly backup
+# happen and did it work?" heartbeat to the team channel.
+#
+# (The PrometheusRule alerts are the real-time failure safety net via robusta;
+# this CronJob is the explicit per-run success/failure report to darwin-devs.)
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: velero-backup-notifier
+  namespace: velero
+  labels:
+    app.kubernetes.io/name: velero
+---
+# Minimal read access to Backup CRs (NOT cluster-admin like velero itself).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: velero-backup-notifier
+  namespace: velero
+  labels:
+    app.kubernetes.io/name: velero
+rules:
+  - apiGroups: ["velero.io"]
+    resources: ["backups"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: velero-backup-notifier
+  namespace: velero
+  labels:
+    app.kubernetes.io/name: velero
+subjects:
+  - kind: ServiceAccount
+    name: velero-backup-notifier
+    namespace: velero
+roleRef:
+  kind: Role
+  name: velero-backup-notifier
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: velero-backup-notifier
+  namespace: velero
+  labels:
+    app.kubernetes.io/name: velero
+spec:
+  # 1h after the Sun 02:00 backup, so the run has finished.
+  schedule: "0 3 * * 0"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: velero
+        spec:
+          serviceAccountName: velero-backup-notifier
+          restartPolicy: Never
+          containers:
+            - name: notifier
+              # bundles kubectl + curl + jq + bash
+              image: alpine/k8s:1.29.4
+              command: ["/bin/bash", "-c"]
+              args:
+                - |
+                  set -euo pipefail
+                  items=$(kubectl get backups.velero.io -n velero \
+                    -l velero.io/schedule-name=vespa-weekly -o json)
+                  latest=$(echo "$items" | jq -r '.items | sort_by(.metadata.creationTimestamp) | last')
+                  if [ "$latest" = "null" ] || [ -z "$latest" ]; then
+                    name="(none)"; phase="NoBackupFound"; errs="-"; comp="-"
+                  else
+                    name=$(echo "$latest" | jq -r '.metadata.name')
+                    phase=$(echo "$latest" | jq -r '.status.phase // "Unknown"')
+                    errs=$(echo "$latest" | jq -r '.status.errors // 0')
+                    comp=$(echo "$latest" | jq -r '.status.completionTimestamp // "-"')
+                  fi
+                  case "$phase" in
+                    Completed) emoji="✅" ;;
+                    PartiallyFailed) emoji="⚠️" ;;
+                    *) emoji="❌" ;;
+                  esac
+                  text=$(printf '%s Vespa weekly backup *%s*\nbackup: `%s`\nerrors: %s\ncompleted: %s' \
+                    "$emoji" "$phase" "$name" "$errs" "$comp")
+                  payload=$(jq -nc --arg c "$SLACK_CHANNEL" --arg t "$text" '{channel:$c,text:$t}')
+                  resp=$(curl -sf -X POST https://slack.com/api/chat.postMessage \
+                    -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
+                    -H "Content-type: application/json; charset=utf-8" \
+                    --data "$payload")
+                  echo "$resp"
+                  echo "$resp" | jq -e '.ok == true' >/dev/null \
+                    || { echo "ERROR: slack post failed"; exit 1; }
+              env:
+                - name: SLACK_BOT_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: slack-notify
+                      key: SLACK_BOT_TOKEN
+                - name: SLACK_CHANNEL
+                  valueFrom:
+                    secretKeyRef:
+                      name: slack-notify
+                      key: SLACK_CHANNEL
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  cpu: 250m
+                  memory: 256Mi

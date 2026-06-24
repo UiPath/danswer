@@ -10,7 +10,7 @@ export function StarterMessage({
   return (
     <div
       className={
-        "py-2 px-3 rounded border border-border bg-white cursor-pointer hover:bg-hover-light h-full"
+        "py-2 px-3 rounded border border-border bg-background-search dark:bg-background-strong cursor-pointer hover:bg-hover-light h-full"
       }
       onClick={onClick}
     >

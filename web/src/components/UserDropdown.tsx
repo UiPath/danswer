@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useRef, useContext } from "react";
-import { FiMessageSquare, FiTool, FiLogOut } from "react-icons/fi";
+import { useState, useRef, useContext, useEffect } from "react";
+import { FiMessageSquare, FiTool, FiLogOut, FiSun, FiMoon } from "react-icons/fi";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { User } from "@/lib/types";
@@ -23,6 +23,21 @@ export function UserDropdown({
   const [userInfoVisible, setUserInfoVisible] = useState(false);
   const userInfoRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
+
+  // App-wide light/dark toggle (dark is the default; set pre-paint by the inline
+  // script in layout.tsx). Available here so every page with the avatar menu can
+  // switch, not just the chat sidebar. Flips `.dark` on <html> + persists.
+  // NOTE: must stay ABOVE the early `return null` below — rules-of-hooks.
+  const [darkMode, setDarkMode] = useState(true);
+  useEffect(() => {
+    setDarkMode(document.documentElement.classList.contains("dark"));
+  }, []);
+  const toggleTheme = () => {
+    const next = !darkMode;
+    setDarkMode(next);
+    localStorage.setItem("darwin-theme", next ? "dark" : "light");
+    document.documentElement.classList.toggle("dark", next);
+  };
 
   const combinedSettings = useContext(SettingsContext);
   if (!combinedSettings) {
@@ -115,11 +130,21 @@ export function UserDropdown({
                 </Link>
               </>
             )}
+            <div className="border-t border-border my-1" />
+            <div
+              onClick={toggleTheme}
+              className="flex py-3 px-4 cursor-pointer rounded hover:bg-hover-light"
+            >
+              {darkMode ? (
+                <FiSun className="my-auto mr-2 text-lg" />
+              ) : (
+                <FiMoon className="my-auto mr-2 text-lg" />
+              )}
+              {darkMode ? "Light mode" : "Dark mode"}
+            </div>
             {showLogout && (
               <>
-                {(!hideChatAndSearch || showAdminPanel) && (
-                  <div className="border-t border-border my-1" />
-                )}
+                <div className="border-t border-border my-1" />
                 <div
                   onClick={handleLogout}
                   className="mt-1 flex py-3 px-4 cursor-pointer hover:bg-hover-light"

@@ -28,7 +28,6 @@ requestdata.json
 # Playwright MCP session artifacts (console logs, page snapshots, ad-hoc
 # screenshots) written during local UI debugging. Not source.
 .playwright-mcp/
-model-picker-open.png
 
 # Live cluster dumps from `kubectl get -o yaml > …`. NEVER commit:
 # Darwin's ConfigMap currently contains real secrets in plaintext (Slack
@@ -39,3 +38,9 @@ model-picker-open.png
 darwin-kubernetes/temp/
 k8s/overlays/*/secrets.env
 k8s/overlays/*/*.secrets.env
+# Velero Azure SP credentials (source for the cloud-credentials secret)
+k8s/overlays/prod-velero/credentials-velero
+# Velero notifier Slack bot token (source for the slack-notify secret)
+k8s/overlays/prod-velero/slack-notify.env
+# Ad-hoc export of web connector URLs (local only)
+web-connectors.csv

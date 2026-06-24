@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import useSWR from "swr";
 
 import { LoadingAnimation } from "@/components/Loading";
@@ -28,6 +29,10 @@ function buildIndexingStatusUrl(show: ShowFilter): string {
 }
 
 function Main() {
+  // Deep-link shortcut: ?status=active (or any status value) seeds the
+  // table's status filter so links/bookmarks land straight in that view.
+  const searchParams = useSearchParams();
+  const initialStatusFilter = searchParams.get("status") ?? "all";
   // Default to "enabled" so the initial load is small. Switching the
   // dropdown changes the SWR key (different URL) so SWR re-fetches
   // and caches each variant separately.
@@ -137,6 +142,7 @@ function Main() {
         <CCPairIndexingStatusTable
           ccPairsIndexingStatuses={indexAttemptData}
           onRefresh={() => refetchIndexAttempt()}
+          initialStatusFilter={initialStatusFilter}
         />
       )}
     </>
@@ -157,7 +163,11 @@ export default function Status() {
           </Link>
         }
       />
-      <Main />
+      {/* useSearchParams() in Main requires a Suspense boundary, or the
+          production build fails ("should be wrapped in a suspense boundary"). */}
+      <Suspense fallback={<LoadingAnimation text="" />}>
+        <Main />
+      </Suspense>
     </div>
   );
 }

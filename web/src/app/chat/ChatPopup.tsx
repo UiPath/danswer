@@ -35,7 +35,7 @@ export function ChatPopup() {
     <Modal width="w-3/6 xl:w-[700px]" title={popupTitle}>
       <>
         <ReactMarkdown
-          className="prose max-w-full"
+          className="prose dark:prose-invert max-w-full"
           components={{
             a: ({ node, ...props }) => (
               <a

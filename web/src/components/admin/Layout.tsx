@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { Header } from "@/components/header/Header";
 import { AdminSidebar } from "@/components/admin/connectors/AdminSidebar";
 import {
@@ -12,6 +13,7 @@ import {
   BarChartIcon,
   DatabaseIcon,
   KeyIcon,
+  TriangleAlertIcon,
 } from "@/components/icons/icons";
 import { User } from "@/lib/types";
 import {
@@ -70,6 +72,9 @@ export async function Layout({ children }: { children: React.ReactNode }) {
       </div>
       <div className="flex h-full pt-16">
         <div className="w-80  bg-background-weak pt-12 pb-8 h-full border-r border-border overflow-auto">
+          {/* Suspense: AdminSidebar uses useSearchParams (for active-tab
+              highlighting), which the prod build requires be wrapped. */}
+          <Suspense fallback={<div className="w-48" />}>
           <AdminSidebar
             collections={[
               {
@@ -83,6 +88,28 @@ export async function Layout({ children }: { children: React.ReactNode }) {
                       </div>
                     ),
                     link: "/admin/indexing/status",
+                  },
+                  {
+                    name: (
+                      <div className="flex">
+                        <BarChartIcon size={18} />
+                        <div className="ml-1">Indexing Activity</div>
+                      </div>
+                    ),
+                    // Deep-link shortcut into the "Active (running + queued)"
+                    // status filter on the Existing Connectors table.
+                    link: "/admin/indexing/status?status=active",
+                  },
+                  {
+                    name: (
+                      <div className="flex">
+                        <TriangleAlertIcon size={18} />
+                        <div className="ml-1">Failed Indexing</div>
+                      </div>
+                    ),
+                    // Deep-link shortcut into the "Failed" status filter on
+                    // the Existing Connectors table.
+                    link: "/admin/indexing/status?status=failed",
                   },
                   {
                     name: (
@@ -306,6 +333,7 @@ export async function Layout({ children }: { children: React.ReactNode }) {
               },
             ]}
           />
+          </Suspense>
         </div>
         <div className="px-12 pt-8 pb-8 h-full overflow-y-auto w-full">
           {children}

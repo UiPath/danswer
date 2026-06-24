@@ -39,6 +39,7 @@ import Prism from "prismjs";
 import "prismjs/themes/prism-tomorrow.css";
 import "./custom-code-styles.css";
 import { Persona } from "@/app/admin/assistants/interfaces";
+import { assistantDisplayName } from "@/lib/assistants/displayName";
 import { Button } from "@tremor/react";
 import { AssistantIcon } from "@/components/assistants/AssistantIcon";
 
@@ -169,7 +170,9 @@ export const AIMessage = ({
   return (
     <div className={"py-5 px-5 flex -mr-6 w-full bg-background-weak border-y border-border"}>
       <div className="mx-auto w-searchbar-xs 2xl:w-searchbar-sm 3xl:w-searchbar relative">
-        <div className="ml-8">
+        {/* px-4 matches the input bar's inset so the answer text lines up
+        exactly with the search box (previously ml-8 shifted it ~16px right). */}
+        <div className="px-4">
           <div className="flex">
             <AssistantIcon
               size="small"
@@ -178,7 +181,7 @@ export const AIMessage = ({
 
             <div className="font-bold text-emphasis ml-2 my-auto">
               {alternativeAssistant
-                ? alternativeAssistant.name
+                ? assistantDisplayName(alternativeAssistant)
                 : personaName || "Darwin"}
             </div>
 
@@ -187,7 +190,7 @@ export const AIMessage = ({
               handleShowRetrieved !== undefined &&
               isCurrentlyShowingRetrieved !== undefined &&
               !retrievalDisabled && (
-                <div className="flex w-message-xs 2xl:w-message-sm 3xl:w-message-default absolute ml-8">
+                <div className="flex w-full absolute pr-4">
                   <div className="ml-auto">
                     <ShowHideDocsButton
                       messageId={messageId}
@@ -199,7 +202,7 @@ export const AIMessage = ({
               )}
           </div>
 
-          <div className="w-message-xs 2xl:w-message-sm 3xl:w-message-default break-words mt-1 ml-8">
+          <div className="w-full break-words mt-1">
             {(!toolCall || toolCall.tool_name === SEARCH_TOOL_NAME) && (
               <>
                 {query !== undefined &&
@@ -265,7 +268,11 @@ export const AIMessage = ({
                 {typeof content === "string" ? (
                   <ReactMarkdown
                     key={messageId}
-                    className="prose max-w-full"
+                    // dark:prose-invert flips ALL markdown elements (lists,
+                    // headings, bold, blockquotes, tables) to light colors in
+                    // dark mode — without it only <p> (forced text-default
+                    // below) was readable and everything else stayed prose-grey.
+                    className="prose dark:prose-invert max-w-full"
                     components={{
                       a: (props) => {
                         const { node, ...rest } = props;
@@ -455,7 +462,9 @@ export const HumanMessage = ({
       onMouseLeave={() => setIsHovered(false)}
     >
       <div className="mx-auto w-searchbar-xs 2xl:w-searchbar-sm 3xl:w-searchbar">
-        <div className="ml-8">
+        {/* px-4 matches the input bar inset (see AIMessage) so the user's
+        message lines up exactly with the search box. */}
+        <div className="px-4">
           <div className="flex">
             <div className="p-1 bg-user rounded-lg h-fit">
               <div className="text-inverted">
@@ -465,8 +474,8 @@ export const HumanMessage = ({
 
             <div className="font-bold text-emphasis ml-2 my-auto">You</div>
           </div>
-          <div className="mx-auto mt-1 ml-8 w-searchbar-xs 2xl:w-searchbar-sm 3xl:w-searchbar-default flex flex-wrap">
-            <div className="w-message-xs 2xl:w-message-sm 3xl:w-message-default break-words">
+          <div className="mt-1 w-full flex flex-wrap">
+            <div className="w-full break-words">
               <FileDisplay files={files || []} />
 
               {isEditing ? (
@@ -563,7 +572,7 @@ export const HumanMessage = ({
                   </div>
                 </div>
               ) : typeof content === "string" ? (
-                <div className="flex flex-col preserve-lines prose max-w-full">
+                <div className="flex flex-col preserve-lines prose max-w-full text-default">
                   {content}
                 </div>
               ) : (

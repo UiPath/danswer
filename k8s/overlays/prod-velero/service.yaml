@@ -1,0 +1,16 @@
+# Exposes Velero's :8085 metrics endpoint so the robusta Prometheus (via the
+# ServiceMonitor) can scrape it.
+apiVersion: v1
+kind: Service
+metadata:
+  name: velero
+  namespace: velero
+  labels:
+    app.kubernetes.io/name: velero
+spec:
+  selector:
+    app.kubernetes.io/name: velero
+  ports:
+    - name: http-monitoring
+      port: 8085
+      targetPort: http-monitoring

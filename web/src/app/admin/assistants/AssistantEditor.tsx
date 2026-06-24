@@ -17,7 +17,7 @@ import { useRouter } from "next/navigation";
 import { usePopup } from "@/components/admin/connectors/Popup";
 import { Persona, StarterMessage } from "./interfaces";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useContext, useEffect, useState } from "react";
 import {
   BooleanFormField,
   SelectorFormField,
@@ -82,6 +82,9 @@ export function AssistantEditor({
   const { popup, setPopup } = usePopup();
 
   const isPaidEnterpriseFeaturesEnabled = usePaidEnterpriseFeaturesEnabled();
+  // Cluster-level enablement — hide the rerank / relevance assistant settings
+  // entirely when the feature is disabled cluster-wide.
+  const globalSettings = useContext(SettingsContext)?.settings;
 
   // EE only
   const { data: userGroups, isLoading: userGroupsIsLoading } = useUserGroups();
@@ -168,6 +171,7 @@ export function AssistantEditor({
 
   const initialValues = {
     name: existingPersona?.name ?? "",
+    display_name: existingPersona?.display_name ?? "",
     description: existingPersona?.description ?? "",
     system_prompt: existingPrompt?.system_prompt ?? "",
     task_prompt: existingPrompt?.task_prompt ?? "",
@@ -178,6 +182,7 @@ export function AssistantEditor({
     num_chunks: existingPersona?.num_chunks ?? null,
     include_citations: existingPersona?.prompts[0]?.include_citations ?? true,
     llm_relevance_filter: existingPersona?.llm_relevance_filter ?? false,
+    rerank_enabled: existingPersona?.rerank_enabled ?? false,
     llm_model_provider_override:
       existingPersona?.llm_model_provider_override ?? null,
     llm_model_version_override:
@@ -213,6 +218,7 @@ export function AssistantEditor({
             num_chunks: Yup.number().nullable(),
             include_citations: Yup.boolean().required(),
             llm_relevance_filter: Yup.boolean().required(),
+            rerank_enabled: Yup.boolean().required(),
             llm_model_version_override: Yup.string().nullable(),
             llm_model_provider_override: Yup.string().nullable(),
             starter_messages: Yup.array().of(
@@ -402,6 +408,12 @@ export function AssistantEditor({
                     />
 
                     <TextFormField
+                      name="display_name"
+                      label="Display name (optional)"
+                      subtext="Friendly name shown to users in the chat interface. Leave blank to use the name above."
+                    />
+
+                    <TextFormField
                       name="description"
                       label="Description"
                       subtext="Provide a short descriptions which gives users a hint as to what they should use this Assistant for."
@@ -503,35 +515,81 @@ export function AssistantEditor({
                                 {documentSets.length > 0 ? (
                                   <FieldArray
                                     name="document_set_ids"
-                                    render={(arrayHelpers: ArrayHelpers) => (
-                                      <div>
-                                        <div className="mb-3 mt-2 flex gap-2 flex-wrap text-sm">
-                                          {documentSets.map((documentSet) => {
-                                            const ind =
-                                              values.document_set_ids.indexOf(
-                                                documentSet.id
-                                              );
-                                            let isSelected = ind !== -1;
-                                            return (
-                                              <DocumentSetSelectable
-                                                key={documentSet.id}
-                                                documentSet={documentSet}
-                                                isSelected={isSelected}
-                                                onSelect={() => {
-                                                  if (isSelected) {
-                                                    arrayHelpers.remove(ind);
-                                                  } else {
-                                                    arrayHelpers.push(
-                                                      documentSet.id
-                                                    );
-                                                  }
-                                                }}
-                                              />
-                                            );
-                                          })}
+                                    render={(arrayHelpers: ArrayHelpers) => {
+                                      const selectedDocumentSets =
+                                        documentSets.filter((ds) =>
+                                          values.document_set_ids.includes(ds.id)
+                                        );
+                                      const availableDocumentSets =
+                                        documentSets.filter(
+                                          (ds) =>
+                                            !values.document_set_ids.includes(
+                                              ds.id
+                                            )
+                                        );
+                                      return (
+                                        <div>
+                                          <div className="mt-2 mb-1 text-xs font-semibold text-default">
+                                            Selected (
+                                            {selectedDocumentSets.length})
+                                          </div>
+                                          {selectedDocumentSets.length > 0 ? (
+                                            <div className="mb-3 flex gap-2 flex-wrap text-sm">
+                                              {selectedDocumentSets.map(
+                                                (documentSet) => (
+                                                  <DocumentSetSelectable
+                                                    key={documentSet.id}
+                                                    documentSet={documentSet}
+                                                    isSelected={true}
+                                                    onSelect={() => {
+                                                      const ind =
+                                                        values.document_set_ids.indexOf(
+                                                          documentSet.id
+                                                        );
+                                                      if (ind !== -1) {
+                                                        arrayHelpers.remove(ind);
+                                                      }
+                                                    }}
+                                                  />
+                                                )
+                                              )}
+                                            </div>
+                                          ) : (
+                                            <Italic className="text-sm block mb-3">
+                                              None selected — pick from the
+                                              available sets below.
+                                            </Italic>
+                                          )}
+
+                                          <div className="mt-2 mb-1 text-xs font-semibold text-default">
+                                            Available (
+                                            {availableDocumentSets.length})
+                                          </div>
+                                          {availableDocumentSets.length > 0 ? (
+                                            <div className="mb-3 flex gap-2 flex-wrap text-sm">
+                                              {availableDocumentSets.map(
+                                                (documentSet) => (
+                                                  <DocumentSetSelectable
+                                                    key={documentSet.id}
+                                                    documentSet={documentSet}
+                                                    isSelected={false}
+                                                    onSelect={() =>
+                                                      arrayHelpers.push(
+                                                        documentSet.id
+                                                      )
+                                                    }
+                                                  />
+                                                )
+                                              )}
+                                            </div>
+                                          ) : (
+                                            <Italic className="text-sm block mb-3">
+                                              All document sets are selected.
+                                            </Italic>
+                                          )}
                                         </div>
-                                      </div>
-                                    )}
+                                      );
+                                    }}
                                   />
                                 ) : (
                                   <Italic className="text-sm">
@@ -572,13 +630,25 @@ export function AssistantEditor({
 
                                   <Label>Misc</Label>
 
-                                  <BooleanFormField
-                                    name="llm_relevance_filter"
-                                    label="Apply LLM Relevance Filter"
-                                    subtext={
-                                      "If enabled, the LLM will filter out chunks that are not relevant to the user query."
-                                    }
-                                  />
+                                  {globalSettings?.llm_relevance_filter_enabled && (
+                                    <BooleanFormField
+                                      name="llm_relevance_filter"
+                                      label="Apply LLM Relevance Filter"
+                                      subtext={
+                                        "If enabled, the LLM will filter out chunks that are not relevant to the user query."
+                                      }
+                                    />
+                                  )}
+
+                                  {globalSettings?.rerank_enabled && (
+                                    <BooleanFormField
+                                      name="rerank_enabled"
+                                      label="Rerank results (beta)"
+                                      subtext={
+                                        "If enabled, retrieved results are reordered by a cross-encoder reranking model before being passed to the LLM, which usually improves answer quality. Only takes effect when reranking is enabled globally (a GPU-backed model server is deployed); otherwise this setting is ignored."
+                                      }
+                                    />
+                                  )}
 
                                   <BooleanFormField
                                     name="include_citations"

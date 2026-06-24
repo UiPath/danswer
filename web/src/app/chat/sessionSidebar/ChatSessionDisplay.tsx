@@ -164,7 +164,10 @@ export function ChatSessionDisplay({
                     {chatName || `Chat ${chatSession.id}`}
                   </p>
                   {chatSession.time_created && (
-                    <p className="text-xs text-subtle leading-tight">
+                    <p
+                      className="text-xs text-subtle leading-tight"
+                      suppressHydrationWarning
+                    >
                       {timeAgo(chatSession.time_created)}
                     </p>
                   )}
@@ -175,7 +178,7 @@ export function ChatSessionDisplay({
                   <div className="ml-auto my-auto flex">
                     <div
                       onClick={onRename}
-                      className={`hover:bg-black/10 p-1 -m-1 rounded`}
+                      className={`hover:bg-black/10 dark:hover:bg-white/10 p-1 -m-1 rounded`}
                     >
                       <FiCheck size={16} />
                     </div>
@@ -184,7 +187,7 @@ export function ChatSessionDisplay({
                         setChatName(chatSession.name);
                         setIsRenamingChat(false);
                       }}
-                      className={`hover:bg-black/10 p-1 -m-1 rounded ml-2`}
+                      className={`hover:bg-black/10 dark:hover:bg-white/10 p-1 -m-1 rounded ml-2`}
                     >
                       <FiX size={16} />
                     </div>
@@ -206,7 +209,7 @@ export function ChatSessionDisplay({
                             setIsMoreOptionsDropdownOpen(open)
                           }
                           content={
-                            <div className="hover:bg-black/10 p-1 rounded">
+                            <div className="hover:bg-black/10 dark:hover:bg-white/10 p-1 rounded">
                               <FiMoreHorizontal size={16} />
                             </div>
                           }
@@ -232,7 +235,7 @@ export function ChatSessionDisplay({
                     </div>
                     <div
                       onClick={() => setIsDeletionModalVisible(true)}
-                      className={`hover:bg-black/10 p-1 -m-1 rounded ml-2`}
+                      className={`hover:bg-black/10 dark:hover:bg-white/10 p-1 -m-1 rounded ml-2`}
                     >
                       <FiTrash size={16} />
                     </div>
@@ -243,7 +246,7 @@ export function ChatSessionDisplay({
               <div className="absolute bottom-0 right-0 top-0 bg-gradient-to-l to-transparent from-hover w-20 from-60% rounded" />
             )}
             {!isSelected && !delayedSkipGradient && (
-              <div className="absolute bottom-0 right-0 top-0 bg-gradient-to-l to-transparent from-background-weak w-8 from-0% rounded" />
+              <div className="absolute bottom-0 right-0 top-0 bg-gradient-to-l to-transparent from-background w-8 from-0% rounded" />
             )}
           </>
         </BasicSelectable>

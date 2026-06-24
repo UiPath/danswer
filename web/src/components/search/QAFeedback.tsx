@@ -57,12 +57,12 @@ const QAFeedback = ({
       {feedbackType === "like" ? (
         <ThumbsUpIcon
           size={size}
-          className="my-auto flex flex-shrink-0 text-gray-500"
+          className="my-auto flex flex-shrink-0 text-subtle"
         />
       ) : (
         <ThumbsDownIcon
           size={size}
-          className="my-auto flex flex-shrink-0 text-gray-500"
+          className="my-auto flex flex-shrink-0 text-subtle"
         />
       )}
     </div>

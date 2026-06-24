@@ -17,6 +17,7 @@ from danswer.db.tools import get_tool_by_id
 from danswer.db.tools import get_tools
 from danswer.db.tools import update_tool
 from danswer.server.features.tool.models import ToolSnapshot
+from danswer.server.utils import user_facing_http_exception
 from danswer.tools.custom.openapi_parsing import MethodSpec
 from danswer.tools.custom.openapi_parsing import openapi_to_method_specs
 from danswer.tools.custom.openapi_parsing import validate_openapi_schema
@@ -92,8 +93,17 @@ def delete_custom_tool(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        # handles case where tool is still used by an Assistant
-        raise HTTPException(status_code=400, detail=str(e))
+        # Most commonly a FK IntegrityError: the tool is still referenced by an
+        # Assistant. Give an actionable message instead of leaking raw SQL.
+        raise user_facing_http_exception(
+            e,
+            "delete the tool",
+            integrity_detail=(
+                "This tool can't be deleted because one or more assistants "
+                "still use it. Remove it from those assistants first, then try "
+                "again."
+            ),
+        )
 
 
 class ValidateToolRequest(BaseModel):

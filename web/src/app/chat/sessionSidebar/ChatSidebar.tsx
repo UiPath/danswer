@@ -32,11 +32,13 @@ import { HeaderTitle } from "@/components/header/Header";
 
 export const ChatSidebar = ({
   existingChats,
+  hasMoreChats,
   currentChatSession,
   folders,
   openedFolders,
 }: {
   existingChats: ChatSession[];
+  hasMoreChats: boolean;
   currentChatSession: ChatSession | null | undefined;
   folders: Folder[];
   openedFolders: { [key: number]: boolean };
@@ -83,12 +85,10 @@ export const ChatSidebar = ({
         w-64
         flex
         flex-none
-        bg-background-weak
+        bg-background
         3xl:w-72
-        border-r 
-        border-border 
-        flex 
-        flex-col 
+        flex
+        flex-col
         h-screen
         transition-transform`}
         id="chat-sidebar"
@@ -195,6 +195,7 @@ export const ChatSidebar = ({
 
         <ChatTab
           existingChats={existingChats}
+          hasMoreChats={hasMoreChats}
           currentChatId={currentChatId}
           folders={localFolders}
           openedFolders={openedFolders}

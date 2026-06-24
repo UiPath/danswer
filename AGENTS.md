@@ -432,6 +432,78 @@ liveness probes by design** (an aggressive one kills slow-but-healthy
 nodes); readiness probes on the Service-backed nodes
 (configserver/query/feed) gate traffic during the slow bootstrap.
 
+### 11. Slow indexing is the per-doc Vespa existence VISIT, not the crawl — and the content-hash dedup already exists
+
+When a connector (especially a big web one like docs.uipath) indexes slowly,
+the bottleneck is almost never the source fetch. For every document,
+`VespaIndex.index()` → `_clear_and_index_vespa_chunks()` →
+`_get_vespa_chunks_by_document_id` (`document_index/vespa/index.py`) hits Vespa's
+**Visit API** (`GET /document/v1/.../docid?selection=document_id=='<id>'&wantedDocumentCount=1000`)
+to find existing chunks before re-writing. That `selection` is a **corpus scan**,
+~**10–11 s per document** on the large prod index — and Vespa content nodes sit
+near-idle while it happens (it's scan/IO-bound, so scaling content nodes does
+NOT help). It's in the shared indexing path, so it slows every connector; large
+multi-doc connectors just make it obvious. The real fix is a keyed lookup
+(`document_id` as a `fast-search` attribute, or a point GET / search query)
+instead of the visit.
+
+**Do NOT "add" a Postgres content-hash dedup to skip this — it already exists.**
+`Document.indexed_content_hash` (`db/models.py`) +
+`get_doc_ids_to_update` (`indexing/indexing_pipeline.py`) skip a doc (no re-embed,
+no Vespa write) when the stored hash equals `doc.get_content_hash()`. The hash is
+written only AFTER a confirmed Vespa write. Why it can still re-index everything:
+
+- It's bypassed when `ignore_time_skip=True`, set on `from_beginning` full runs
+  (`background/indexing/run_indexing.py`).
+- Docs indexed before the hash feature have `indexed_content_hash = NULL`, so the
+  hash check can't fire and it falls back to a `doc_updated_at` timestamp compare.
+- The **web connector never sets `doc_updated_at`**, so that fallback can't skip
+  hash-less web docs either → they re-index every run (each paying the ~11 s
+  visit) UNTIL the run completes and backfills their hash. It is self-healing —
+  once hashes exist, later polls skip unchanged docs and run fast — but a full
+  run that times out before backfilling will keep re-doing the slow work.
+
+(Diagnosed 2026-06 on the docs.uipath automation-suite latest-N connector:
+~2889 of ~3161 docs had NULL hashes.)
+
+---
+
+### 12. NEVER build the web image locally on Apple Silicon
+
+The web image's `next build` step **SIGSEGVs** when built for `linux/amd64`
+under emulation on an arm64 Mac (Next.js build worker dies with `signal:
+SIGSEGV`). Building amd64 under emulation is the only way to produce a
+deployable image locally on Apple Silicon, so there is no working local web
+build there — don't try, and don't burn time "fixing" it. It is not a config /
+dependency / disk-space problem.
+
+Instead, build web on **darwinacr** (native-amd64 ACR build agents) and import
+the result into the prod registry. `k8s/scripts/build-deploy.sh` does this
+**automatically** on Apple Silicon — `build-deploy.sh deploy web` detects the
+host and routes web to `az acr build` + `az acr import`, no flags needed. The
+backend image has no native build step and still builds locally under emulation.
+
+If you ever need the raw commands (script unavailable / debugging):
+
+```bash
+# 1. build on darwinacr (native amd64)
+az acr build --registry darwinacr \
+  --image danswer/danswer-web-server:vha-N \
+  --build-arg NODE_BASE=darwinacr.azurecr.io/library/node:20-alpine \
+  --file web/Dockerfile ./web
+# 2. transfer darwinacr -> prod registry (different subscriptions, so blob-copy
+#    via pull/retag/push, NOT `az acr import`). Pure copy on the Mac, no SIGSEGV.
+az acr login --name darwinacr
+docker pull --platform linux/amd64 darwinacr.azurecr.io/danswer/danswer-web-server:vha-N
+docker tag  darwinacr.azurecr.io/danswer/danswer-web-server:vha-N \
+            sfbrdevhelmweacr.azurecr.io/danswer/danswer-web-server:vha-N
+docker push sfbrdevhelmweacr.azurecr.io/danswer/danswer-web-server:vha-N
+```
+
+(`--file` is relative to the CWD, not the `./web` context — `web/Dockerfile`,
+not `Dockerfile`. `az acr build` on darwinacr needs **PIM Contributor**; the
+prod push uses the `~/.zshrc` ACR_USERNAME/ACR_PASSWORD admin creds.)
+
 ---
 
 ## Common workflows

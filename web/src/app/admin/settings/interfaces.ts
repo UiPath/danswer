@@ -5,6 +5,11 @@ export interface Settings {
   maximum_chat_retention_days: number | null;
   // Byte cap for chat file uploads (mirrors backend CHAT_FILE_MAX_SIZE_MB).
   chat_file_max_size_mb?: number;
+  // Cluster-level enablement (mirrors backend RERANK_ENABLED /
+  // LLM_RELEVANCE_FILTER_ENABLED). When false the chat + assistant UIs hide the
+  // corresponding rerank / relevance toggles.
+  rerank_enabled?: boolean;
+  llm_relevance_filter_enabled?: boolean;
 }
 
 export interface EnterpriseSettings {

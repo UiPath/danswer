@@ -17,12 +17,17 @@ logger = setup_logger()
 
 class CreatePersonaRequest(BaseModel):
     name: str
+    # Optional user-friendly label shown in chat; defaults to `name` if omitted.
+    display_name: str | None = None
     description: str
     num_chunks: float
     llm_relevance_filter: bool
     is_public: bool
     llm_filter_extraction: bool
     recency_bias: RecencyBiasSetting
+    # Per-assistant cross-encoder reranking opt-in (beta). Defaults False so
+    # older clients that omit it keep current behavior.
+    rerank_enabled: bool = False
     prompt_ids: list[int]
     document_set_ids: list[int]
     # e.g. ID of SearchTool or ImageGenerationTool or <USER_DEFINED_TOOL>
@@ -39,6 +44,7 @@ class PersonaSnapshot(BaseModel):
     id: int
     owner: MinimalUserSnapshot | None
     name: str
+    display_name: str | None
     is_visible: bool
     is_public: bool
     display_priority: int | None
@@ -46,6 +52,7 @@ class PersonaSnapshot(BaseModel):
     num_chunks: float | None
     llm_relevance_filter: bool
     llm_filter_extraction: bool
+    rerank_enabled: bool
     llm_model_provider_override: str | None
     llm_model_version_override: str | None
     starter_messages: list[StarterMessage] | None
@@ -70,6 +77,7 @@ class PersonaSnapshot(BaseModel):
         return PersonaSnapshot(
             id=persona.id,
             name=persona.name,
+            display_name=persona.display_name,
             owner=(
                 MinimalUserSnapshot(id=persona.user.id, email=persona.user.email)
                 if persona.user
@@ -82,6 +90,7 @@ class PersonaSnapshot(BaseModel):
             num_chunks=persona.num_chunks,
             llm_relevance_filter=persona.llm_relevance_filter,
             llm_filter_extraction=persona.llm_filter_extraction,
+            rerank_enabled=persona.rerank_enabled,
             llm_model_provider_override=persona.llm_model_provider_override,
             llm_model_version_override=persona.llm_model_version_override,
             starter_messages=persona.starter_messages,

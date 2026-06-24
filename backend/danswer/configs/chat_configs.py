@@ -33,6 +33,72 @@ DISABLE_LLM_FILTER_EXTRACTION = (
 DISABLE_LLM_CHUNK_FILTER = (
     os.environ.get("DISABLE_LLM_CHUNK_FILTER", "").lower() == "true"
 )
+# Global master switch for the (one-shot, main-LLM) relevance filter, mirroring
+# RERANK_ENABLED. When true the app may run the filter for assistants/chats that
+# opt in; when false (default) it never runs regardless of per-assistant flags.
+# Unlike reranking this is LLM-only — it needs NO GPU — so it can be enabled on
+# its own as a cheaper quality tier. DISABLE_LLM_CHUNK_FILTER still hard-kills it.
+LLM_RELEVANCE_FILTER_ENABLED = (
+    os.environ.get("LLM_RELEVANCE_FILTER_ENABLED", "").lower() == "true"
+)
+# Source diversity at final doc selection: guarantee that up to
+# SOURCE_DIVERSITY_RESERVED_SLOTS of the highest-ranked docs from PROTECTED_SOURCES
+# survive into the LLM prompt, so curated KB/web content isn't crowded out by a
+# chatty high-relevance source (e.g. Slack). Replaces the old two-query
+# source-prioritization hack — always-on, global, operates on the single
+# comparably-scored candidate set. Set RESERVED_SLOTS=0 to disable.
+PROTECTED_SOURCES = [
+    s.strip().lower()
+    for s in (os.environ.get("PROTECTED_SOURCES") or "web,sfkbarticles").split(",")
+    if s.strip()
+]
+SOURCE_DIVERSITY_RESERVED_SLOTS = int(
+    os.environ.get("SOURCE_DIVERSITY_RESERVED_SLOTS") or 2
+)
+# Source-reserved RETRIEVAL (recall guarantee). SOURCE_DIVERSITY_RESERVED_SLOTS
+# above only reserves FINAL-prompt slots among docs retrieval already surfaced —
+# it cannot help when a chatty source (e.g. Slack) saturates the entire top-N and
+# a curated PROTECTED_SOURCES doc (web/KB/OutSystems) never makes the candidate set
+# at all. This runs ONE extra source-scoped retrieval pass (reusing the same ACL +
+# persona doc-set fence) to guarantee up to N PROTECTED_SOURCES docs land in the
+# candidate set, then the diversity reservation above carries them into the prompt.
+# 0 = disabled (single-query behavior). Set per environment.
+SOURCE_RESERVED_RETRIEVAL_SLOTS = int(
+    os.environ.get("SOURCE_RESERVED_RETRIEVAL_SLOTS") or 0
+)
+# Per-source cap on the FINAL LLM prompt. A chatty source (e.g. a busy Slack
+# channel) can contribute dozens of docs and monopolize what the LLM grounds in
+# and CITES, drowning out curated sources even when those are present and
+# front-ranked. This keeps the top-N (highest-ranked, after source-diversity
+# promotion) docs per source and drops the rest before the token-budget cut, so
+# the model sees a balanced set and cites across sources. 0 = disabled (no cap).
+# Generic: applies to every assistant + both flows, and only binds when one
+# source dominates (single-source assistants are unaffected).
+MAX_PROMPT_DOCS_PER_SOURCE = int(os.environ.get("MAX_PROMPT_DOCS_PER_SOURCE") or 0)
+# Verify-then-retain authoritative citations. Citations are the LLM's output and it
+# inconsistently cites curated sources even when they're at the front of the prompt.
+# After generation, if a promoted PROTECTED_SOURCES doc is in context but was NOT
+# cited by the LLM, one extra (conditional, batched) LLM call checks whether it
+# actually supports a statement in the answer; supporting docs are appended as an
+# "Authoritative sources" footer. Additive (LLM's own citations are untouched),
+# deduped (skips already-cited + same-document_id), honest (only retains on verified
+# support). 0/false = disabled. Costs at most ONE extra call, and only on answers
+# where an uncited authoritative doc is present.
+AUTHORITATIVE_CITATION_RETENTION_ENABLED = (
+    os.environ.get("AUTHORITATIVE_CITATION_RETENTION_ENABLED", "").lower() == "true"
+)
+# Versioned-docs dedup at final doc selection. Documentation sites publish the
+# SAME page under one URL per product version (e.g. docs.uipath.com/.../2024.10/…
+# and /.../2023.10/… and /.../2.2510/…). Retrieval then floods the LLM context
+# with many near-identical copies of one page, crowding out distinct sources and
+# (observed) making the LLM intermittently fail to cite -> DanswerBot skips the
+# answer. When enabled, for each docs page we keep only the newest version's
+# chunk(s) and drop the older-version duplicates, freeing context for diverse
+# pages. Scoped to URLs containing DOCS_VERSION_DEDUP_URL_SUBSTR — all other
+# sources are untouched. Set the substr empty to disable.
+DOCS_VERSION_DEDUP_URL_SUBSTR = (
+    os.environ.get("DOCS_VERSION_DEDUP_URL_SUBSTR") or "docs.uipath.com"
+)
 # Whether the LLM should be used to decide if a search would help given the chat history
 DISABLE_LLM_CHOOSE_SEARCH = (
     os.environ.get("DISABLE_LLM_CHOOSE_SEARCH", "").lower() == "true"

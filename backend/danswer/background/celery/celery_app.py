@@ -31,14 +31,18 @@ from danswer.db.deletion_attempt import check_deletion_attempt_is_allowed
 from danswer.db.document import get_document_ids_for_connector_credential_pair
 from danswer.db.document import prepare_to_modify_documents
 from danswer.db.document_set import delete_document_set
+from danswer.db.document_set import document_set_sync_cursor_key
 from danswer.db.document_set import fetch_document_sets
 from danswer.db.document_set import fetch_document_sets_for_documents
 from danswer.db.document_set import fetch_documents_for_document_set_paginated
 from danswer.db.document_set import get_document_set_by_id
 from danswer.db.document_set import mark_document_set_as_synced
+from danswer.dynamic_configs.factory import get_dynamic_config_store
+from danswer.dynamic_configs.interface import ConfigNotFoundError
 from danswer.db.engine import build_connection_string
 from danswer.db.engine import get_sqlalchemy_engine
 from danswer.db.engine import SYNC_DB_API
+from danswer.db.tasks import get_stuck_deletion_cc_ids
 from danswer.db.models import DocumentSet
 from danswer.document_index.document_index_utils import get_both_index_names
 from danswer.document_index.factory import get_default_document_index
@@ -75,6 +79,14 @@ celery_app.conf.broker_connection_retry_on_startup = True
 
 
 _SYNC_BATCH_SIZE = 100
+# Cap on how many document-set syncs run at once. Each sync fans out
+# _NUM_THREADS (32) concurrent Vespa requests, so without a cap up to
+# worker-concurrency (10) syncs × 32 = ~320 simultaneous Vespa calls would
+# hammer the cluster. 3 keeps Vespa load predictable (≈96 concurrent calls
+# across the 3 content nodes — measured to have headroom: ~2-2.5 cores/node,
+# no 429s/timeouts at 2) while draining the backlog a bit faster; the rest
+# wait and are picked up on later ticks.
+_MAX_CONCURRENT_DOCUMENT_SET_SYNCS = 3
 
 
 #####
@@ -270,9 +282,24 @@ def sync_document_set_task(document_set_id: int) -> None:
             ]
             document_index.update(update_requests=update_requests)
 
+    kv_store = get_dynamic_config_store()
+    cursor_key = document_set_sync_cursor_key(document_set_id)
+
     with Session(get_sqlalchemy_engine()) as db_session:
         try:
-            cursor = None
+            # Resume from the last persisted cursor so a worker restart or the
+            # 6h soft_time_limit doesn't force a from-scratch re-sync. Without
+            # this, a set too large to finish in one window kept re-doing its
+            # first batches forever and never reached the rest.
+            try:
+                cursor = cast(str, kv_store.load(cursor_key))
+                logger.info(
+                    f"Resuming document set {document_set_id} sync after cursor "
+                    f"'{cursor}'"
+                )
+            except ConfigNotFoundError:
+                cursor = None
+
             while True:
                 document_id_batch, cursor = fetch_documents_for_document_set_paginated(
                     document_set_id=document_set_id,
@@ -287,6 +314,16 @@ def sync_document_set_task(document_set_id: int) -> None:
                 )
                 if cursor is None:
                     break
+                # Checkpoint progress after each fully-synced batch so an
+                # interruption resumes here (re-doing at most one batch, which
+                # is idempotent since updates are "assign").
+                kv_store.store(cursor_key, cursor)
+
+            # Completed a full pass — drop the resume cursor.
+            try:
+                kv_store.delete(cursor_key)
+            except ConfigNotFoundError:
+                pass
 
             # if there are no connectors, then delete the document set. Otherwise, just
             # mark it as successfully synced.
@@ -329,12 +366,29 @@ def check_for_document_sets_sync_task() -> None:
         document_set_info = fetch_document_sets(
             user_id=None, db_session=db_session, include_outdated=True
         )
+
+        # Bound how many syncs run concurrently (each fans out 32 Vespa
+        # threads). Count the ones already in flight, then only kick off enough
+        # new ones to reach _MAX_CONCURRENT_DOCUMENT_SET_SYNCS. The rest are
+        # left for a later tick. should_sync_doc_set() returns False for sets
+        # that are up-to-date OR already syncing, so an out-of-date set for
+        # which it returns False is one that's currently in flight.
+        live_syncs = 0
+        candidates = []
         for document_set, _ in document_set_info:
+            if document_set.is_up_to_date:
+                continue
             if should_sync_doc_set(document_set, db_session):
-                logger.info(f"Syncing the {document_set.name} document set")
-                sync_document_set_task.apply_async(
-                    kwargs=dict(document_set_id=document_set.id),
-                )
+                candidates.append(document_set)
+            else:
+                live_syncs += 1
+
+        open_slots = max(0, _MAX_CONCURRENT_DOCUMENT_SET_SYNCS - live_syncs)
+        for document_set in candidates[:open_slots]:
+            logger.info(f"Syncing the {document_set.name} document set")
+            sync_document_set_task.apply_async(
+                kwargs=dict(document_set_id=document_set.id),
+            )
 
 
 @celery_app.task(
@@ -414,6 +468,41 @@ def check_for_prune_task() -> None:
                 )
 
 
+@celery_app.task(
+    name="check_for_stuck_deletion_tasks",
+    soft_time_limit=JOB_TIMEOUT,
+)
+def check_for_stuck_deletion_tasks() -> None:
+    """Re-drive connector deletions orphaned by a lost broker message.
+
+    Connector deletion is the event-driven `cleanup_connector_credential_pair_task`
+    on the non-durable Redis broker. A Redis/worker restart while it's queued
+    loses the broker message but leaves the `task_queue_jobs` row PENDING, so
+    the connector is stuck "Deleting" forever — deletion, unlike sync/prune, is
+    never periodically rescheduled, and the delete API's dedup guard then blocks
+    re-submission. This re-enqueues any cleanup task whose latest row has been
+    non-terminal past JOB_TIMEOUT.
+
+    Safe to run repeatedly: the cleanup task's per-cc-pair advisory lock makes a
+    re-enqueue a no-op if a deletion is genuinely still running, and the fresh
+    row a re-enqueue creates stays "live" for JOB_TIMEOUT — so this self-throttles
+    to at most one re-drive per cc-pair per timeout window. A re-enqueue for an
+    already-deleted cc-pair simply fails fast (cc-pair not found -> FAILURE),
+    clearing the stale "Deleting" state."""
+    with Session(get_sqlalchemy_engine()) as db_session:
+        for connector_id, credential_id in get_stuck_deletion_cc_ids(db_session):
+            logger.info(
+                f"Re-driving orphaned connector deletion: "
+                f"connector_id={connector_id}, credential_id={credential_id}"
+            )
+            cleanup_connector_credential_pair_task.apply_async(
+                kwargs=dict(
+                    connector_id=connector_id,
+                    credential_id=credential_id,
+                )
+            )
+
+
 #####
 # Celery Beat (Periodic Tasks) Settings
 #####
@@ -425,9 +514,28 @@ celery_app.conf.beat_schedule = {
 }
 celery_app.conf.beat_schedule.update(
     {
+        # Was every 5s, but check_for_prune_task scans ALL cc-pairs (444+ here,
+        # with lazy-loaded connector/credential → N+1, ~8s/run). At a 5s cadence
+        # the runs overlapped and piled up until they saturated all worker
+        # threads, starving sync_document_set_task (doc sets stuck syncing).
+        # Pruning is governed by each connector's prune_freq (~daily), so a
+        # frequent check buys nothing — 15 min is plenty.
         "check-for-prune": {
             "task": "check_for_prune_task",
-            "schedule": timedelta(seconds=5),
+            "schedule": timedelta(minutes=15),
+        },
+    }
+)
+celery_app.conf.beat_schedule.update(
+    {
+        # Safety net for connector deletions orphaned by a lost broker message
+        # (Redis is non-durable; a restart strands the task_queue_jobs row
+        # PENDING and the connector sticks on "Deleting"). Re-drives any cleanup
+        # task non-terminal past JOB_TIMEOUT. 30-min cadence is fine — the
+        # orphan threshold is JOB_TIMEOUT (6h) and the re-drive self-throttles.
+        "check-for-stuck-deletions": {
+            "task": "check_for_stuck_deletion_tasks",
+            "schedule": timedelta(minutes=30),
         },
     }
 )

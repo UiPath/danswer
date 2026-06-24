@@ -1,7 +1,12 @@
 import { Persona } from "@/app/admin/assistants/interfaces";
 
 export interface UserPreferences {
+  // Order / pinned-default of the user's assistants. Visibility is governed by
+  // `hidden_assistants`, NOT membership here.
   chosen_assistants: number[] | null;
+  // Assistants the user has explicitly hidden. Opt-out: anything not listed is
+  // visible by default, so new assistants appear for everyone automatically.
+  hidden_assistants?: number[] | null;
 }
 
 export enum UserStatus {
@@ -66,7 +71,8 @@ export type ValidSources =
   | "r2"
   | "google_cloud_storage"
   | "oci_storage"
-  | "highspot";
+  | "highspot"
+  | "outsystems";
 
 export type ValidInputTypes = "load_state" | "poll" | "event";
 export type ValidStatuses =
@@ -106,6 +112,10 @@ export interface Connector<T> extends ConnectorBase<T> {
 export interface WebConfig {
   base_url: string;
   web_connector_type?: "recursive" | "single" | "sitemap";
+  // docs.uipath.com only: auto-index the latest `max_versions` versions of a
+  // versioned product (Recursive scrape method). Ignored otherwise.
+  uipath_latest_versions?: boolean;
+  max_versions?: number;
 }
 
 export interface GithubConfig {
@@ -167,6 +177,11 @@ export interface SfKbArticlesConfig {
 
 export interface HighspotConfig {
   spot_names?: string[];
+}
+
+export interface OutSystemsConfig {
+  page_id_start?: number;
+  page_id_end?: number;
 }
 
 export interface SharepointConfig {
@@ -376,6 +391,20 @@ export interface HighspotCredentialJson {
   highspot_key: string;
   highspot_secret: string;
   highspot_url?: string;
+}
+
+// INTERIM: short-lived browser session (cookie + csrf + apiVersion) captured
+// from DevTools. Swaps to a service-account credential later. See the
+// outsystems connector.
+export interface OutSystemsCredentialJson {
+  outsystems_cookie: string;
+  outsystems_csrf: string;
+  outsystems_api_version: string;
+  // Optional: enables downloading attached files (PDFs etc). The file action's
+  // apiVersion (from an ActionFileMetadata_Get request), distinct from the page
+  // apiVersion. Absent => page text only.
+  outsystems_file_api_version?: string;
+  outsystems_base_url?: string;
 }
 
 export interface SlackCredentialJson {

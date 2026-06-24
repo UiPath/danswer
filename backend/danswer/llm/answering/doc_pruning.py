@@ -1,12 +1,22 @@
 import json
+import re
+from collections import defaultdict
 from copy import deepcopy
 from typing import TypeVar
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from danswer.chat.models import (
     LlmDoc,
 )
+from danswer.configs.chat_configs import DOCS_VERSION_DEDUP_URL_SUBSTR
+from danswer.configs.chat_configs import MAX_PROMPT_DOCS_PER_SOURCE
+from danswer.configs.chat_configs import PROTECTED_SOURCES
+from danswer.configs.chat_configs import SOURCE_DIVERSITY_RESERVED_SLOTS
 from danswer.configs.constants import IGNORE_FOR_QA
 from danswer.configs.model_configs import DOC_EMBEDDING_CONTEXT_SIZE
+from danswer.db.models import Document
 from danswer.llm.answering.models import DocumentPruningConfig
 from danswer.llm.answering.models import PromptConfig
 from danswer.llm.answering.prompts.citations_prompt import compute_max_document_tokens
@@ -84,6 +94,236 @@ def reorder_docs(
     return reordered_docs
 
 
+def ensure_source_diversity(docs: list[T]) -> list[T]:
+    """Guarantee that up to SOURCE_DIVERSITY_RESERVED_SLOTS of the highest-ranked
+    docs from PROTECTED_SOURCES survive final selection, so curated KB/web
+    content isn't crowded out of the prompt by a chatty high-relevance source
+    (e.g. Slack). Promotes those protected docs to the front (keeping their
+    relative order); everything else keeps its order. No-op when disabled
+    (reserved <= 0), when there are no protected sources, or when none are
+    present in `docs`.
+    """
+    if SOURCE_DIVERSITY_RESERVED_SLOTS <= 0 or not PROTECTED_SOURCES:
+        return docs
+
+    protected = set(PROTECTED_SOURCES)
+    promote_indices: list[int] = []
+    for ind, doc in enumerate(docs):
+        source = doc.source_type
+        source_str = (source.value if hasattr(source, "value") else str(source)).lower()
+        if source_str in protected:
+            promote_indices.append(ind)
+            if len(promote_indices) >= SOURCE_DIVERSITY_RESERVED_SLOTS:
+                break
+
+    if not promote_indices:
+        return docs
+
+    promote_set = set(promote_indices)
+    promoted = [docs[i] for i in promote_indices]
+    rest = [doc for i, doc in enumerate(docs) if i not in promote_set]
+    return promoted + rest
+
+
+def cap_docs_per_source(docs: list[T]) -> list[T]:
+    """Cap how many docs any single source contributes to the prompt, preserving
+    order (so the highest-ranked / source-diversity-promoted docs per source
+    survive and the rest are dropped). Prevents a chatty source from monopolizing
+    the context — and therefore the citations — when diverse sources are present.
+    No-op when disabled (cap <= 0). Run AFTER ensure_source_diversity so promoted
+    curated docs are kept.
+    """
+    cap = MAX_PROMPT_DOCS_PER_SOURCE
+    if cap <= 0:
+        return docs
+
+    counts: dict[str, int] = defaultdict(int)
+    capped: list[T] = []
+    for doc in docs:
+        source = doc.source_type
+        key = (source.value if hasattr(source, "value") else str(source)).lower()
+        if counts[key] >= cap:
+            continue
+        counts[key] += 1
+        capped.append(doc)
+    return capped
+
+
+_DOCS_VERSION_SEG_RE = re.compile(r"^(latest|\d+\.\d+)$")
+
+
+def _docs_page_and_version(url: str | None) -> tuple[str, str] | None:
+    """For a versioned documentation URL, return (page_key, version_token) where
+    page_key is the URL with the version path-segment stripped, so the SAME page
+    across product versions collapses to one key. Returns None for non-docs URLs
+    (other sources are left untouched) and for docs URLs with no recognizable
+    version segment. Scoped by DOCS_VERSION_DEDUP_URL_SUBSTR (empty = disabled).
+    """
+    if not url or not DOCS_VERSION_DEDUP_URL_SUBSTR:
+        return None
+    if DOCS_VERSION_DEDUP_URL_SUBSTR not in url:
+        return None
+    parts = url.split("/")
+    for i, seg in enumerate(parts):
+        if _DOCS_VERSION_SEG_RE.match(seg):
+            page_key = "/".join(parts[:i] + parts[i + 1 :])
+            return page_key, seg
+    return None
+
+
+def _versioned_url_parts(url: str | None) -> tuple[str, str, str] | None:
+    """(prefix, version, suffix) for a versioned docs URL, else None. The page is
+    identified by prefix + suffix (version segment stripped); any version's URL is
+    rebuilt as f"{prefix}/{version}/{suffix}". Scoped by DOCS_VERSION_DEDUP_URL_SUBSTR."""
+    if not url or not DOCS_VERSION_DEDUP_URL_SUBSTR:
+        return None
+    if DOCS_VERSION_DEDUP_URL_SUBSTR not in url:
+        return None
+    parts = url.split("/")
+    for i, seg in enumerate(parts):
+        if _DOCS_VERSION_SEG_RE.match(seg):
+            return "/".join(parts[:i]), seg, "/".join(parts[i + 1 :])
+    return None
+
+
+# Version mentioned in a user question: "23.10", "2023.10", "24.10", etc. We treat
+# a 2-digit year as 20YY ("23.10" -> "2023.10").
+_QUESTION_VERSION_RE = re.compile(r"\b(20\d{2}|\d{2})\.(\d{1,2})\b")
+
+
+def parse_question_doc_version(question: str | None) -> str | None:
+    """Return a normalized docs version token (e.g. '2023.10') IFF the question names
+    exactly ONE version; None when zero or multiple are mentioned (ambiguous — e.g.
+    'upgrade from 23.10 to 25.10' — so we don't guess and fall back to latest)."""
+    found: set[str] = set()
+    for m in _QUESTION_VERSION_RE.finditer(question or ""):
+        year = m.group(1)
+        if len(year) == 2:
+            year = "20" + year
+        found.add(f"{year}.{int(m.group(2))}")  # int() drops any leading zero in minor
+    return next(iter(found)) if len(found) == 1 else None
+
+
+def rewrite_docs_links(
+    docs: list[LlmDoc], db_session: Session, target_version: str | None = None
+) -> None:
+    """Rewrite each versioned docs link to the right version of that SAME page (same
+    URL with the version path-segment stripped; slug kept):
+
+    - `target_version` set (the question named one version): rewrite to THAT version
+      if it's indexed for the page — even if it's older than what was retrieved
+      (answering 'is X supported in 23.10' must point at the 23.10 doc, not latest).
+      If that version isn't indexed for the page, leave the link as-is.
+    - `target_version` None (version-agnostic question): rewrite to the NEWEST indexed
+      version, and only when it's newer than what was retrieved.
+
+    Mutates `docs` in place; no-op for non-docs links. One PK-indexed prefix-scan per
+    distinct page-prefix.
+    """
+    pages: set[tuple[str, str]] = set()
+    for doc in docs:
+        pv = _versioned_url_parts(doc.link)
+        if pv:
+            pages.add((pv[0], pv[2]))
+    if not pages:
+        return
+
+    # (prefix, suffix) page -> {version_token: full_url} of every indexed version.
+    page_versions: dict[tuple[str, str], dict[str, str]] = defaultdict(dict)
+    for prefix in {p for p, _ in pages}:
+        rows = db_session.execute(
+            select(Document.id).where(Document.id.like(f"{prefix}/%"))
+        ).all()
+        for (doc_id,) in rows:
+            pv = _versioned_url_parts(doc_id)
+            if pv is None:
+                continue
+            key = (pv[0], pv[2])
+            if key in pages:
+                page_versions[key][pv[1]] = doc_id
+
+    for doc in docs:
+        pv = _versioned_url_parts(doc.link)
+        if pv is None:
+            continue
+        versions = page_versions.get((pv[0], pv[2]))
+        if not versions:
+            continue
+        if target_version is not None:
+            if target_version in versions:
+                doc.link = versions[target_version]  # exact match (may be older)
+            # else: requested version not indexed for this page -> leave as-is
+        else:
+            newest = max(versions, key=_docs_version_sort_key)
+            if _docs_version_sort_key(newest) > _docs_version_sort_key(pv[1]):
+                doc.link = versions[newest]
+
+
+def _docs_version_sort_key(token: str) -> tuple[int, int, int]:
+    """Order doc versions newest-first. Tiered so we never have to decode the
+    exact meaning of the post-migration 'N.YYMM' scheme — we only need it to
+    outrank the frozen old 'YYYY.M' scheme, which always holds once a product has
+    migrated:
+        tier 3: 'latest' alias        (always newest)
+        tier 2: new scheme  N.YYMM    e.g. 2.2510  (current)
+        tier 1: old scheme  YYYY.M    e.g. 2024.10 (frozen)
+        tier 0: unrecognized          (sorts last)
+    Within a tier, compare the numeric components.
+    """
+    if token == "latest":
+        return (3, 0, 0)
+    m = re.match(r"^(\d+)\.(\d+)$", token)
+    if not m:
+        return (0, 0, 0)
+    major, minor = int(m.group(1)), int(m.group(2))
+    if major >= 1000:  # YYYY.M (old scheme)
+        return (1, major, minor)
+    return (2, major, minor)  # N.YYMM (new scheme) -> ranks above all old
+
+
+def dedupe_doc_versions(
+    docs: list[LlmDoc], doc_relevance_list: list[bool] | None
+) -> tuple[list[LlmDoc], list[bool] | None]:
+    """Collapse the same documentation page repeated across product versions,
+    keeping only the newest version's chunk(s) so distinct pages aren't crowded
+    out of the LLM context. Only affects versioned docs URLs (see
+    DOCS_VERSION_DEDUP_URL_SUBSTR); every other source/doc passes through.
+    `doc_relevance_list` is filtered in lockstep (prune_documents requires the
+    two stay equal length).
+    """
+    parsed = [_docs_page_and_version(doc.link or doc.document_id) for doc in docs]
+
+    # Newest version token seen per docs page.
+    newest: dict[str, str] = {}
+    for pv in parsed:
+        if pv is None:
+            continue
+        page, ver = pv
+        if page not in newest or _docs_version_sort_key(
+            ver
+        ) > _docs_version_sort_key(newest[page]):
+            newest[page] = ver
+
+    kept_docs: list[LlmDoc] = []
+    kept_rel: list[bool] = []
+    dropped = 0
+    for i, doc in enumerate(docs):
+        pv = parsed[i]
+        # Keep non-docs / unversioned docs, and only the newest version per page.
+        if pv is None or pv[1] == newest[pv[0]]:
+            kept_docs.append(doc)
+            if doc_relevance_list is not None:
+                kept_rel.append(doc_relevance_list[i])
+        else:
+            dropped += 1
+
+    if dropped:
+        logger.info(
+            f"Deduped {dropped} older-version duplicate doc page(s) from the LLM context"
+        )
+    return kept_docs, (kept_rel if doc_relevance_list is not None else None)
+
+
 def _remove_docs_to_ignore(docs: list[LlmDoc]) -> list[LlmDoc]:
     return [doc for doc in docs if not doc.metadata.get(IGNORE_FOR_QA)]
 
@@ -103,6 +343,10 @@ def _apply_pruning(
     docs = reorder_docs(docs=docs, doc_relevance_list=doc_relevance_list)
     # remove docs that are explicitly marked as not for QA
     docs = _remove_docs_to_ignore(docs=docs)
+    # guarantee curated KB/web docs aren't crowded out before the token-budget cut
+    docs = ensure_source_diversity(docs)
+    # cap any single source so a chatty one can't monopolize the prompt + citations
+    docs = cap_docs_per_source(docs)
 
     tokens_per_doc: list[int] = []
     final_doc_ind = None
@@ -210,6 +454,10 @@ def prune_documents(
 ) -> list[LlmDoc]:
     if doc_relevance_list is not None:
         assert len(docs) == len(doc_relevance_list)
+
+    # Drop older-version duplicates of the same docs page before anything else,
+    # so the freed context slots get filled by distinct sources during pruning.
+    docs, doc_relevance_list = dedupe_doc_versions(docs, doc_relevance_list)
 
     doc_token_limit = _compute_limit(
         prompt_config=prompt_config,

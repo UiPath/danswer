@@ -40,3 +40,35 @@ def validate_api_key(request: Request, db_session: Session = Depends(get_session
     # Cache it for future requests
     cache[api_key_value] = True
     return None
+
+
+def request_has_valid_api_key(request: Request, db_session: Session) -> bool:
+    """Return True if the request carries a valid X-API-Key.
+
+    These keys are service credentials for automation (they intentionally do NOT
+    map to a browser `User`). `current_user` uses this to authorize an api-key
+    request as an anonymous service caller instead of 403'ing it into the SSO
+    flow once AUTH_TYPE enforces auth (e.g. OIDC). Mirrors `validate_api_key`'s
+    lookup + cache exactly, so the two stay consistent.
+
+    NOTE: `db_session` is passed in (not a Depends) because the caller already
+    holds a session.
+    """
+    if _API_KEY_HEADER not in request.headers:
+        return False
+
+    api_key_value = request.headers.get(_API_KEY_HEADER)
+    if not api_key_value:
+        return False
+
+    if api_key_value in cache:
+        return True
+
+    api_key = db_session.scalar(
+        select(ApiKey).where(ApiKey.hashed_api_key == api_key_value)
+    )
+    if api_key is None:
+        return False
+
+    cache[api_key_value] = True
+    return True

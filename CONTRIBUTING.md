@@ -112,21 +112,21 @@ playwright install
 #### Dependent Docker Containers
 First navigate to `danswer/deployment/docker_compose`, then start Postgres.
 
-The simplest path is the compose-managed pair (uses a named docker volume for
-Vespa's data; data lives until you `docker volume rm`):
+Start Postgres and Redis via compose under the `-p danswer-stack` project, so
+they share the `danswer-stack_default` network (Vespa is run separately, below,
+on the same network):
 
 ```bash
-docker compose -f docker-compose.dev.yml -p danswer-stack up -d relational_db
+docker compose -f docker-compose.dev.yml -p danswer-stack up -d relational_db redis
 ```
 
-If you'd rather pin Vespa's data + logs to host-mounted directories so you
-can inspect them outside Docker (and survive `docker compose down -v`),
-start Postgres via compose and Vespa via a manual `docker run` on the same
-network. Pick any host paths you like:
+Run Vespa via a manual `docker run` on that same `danswer-stack_default`
+network, with host-mounted data + logs dirs so you can inspect them outside
+Docker (and they survive `docker compose down -v`). Use this rather than the
+compose `index` service (it's unreliable locally); the `--network` flag is what
+keeps the manually-run Vespa on the shared network. Pick any host paths:
 
 ```bash
-docker compose -f docker-compose.dev.yml -p danswer-stack up -d relational_db
-
 export VESPA_VAR_STORAGE="${HOME}/danswer-vespa-data/var"
 export VESPA_LOG_STORAGE="${HOME}/danswer-vespa-data/logs"
 mkdir -p "$VESPA_VAR_STORAGE" "$VESPA_LOG_STORAGE"
@@ -142,13 +142,26 @@ docker run \
   --publish 19071:19071 \
   vespaengine/vespa:8.277.17
 
-# Sanity check: both containers should be on the danswer-stack_default network
+# Sanity check: all containers (Postgres, Redis, Vespa) on danswer-stack_default
 docker ps --format '{{ .ID }} {{ .Names }} {{ json .Networks }}'
 ```
 
 (index refers to Vespa and relational_db refers to Postgres. The hostname
 `index` matters — Danswer reaches Vespa by that DNS name on the shared
 network.)
+
+Redis (caching + per-user rate limiting) comes up with the commands above as
+part of the `danswer-stack` project, so it's already on the shared
+`danswer-stack_default` network. To check it or manage it on its own:
+
+```bash
+docker compose -f docker-compose.dev.yml -p danswer-stack exec redis redis-cli ping   # -> PONG
+docker compose -f docker-compose.dev.yml -p danswer-stack stop redis
+```
+
+The container runs with no auth and publishes `6379` to the host, so a
+host-run backend connects with `REDIS_HOST=localhost`, `REDIS_PORT=6379`,
+`REDIS_PASSWORD=` (empty). (In-compose, the service name is `redis`.)
 
 #### Running Danswer
 To start the frontend, navigate to `danswer/web` and run:
@@ -325,7 +338,18 @@ export MODEL_SERVER_HOST=localhost
 export MODEL_SERVER_PORT=9000
 export INDEXING_MODEL_SERVER_HOST=localhost
 export INDEXING_MODEL_SERVER_PORT=9000
-export REDIS_HOST=cache             # matches the compose service name
+export REDIS_HOST=localhost         # backend runs on the host; reach Redis via the published 6379 port
+
+# Cross-encoder reranking, available locally. The model server (`dmo`) loads the
+# reranker IN-PROCESS (sentence-transformers, CPU) — no extra container. Uses the
+# small default model (mxbai-rerank-xsmall-v1); set RERANK_MODEL_NAME to try a
+# bigger one. Reranking still only runs for assistants / chats that opt in.
+# (Prod serves the reranker via a TEI container instead — see k8s/optional/tei-rerank.)
+export RERANK_ENABLED=true
+export LLM_RELEVANCE_FILTER_ENABLED=true   # LLM relevance filter; independent of rerank
+# Advanced: to mirror prod and offload the reranker to a local TEI container
+# instead of in-process, run TEI yourself and set:
+# export RERANK_SERVER_URL=http://localhost:8086
 
 # ---------------------------------------------------------------------------
 # LLM (Generative AI) — UiPath LLM Gateway via OAuth client credentials

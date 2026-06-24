@@ -124,7 +124,12 @@ const DocumentSetTable = ({
             .map((documentSet) => {
               return (
                 <TableRow key={documentSet.id}>
-                  <TableCell className="overflow-hidden">
+                  {/* No overflow-hidden here: the EditRow renders an absolutely
+                      positioned "Cannot update while syncing" tooltip that must
+                      escape the cell. Column width is held by table-fixed, and
+                      the name itself is clipped by the inner `truncate` span, so
+                      dropping overflow-hidden doesn't break the layout. */}
+                  <TableCell>
                     <div className="flex gap-x-1 text-emphasis min-w-0 max-w-full">
                       <EditRow documentSet={documentSet} />
                     </div>

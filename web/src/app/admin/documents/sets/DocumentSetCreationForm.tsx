@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { ArrayHelpers, FieldArray, Form, Formik } from "formik";
 import * as Yup from "yup";
 import { PopupSpec } from "@/components/admin/connectors/Popup";
@@ -12,10 +13,16 @@ import {
 } from "@/lib/types";
 import {
   BooleanFormField,
+  Label,
+  SubLabel,
   TextFormField,
 } from "@/components/admin/connectors/Field";
 import { ConnectorTitle } from "@/components/admin/connectors/ConnectorTitle";
-import { SearchMultiSelectDropdown } from "@/components/Dropdown";
+import {
+  SearchMultiSelectDropdown,
+  DefaultDropdown,
+} from "@/components/Dropdown";
+import { getSourceMetadata } from "@/lib/sources";
 import { Button, Divider, Text } from "@tremor/react";
 import { FiPlus, FiUsers, FiX } from "react-icons/fi";
 import { usePaidEnterpriseFeaturesEnabled } from "@/components/settings/usePaidEnterpriseFeaturesEnabled";
@@ -61,6 +68,26 @@ export const DocumentSetCreationForm = ({
   const isPaidEnterpriseFeaturesEnabled = usePaidEnterpriseFeaturesEnabled();
 
   const isUpdate = existingDocumentSet !== undefined;
+
+  // Optional connector-type filter for the picker below. Defaults to "all" so
+  // every connector shows; narrows the picker to a single source when chosen.
+  const [sourceFilter, setSourceFilter] = useState<string>("all");
+  const sourceCounts = ccPairs.reduce<Record<string, number>>((acc, ccPair) => {
+    const source = ccPair.connector.source as string;
+    acc[source] = (acc[source] ?? 0) + 1;
+    return acc;
+  }, {});
+  const sourceOptions = [
+    { name: `All connectors (${ccPairs.length})`, value: "all" },
+    ...Array.from(new Set(ccPairs.map((ccPair) => ccPair.connector.source)))
+      .map((source) => ({
+        name: `${getSourceMetadata(source).displayName} (${
+          sourceCounts[source as string]
+        })`,
+        value: source as string,
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name)),
+  ];
 
   return (
     <div>
@@ -127,7 +154,7 @@ export const DocumentSetCreationForm = ({
           }
         }}
       >
-        {({ isSubmitting, values }) => (
+        {({ isSubmitting, values, setFieldValue }) => (
           <Form>
             <TextFormField
               name="name"
@@ -145,14 +172,13 @@ export const DocumentSetCreationForm = ({
 
             <Divider />
 
-            <h2 className="mb-1 font-medium text-base">
-              Pick your connectors:
-            </h2>
-            <p className="mb-3 text-xs">
+            <Label>Pick your connectors</Label>
+            <SubLabel>
               All documents indexed by the selected connectors will be a part of
-              this document set. Search by connector name and click to add;
-              click a selected connector to remove it.
-            </p>
+              this document set. Filter by connector type, then search by name
+              and click to add; click a selected connector to remove it.
+            </SubLabel>
+
             <FieldArray
               name="cc_pair_ids"
               render={(arrayHelpers: ArrayHelpers) => {
@@ -161,19 +187,35 @@ export const DocumentSetCreationForm = ({
                 );
                 const availableOptions = ccPairs
                   .filter(
-                    (ccPair) => !values.cc_pair_ids.includes(ccPair.cc_pair_id)
+                    (ccPair) =>
+                      !values.cc_pair_ids.includes(ccPair.cc_pair_id) &&
+                      (sourceFilter === "all" ||
+                        ccPair.connector.source === sourceFilter)
                   )
-                  .map((ccPair) => ({
-                    name: ccPair.name?.toString() || "",
-                    value: ccPair.cc_pair_id?.toString() ?? "",
-                    metadata: {
-                      ccPairId: ccPair.cc_pair_id,
-                      connector: ccPair.connector,
-                      configSummary: summarizeConnectorConfig(
-                        ccPair.connector.connector_specific_config
-                      ),
-                    },
-                  }));
+                  .map((ccPair) => {
+                    const configSummary = summarizeConnectorConfig(
+                      ccPair.connector.connector_specific_config
+                    );
+                    return {
+                      name: ccPair.name?.toString() || "",
+                      value: ccPair.cc_pair_id?.toString() ?? "",
+                      // Make the connector's source + config (which for web
+                      // connectors holds the URL) searchable, not just the
+                      // display name — so typing a URL fragment finds it.
+                      searchableText: [
+                        ccPair.name,
+                        ccPair.connector?.source,
+                        configSummary,
+                      ]
+                        .filter(Boolean)
+                        .join(" "),
+                      metadata: {
+                        ccPairId: ccPair.cc_pair_id,
+                        connector: ccPair.connector,
+                        configSummary,
+                      },
+                    };
+                  });
                 return (
                   <div className="mb-3">
                     {selectedCCPairs.length > 0 && (
@@ -207,6 +249,15 @@ export const DocumentSetCreationForm = ({
                         })}
                       </div>
                     )}
+                    <div className="w-52 mb-3">
+                      <DefaultDropdown
+                        options={sourceOptions}
+                        selected={sourceFilter}
+                        onSelect={(value) =>
+                          setSourceFilter((value as string) ?? "all")
+                        }
+                      />
+                    </div>
                     <SearchMultiSelectDropdown
                       options={availableOptions}
                       onSelect={(option) => {
@@ -249,6 +300,37 @@ export const DocumentSetCreationForm = ({
                         );
                       }}
                     />
+                    <div className="mt-2 flex gap-4 text-sm">
+                      <button
+                        type="button"
+                        className="text-link hover:text-link-hover disabled:opacity-50 disabled:cursor-default"
+                        disabled={availableOptions.length === 0}
+                        onClick={() =>
+                          setFieldValue("cc_pair_ids", [
+                            ...values.cc_pair_ids,
+                            ...availableOptions.map((option) =>
+                              parseInt(option.value as string)
+                            ),
+                          ])
+                        }
+                      >
+                        {sourceFilter === "all"
+                          ? "Select all"
+                          : "Select all of this type"}
+                        {availableOptions.length > 0
+                          ? ` (${availableOptions.length})`
+                          : ""}
+                      </button>
+                      {values.cc_pair_ids.length > 0 && (
+                        <button
+                          type="button"
+                          className="text-link hover:text-link-hover"
+                          onClick={() => setFieldValue("cc_pair_ids", [])}
+                        >
+                          Clear selection
+                        </button>
+                      )}
+                    </div>
                   </div>
                 );
               }}

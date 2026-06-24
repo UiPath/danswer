@@ -67,6 +67,49 @@ export async function moveAssistantDown(
 }
 
 // ---------------------------------------------------------------------------
+// Hidden-assistants (opt-out visibility). `hidden_assistants` is the source of
+// truth for what's shown in the picker; `chosen_assistants` (above) only orders
+// what's visible. Anything NOT hidden is visible by default — so newly created
+// assistants appear for everyone automatically.
+// ---------------------------------------------------------------------------
+
+/** PATCH the user's full `hidden_assistants` array. */
+export async function setHiddenAssistants(
+  hiddenAssistants: number[]
+): Promise<boolean> {
+  const response = await fetch("/api/user/hidden-assistants", {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ hidden_assistants: hiddenAssistants }),
+  });
+
+  return response.ok;
+}
+
+/** Hide a single assistant (add to the hidden list; idempotent). */
+export async function hideAssistant(
+  assistantId: number,
+  hiddenAssistants: number[]
+): Promise<boolean> {
+  if (hiddenAssistants.includes(assistantId)) {
+    return true;
+  }
+  return setHiddenAssistants([...hiddenAssistants, assistantId]);
+}
+
+/** Show a single assistant (remove from the hidden list; idempotent). */
+export async function unhideAssistant(
+  assistantId: number,
+  hiddenAssistants: number[]
+): Promise<boolean> {
+  return setHiddenAssistants(
+    hiddenAssistants.filter((id) => id !== assistantId)
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Used by the new Manage Assistants UX
 // ---------------------------------------------------------------------------
 

@@ -9,6 +9,10 @@ export interface Option<T> {
   description?: string;
   metadata?: { [key: string]: any };
   icon?: React.FC<{ size?: number; className?: string }>;
+  // Optional haystack the search matches against instead of just `name`.
+  // Lets callers make extra fields searchable (e.g. a web connector's URL,
+  // which lives in its config, not its display name). Falls back to `name`.
+  searchableText?: string;
 }
 
 export type StringOrNumberOption = Option<string | number>;
@@ -57,9 +61,45 @@ export function SearchMultiSelectDropdown({
     setSearchTerm(""); // Clear search term after selection
   };
 
-  const filteredOptions = options.filter((option) =>
-    option.name.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  // Search = token-based AND match + relevance ranking over `searchableText`
+  // (falling back to `name`). Split the query on whitespace and require every
+  // term to appear (any order), then score so the closest matches sort first:
+  // exact name > name prefix > contiguous-in-name > contiguous-in-haystack >
+  // scattered tokens; ties break toward shorter names and earlier matches.
+  // With no query, original order is preserved. Results are capped so a broad
+  // query doesn't render hundreds of rows (the best MAX_RENDERED show; the
+  // rest are reachable by typing more).
+  const MAX_RENDERED = 50;
+  const query = searchTerm.trim().toLowerCase();
+  const terms = query.split(/\s+/).filter(Boolean);
+
+  const scoreOption = (option: StringOrNumberOption): number => {
+    if (terms.length === 0) return 0; // no query → keep all, original order
+    const name = option.name.toLowerCase();
+    const haystack = (option.searchableText ?? option.name).toLowerCase();
+    if (!terms.every((term) => haystack.includes(term))) return -1; // no match
+    let score = 1; // base: it matches
+    if (name === query) score += 1000;
+    else if (name.startsWith(query)) score += 600;
+    else if (name.includes(query)) score += 400;
+    else if (haystack.startsWith(query)) score += 300;
+    else if (haystack.includes(query)) score += 200;
+    if (terms.every((term) => name.includes(term))) score += 100; // hits the name, not just config
+    const firstPos = haystack.indexOf(terms[0]);
+    if (firstPos >= 0) score += (Math.max(0, 60 - firstPos) / 60) * 50; // earlier = better
+    score -= name.length * 0.05; // shorter names win ties
+    return score;
+  };
+
+  const ranked = options
+    .map((option) => ({ option, score: scoreOption(option) }))
+    .filter((entry) => entry.score >= 0)
+    .sort((a, b) => b.score - a.score);
+  const totalMatches = ranked.length;
+  const filteredOptions = ranked
+    .slice(0, MAX_RENDERED)
+    .map((entry) => entry.option);
+  const hiddenMatchCount = totalMatches - filteredOptions.length;
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -172,6 +212,12 @@ export function SearchMultiSelectDropdown({
               >
                 No matches found...
               </button>
+            )}
+            {hiddenMatchCount > 0 && (
+              <div className="px-4 py-2 text-xs text-subtle border-t border-border">
+                Showing top {filteredOptions.length} of {totalMatches} matches —
+                keep typing to narrow.
+              </div>
             )}
           </div>
         </div>

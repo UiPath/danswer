@@ -20,6 +20,8 @@ from shared_configs.configs import INDEXING_ONLY
 from shared_configs.configs import MIN_THREADS_ML_MODELS
 from shared_configs.configs import MODEL_SERVER_ALLOWED_HOST
 from shared_configs.configs import MODEL_SERVER_PORT
+from shared_configs.configs import RERANK_ENABLED
+from shared_configs.configs import RERANK_SERVER_URL
 
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
@@ -41,7 +43,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
 
     if not INDEXING_ONLY:
         warm_up_intent_model()
-        if ENABLE_RERANKING_REAL_TIME_FLOW or ENABLE_RERANKING_ASYNC_FLOW:
+        # Only load the cross-encoder here when reranking is enabled AND it's
+        # NOT served by an external TEI server (RERANK_SERVER_URL). With TEI,
+        # the reranker lives in that container, so this server stays embedding +
+        # intent only.
+        if (
+            RERANK_ENABLED
+            or ENABLE_RERANKING_REAL_TIME_FLOW
+            or ENABLE_RERANKING_ASYNC_FLOW
+        ) and not RERANK_SERVER_URL:
             warm_up_cross_encoders()
     else:
         logger.info("This model server should only run document indexing.")

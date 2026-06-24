@@ -16,6 +16,11 @@ resources:
 
 components:
   - ../../optional/background-scaling
+  # GPU cross-encoder reranker. DISABLED (RERANK_ENABLED=false in env.properties),
+  # so the tei-rerank component + GPU node pool are removed. To re-enable: set
+  # RERANK_ENABLED=true + RERANK_SERVER_URL, re-add the component below, and add a
+  # GPU node pool.
+  # - ../../optional/tei-rerank
 
 namespace: darwin
 
@@ -25,10 +30,10 @@ namespace: darwin
 images:
   - name: danswer-backend
     newName: sfbrdevhelmweacr.azurecr.io/danswer/danswer-backend
-    newTag: vha-147
+    newTag: vha-204
   - name: danswer-web-server
     newName: sfbrdevhelmweacr.azurecr.io/danswer/danswer-web-server
-    newTag: vha-77
+    newTag: vha-103
   - name: danswer-model-server
     newName: danswer/danswer-model-server
     newTag: v0.3.94

@@ -72,6 +72,10 @@ def get_chat_sessions_by_user(
     deleted: bool | None,
     db_session: Session,
     include_one_shot: bool = False,
+    limit: int | None = None,
+    offset: int = 0,
+    start_time: datetime | None = None,
+    end_time: datetime | None = None,
 ) -> list[ChatSession]:
     stmt = select(ChatSession).where(ChatSession.user_id == user_id)
 
@@ -80,6 +84,25 @@ def get_chat_sessions_by_user(
 
     if deleted is not None:
         stmt = stmt.where(ChatSession.deleted == deleted)
+
+    # Date-range bounds let the sidebar load each time bucket independently
+    # (recent / previous-30-days / older) without paging through the buckets
+    # above it. `start_time` is inclusive, `end_time` exclusive, so adjacent
+    # buckets partition cleanly without overlap.
+    if start_time is not None:
+        stmt = stmt.where(ChatSession.time_created >= start_time)
+    if end_time is not None:
+        stmt = stmt.where(ChatSession.time_created < end_time)
+
+    # Newest first so the sidebar's "recent" page + lazy-loaded older pages
+    # walk backwards through history deterministically (offset pagination).
+    # id breaks ties when several sessions share the same time_created.
+    stmt = stmt.order_by(ChatSession.time_created.desc(), ChatSession.id.desc())
+
+    if offset:
+        stmt = stmt.offset(offset)
+    if limit is not None:
+        stmt = stmt.limit(limit)
 
     result = db_session.execute(stmt)
     chat_sessions = result.scalars().all()

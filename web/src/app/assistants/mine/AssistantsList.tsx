@@ -75,10 +75,8 @@ import { Bubble } from "@/components/Bubble";
 import { PopupSpec, usePopup } from "@/components/admin/connectors/Popup";
 import { checkUserOwnsAssistant } from "@/lib/assistants/checkOwnership";
 import {
-  bulkAddToList,
-  bulkRemoveFromList,
   reorderAssistantList,
-  setDefaultAssistant,
+  setHiddenAssistants,
 } from "@/lib/assistants/updateAssistantPreferences";
 import { AssistantSharingModal } from "./AssistantSharingModal";
 import { AssistantSharedStatusDisplay } from "../AssistantSharedStatus";
@@ -423,7 +421,9 @@ function SortableAssistantRow(props: RowProps) {
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: props.assistant.id });
+    // String id: the default assistant has id 0, and a falsy numeric id trips
+    // up dnd-kit's drag pipeline (it can't be grabbed). "0" is truthy.
+  } = useSortable({ id: String(props.assistant.id) });
 
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
@@ -541,12 +541,15 @@ export function AssistantsList({ user, assistants }: AssistantsListProps) {
   const router = useRouter();
   const { popup, setPopup } = usePopup();
 
-  // When the user has no preference yet, treat every accessible
-  // assistant as "visible by default" — matches the previous behavior.
-  const initialChosen: number[] =
-    user?.preferences?.chosen_assistants ?? assistants.map((a) => a.id);
-
-  const [chosenOrder, setChosenOrder] = useState<number[]>(initialChosen);
+  // Opt-out model: `chosenOrder` controls ORDER only (and default = position
+  // 0); `hiddenIds` controls VISIBILITY. Anything not hidden is visible — so a
+  // newly created assistant shows up here (and in chat) automatically.
+  const [chosenOrder, setChosenOrder] = useState<number[]>(
+    user?.preferences?.chosen_assistants ?? []
+  );
+  const [hiddenIds, setHiddenIds] = useState<number[]>(
+    user?.preferences?.hidden_assistants ?? []
+  );
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [sharingAssistantId, setSharingAssistantId] = useState<number | null>(
@@ -565,20 +568,29 @@ export function AssistantsList({ user, assistants }: AssistantsListProps) {
     () => new Map(assistants.map((a) => [a.id, a])),
     [assistants]
   );
-  const chosenSet = useMemo(() => new Set(chosenOrder), [chosenOrder]);
+  const hiddenSet = useMemo(() => new Set(hiddenIds), [hiddenIds]);
 
+  // Visible = everything NOT hidden, ordered by chosenOrder first, then the
+  // rest in their incoming (backend) order.
   const visibleAssistants: Persona[] = useMemo(() => {
-    const out: Persona[] = [];
-    for (const id of chosenOrder) {
-      const a = assistantsById.get(id);
-      if (a) out.push(a);
-    }
-    return out;
-  }, [chosenOrder, assistantsById]);
+    const notHidden = assistants.filter((a) => !hiddenSet.has(a.id));
+    const orderMap = new Map(chosenOrder.map((id, i) => [id, i]));
+    return notHidden
+      .map((a, i) => ({ a, i }))
+      .sort((x, y) => {
+        const ox = orderMap.get(x.a.id);
+        const oy = orderMap.get(y.a.id);
+        if (ox !== undefined && oy !== undefined) return ox - oy;
+        if (ox !== undefined) return -1;
+        if (oy !== undefined) return 1;
+        return x.i - y.i;
+      })
+      .map(({ a }) => a);
+  }, [assistants, hiddenSet, chosenOrder]);
 
   const hiddenAssistants: Persona[] = useMemo(
-    () => assistants.filter((a) => !chosenSet.has(a.id)),
-    [assistants, chosenSet]
+    () => assistants.filter((a) => hiddenSet.has(a.id)),
+    [assistants, hiddenSet]
   );
 
   const matchesSearch = (a: Persona) => {
@@ -592,15 +604,14 @@ export function AssistantsList({ user, assistants }: AssistantsListProps) {
   const filteredVisible = visibleAssistants.filter(matchesSearch);
   const filteredHidden = hiddenAssistants.filter(matchesSearch);
 
-  // The default is just position 0 of chosen_assistants. If the user has
-  // no preference at all, there's no notion of "default yet" — leave it
-  // unset so no row shows the accent until the user picks.
-  const defaultId =
-    user?.preferences?.chosen_assistants && chosenOrder.length > 0
-      ? chosenOrder[0]
-      : null;
+  // Default = position 0 of the explicit order. If the user has never set an
+  // order, there's no default yet — leave it unset so no row shows the accent.
+  const defaultId = chosenOrder.length > 0 ? chosenOrder[0] : null;
 
   // ---- persistence with optimistic + undo --------------------------------
+  // Two independent arrays now: `chosen_assistants` (order) and
+  // `hidden_assistants` (visibility). persistOrder writes the former,
+  // persistHidden the latter; each is optimistic with rollback + undo.
 
   const persistOrder = async (
     nextOrder: number[],
@@ -640,15 +651,54 @@ export function AssistantsList({ user, assistants }: AssistantsListProps) {
     return true;
   };
 
+  const persistHidden = async (
+    nextHidden: number[],
+    {
+      successMsg,
+      undoToHidden,
+    }: { successMsg?: string; undoToHidden?: number[] } = {}
+  ): Promise<boolean> => {
+    const prev = hiddenIds;
+    setHiddenIds(nextHidden);
+    const ok = await setHiddenAssistants(nextHidden);
+    if (!ok) {
+      setHiddenIds(prev);
+      setPopup({
+        message: "Couldn't update your assistant list — please try again.",
+        type: "error",
+      });
+      return false;
+    }
+    if (successMsg) {
+      setPopup({
+        message: successMsg,
+        type: "success",
+        undo:
+          undoToHidden !== undefined
+            ? {
+                onClick: async () => {
+                  await persistHidden(undoToHidden);
+                },
+              }
+            : undefined,
+      });
+    }
+    router.refresh();
+    return true;
+  };
+
   // ---- handlers ----------------------------------------------------------
 
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
-    const oldIndex = chosenOrder.indexOf(Number(active.id));
-    const newIndex = chosenOrder.indexOf(Number(over.id));
+    // Reorder operates over the *visible* list (which may include assistants
+    // not yet in chosenOrder); we persist the resulting full visible order.
+    const visibleIds = visibleAssistants.map((a) => a.id);
+    const oldIndex = visibleIds.indexOf(Number(active.id));
+    const newIndex = visibleIds.indexOf(Number(over.id));
     if (oldIndex < 0 || newIndex < 0) return;
-    const next = arrayMove(chosenOrder, oldIndex, newIndex);
+    const next = arrayMove(visibleIds, oldIndex, newIndex);
     void persistOrder(next, {
       successMsg: "Order updated.",
       undoToOrder: chosenOrder,
@@ -656,38 +706,28 @@ export function AssistantsList({ user, assistants }: AssistantsListProps) {
   };
 
   const handleSetDefault = async (id: number) => {
-    if (chosenOrder[0] === id) return;
-    const prev = chosenOrder;
-    const ok = await persistOrder(
-      [id, ...chosenOrder.filter((x) => x !== id)],
-      {
-        successMsg: `Default assistant updated.`,
-        undoToOrder: prev,
-      }
-    );
-    if (!ok) {
-      // persistOrder already showed the error toast.
-    } else {
-      // setDefaultAssistant also handles the case where id wasn't in
-      // chosen_assistants; persistOrder above already prepended it.
-      void setDefaultAssistant(id, prev); // best-effort idempotent confirmation
-    }
+    const visibleIds = visibleAssistants.map((a) => a.id);
+    if (visibleIds[0] === id) return;
+    await persistOrder([id, ...visibleIds.filter((x) => x !== id)], {
+      successMsg: `Default assistant updated.`,
+      undoToOrder: chosenOrder,
+    });
   };
 
   const handleToggleVisibility = async (id: number, makeVisible: boolean) => {
-    const prev = chosenOrder;
+    const assistant = assistantsById.get(id);
     if (makeVisible) {
-      // Add to end so reorder isn't surprising.
-      const next = [...chosenOrder, id];
-      const assistant = assistantsById.get(id);
-      await persistOrder(next, {
-        successMsg: assistant
-          ? `"${assistant.name}" added to your picker.`
-          : "Added to your picker.",
-        undoToOrder: prev,
-      });
+      await persistHidden(
+        hiddenIds.filter((x) => x !== id),
+        {
+          successMsg: assistant
+            ? `"${assistant.name}" shown in your picker.`
+            : "Shown in your picker.",
+          undoToHidden: hiddenIds,
+        }
+      );
     } else {
-      if (chosenOrder.length === 1 && chosenOrder[0] === id) {
+      if (visibleAssistants.length <= 1) {
         setPopup({
           message:
             "You need at least one visible assistant — can't hide the last one.",
@@ -695,13 +735,11 @@ export function AssistantsList({ user, assistants }: AssistantsListProps) {
         });
         return;
       }
-      const next = chosenOrder.filter((x) => x !== id);
-      const assistant = assistantsById.get(id);
-      await persistOrder(next, {
+      await persistHidden([...hiddenIds, id], {
         successMsg: assistant
           ? `"${assistant.name}" hidden from your picker.`
           : "Hidden from your picker.",
-        undoToOrder: prev,
+        undoToHidden: hiddenIds,
       });
     }
   };
@@ -718,67 +756,41 @@ export function AssistantsList({ user, assistants }: AssistantsListProps) {
   const clearSelection = () => setSelected(new Set());
 
   const handleBulkShow = async () => {
-    const ids = Array.from(selected);
-    const prev = chosenOrder;
-    const ok = await bulkAddToList(ids, chosenOrder);
-    if (!ok) {
-      setPopup({ message: "Couldn't show selected.", type: "error" });
-      return;
-    }
-    // Mirror the optimistic update locally — the helper PATCHed the
-    // server; we just need to align local state.
-    const existing = new Set(chosenOrder);
-    const toAppend = ids.filter((id) => !existing.has(id));
-    setChosenOrder([...chosenOrder, ...toAppend]);
-    setPopup({
-      message: `${ids.length} assistant${ids.length === 1 ? "" : "s"} shown.`,
-      type: "success",
-      undo: {
-        onClick: async () => {
-          await persistOrder(prev);
-        },
-      },
+    const ids = new Set(selected);
+    const next = hiddenIds.filter((id) => !ids.has(id));
+    const ok = await persistHidden(next, {
+      successMsg: `${ids.size} assistant${ids.size === 1 ? "" : "s"} shown.`,
+      undoToHidden: hiddenIds,
     });
-    clearSelection();
-    router.refresh();
+    if (ok) clearSelection();
   };
 
   const handleBulkHide = async () => {
     const ids = Array.from(selected);
+    const idSet = new Set(ids);
     // Don't let the user hide every visible row at once.
-    const remaining = chosenOrder.filter((id) => !ids.includes(id));
-    if (remaining.length === 0 && chosenOrder.length > 0) {
+    const remainingVisible = assistants.filter(
+      (a) => !hiddenSet.has(a.id) && !idSet.has(a.id)
+    );
+    if (remainingVisible.length === 0) {
       setPopup({
         message: "Can't hide every visible assistant — keep at least one.",
         type: "error",
       });
       return;
     }
-    const prev = chosenOrder;
-    const ok = await bulkRemoveFromList(ids, chosenOrder);
-    if (!ok) {
-      setPopup({ message: "Couldn't hide selected.", type: "error" });
-      return;
-    }
-    setChosenOrder(remaining);
-    setPopup({
-      message: `${ids.length} assistant${ids.length === 1 ? "" : "s"} hidden.`,
-      type: "success",
-      undo: {
-        onClick: async () => {
-          await persistOrder(prev);
-        },
-      },
+    const next = Array.from(new Set([...hiddenIds, ...ids]));
+    const ok = await persistHidden(next, {
+      successMsg: `${ids.length} assistant${ids.length === 1 ? "" : "s"} hidden.`,
+      undoToHidden: hiddenIds,
     });
-    clearSelection();
-    router.refresh();
+    if (ok) clearSelection();
   };
 
-  // "Remove" is the same backend op as Hide today — both just remove the
-  // ids from chosen_assistants. The label distinction is a UX hint: Hide
-  // is reversible by toggling the switch back on (or Undo); Remove
-  // implies "I don't want to see this any more." Functionally identical
-  // until we have a true "remove access" path.
+  // "Remove" is the same op as Hide today — both add the ids to
+  // hidden_assistants. The label distinction is a UX hint: Hide is reversible
+  // by toggling back on (or Undo); Remove implies "I don't want to see this."
+  // Functionally identical until we have a true "remove access" path.
   const handleBulkRemove = handleBulkHide;
 
   // ---- DnD plumbing -------------------------------------------------------
@@ -885,7 +897,7 @@ export function AssistantsList({ user, assistants }: AssistantsListProps) {
             modifiers={[restrictToVerticalAxis]}
           >
             <SortableContext
-              items={filteredVisible.map((a) => a.id)}
+              items={filteredVisible.map((a) => String(a.id))}
               strategy={verticalListSortingStrategy}
             >
               {filteredVisible.map((assistant) => (

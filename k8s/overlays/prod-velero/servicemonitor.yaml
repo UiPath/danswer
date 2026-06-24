@@ -1,0 +1,19 @@
+# Makes the robusta Prometheus scrape Velero's metrics. The `release: robusta`
+# label is REQUIRED — it matches that Prometheus's serviceMonitorSelector
+# (matchLabels release=robusta); without it the target is silently ignored.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: velero
+  namespace: velero
+  labels:
+    app.kubernetes.io/name: velero
+    release: robusta
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: velero
+  endpoints:
+    - port: http-monitoring
+      path: /metrics
+      interval: 30s

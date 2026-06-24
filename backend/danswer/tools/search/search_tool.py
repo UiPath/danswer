@@ -13,7 +13,9 @@ from danswer.chat.models import LlmDoc
 from danswer.db.models import Persona
 from danswer.db.models import User
 from danswer.dynamic_configs.interface import JSON_ro
+from danswer.llm.answering.doc_pruning import parse_question_doc_version
 from danswer.llm.answering.doc_pruning import prune_documents
+from danswer.llm.answering.doc_pruning import rewrite_docs_links
 from danswer.llm.answering.models import DocumentPruningConfig
 from danswer.llm.answering.models import PreviousMessage
 from danswer.llm.answering.models import PromptConfig
@@ -78,6 +80,12 @@ class SearchTool(Tool):
         chunks_below: int = 0,
         full_doc: bool = False,
         bypass_acl: bool = False,
+        # Per-request reranking / relevance-filter overrides. None => let
+        # retrieval_preprocessing decide from the global flags + the assistant's
+        # settings (Slack / default path). The chat flow passes explicit values
+        # derived from the per-conversation toggles + global flags.
+        skip_rerank: bool | None = None,
+        skip_llm_chunk_filter: bool | None = None,
     ) -> None:
         self.user = user
         self.persona = persona
@@ -93,6 +101,8 @@ class SearchTool(Tool):
         self.chunks_below = chunks_below
         self.full_doc = full_doc
         self.bypass_acl = bypass_acl
+        self.skip_rerank = skip_rerank
+        self.skip_llm_chunk_filter = skip_llm_chunk_filter
         self.db_session = db_session
 
     def name(self) -> str:
@@ -211,6 +221,8 @@ class SearchTool(Tool):
                 chunks_above=self.chunks_above,
                 chunks_below=self.chunks_below,
                 full_doc=self.full_doc,
+                skip_rerank=self.skip_rerank,
+                skip_llm_chunk_filter=self.skip_llm_chunk_filter,
             ),
             user=self.user,
             llm=self.llm,
@@ -262,6 +274,14 @@ class SearchTool(Tool):
             llm_config=self.llm.config,
             question=query,
             document_pruning_config=self.pruning_config,
+        )
+        # Rewrite versioned-docs links to the right version of the same page: the
+        # version the question asked about if it named one, else the newest indexed
+        # (retrieval can surface an arbitrary/stale version when several exist).
+        rewrite_docs_links(
+            final_context_documents,
+            self.db_session,
+            target_version=parse_question_doc_version(query),
         )
         yield ToolResponse(id=FINAL_CONTEXT_DOCUMENTS, response=final_context_documents)
 

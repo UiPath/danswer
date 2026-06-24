@@ -7,6 +7,7 @@ from langchain_core.messages import BaseMessage
 from danswer.chat.models import LlmDoc
 from danswer.configs.chat_configs import LANGUAGE_HINT
 from danswer.configs.chat_configs import MULTILINGUAL_QUERY_EXPANSION
+from danswer.configs.chat_configs import PROTECTED_SOURCES
 from danswer.configs.constants import DocumentSource
 from danswer.db.models import Prompt
 from danswer.llm.answering.models import PromptConfig
@@ -61,9 +62,40 @@ def build_task_prompt_reminders(
     language_hint_str: str = LANGUAGE_HINT,
 ) -> str:
     base_task = prompt.task_prompt
-    citation_or_nothing = citation_str if prompt.include_citations else ""
+    citation_or_nothing = (
+        citation_str + build_authoritative_sources_reminder()
+        if prompt.include_citations
+        else ""
+    )
     language_hint_or_nothing = language_hint_str.lstrip() if use_language_hint else ""
     return base_task + citation_or_nothing + language_hint_or_nothing
+
+
+def build_authoritative_sources_reminder() -> str:
+    """A generic, global nudge: tell the LLM which sources are the authoritative
+    systems of record (derived from PROTECTED_SOURCES) and to prefer grounding +
+    citing them over other sources (e.g. chat discussions) when they support the
+    answer. Source names are rendered via clean_up_source so they match the
+    "Source: X" labels on the docs in the prompt. Empty when no protected sources
+    are configured. Applies to every assistant + both flows (it rides on the
+    shared citation reminder), so it needs no per-persona setup.
+    """
+    if not PROTECTED_SOURCES:
+        return ""
+    names: list[str] = []
+    for source in PROTECTED_SOURCES:
+        name = clean_up_source(source)
+        if name not in names:
+            names.append(name)
+    if not names:
+        return ""
+    listed = ", ".join(names)
+    return (
+        f"\n\n{listed} are authoritative systems of record. When one of these documents "
+        f"supports a point in your answer, prefer citing it over a non-authoritative "
+        f"source (e.g. chat discussions) that makes the same point. Only cite sources "
+        f"that actually support your answer."
+    )
 
 
 # Maps connector enum string to a more natural language representation for the LLM

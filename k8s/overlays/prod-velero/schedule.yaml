@@ -1,0 +1,31 @@
+# WEEKLY backup of ONLY the Vespa state worth keeping.
+#
+# Scope: namespace `darwin`, resources labeled `backup=vespa` (the 6 PVCs:
+# vespa-var-vespa-content-{0,1,2} + vespa-var1-vespa-configserver-{0,1,2}),
+# with their PVs snapshotted as Azure disk snapshots.
+#
+# Retention: ttl 504h = 21 days. Weekly cadence => the last 3 backups are
+# retained (ages ~0/7/14d; the 21-day-old one is garbage-collected). This
+# matches "retain last 3, max 21 days back, OK to lose up to a week on crash".
+apiVersion: velero.io/v1
+kind: Schedule
+metadata:
+  name: vespa-weekly
+  namespace: velero
+  labels:
+    app.kubernetes.io/name: velero
+spec:
+  # Sundays 02:00 UTC.
+  schedule: "0 2 * * 0"
+  useOwnerReferencesInBackup: false
+  template:
+    includedNamespaces:
+      - darwin
+    labelSelector:
+      matchLabels:
+        backup: vespa
+    snapshotVolumes: true
+    storageLocation: default
+    volumeSnapshotLocations:
+      - default
+    ttl: 504h0m0s

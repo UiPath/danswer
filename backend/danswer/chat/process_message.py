@@ -16,6 +16,7 @@ from danswer.chat.models import QADocsResponse
 from danswer.chat.models import StreamingError
 from danswer.configs.chat_configs import CHAT_TARGET_CHUNK_PERCENTAGE
 from danswer.configs.chat_configs import DISABLE_LLM_CHOOSE_SEARCH
+from danswer.configs.chat_configs import LLM_RELEVANCE_FILTER_ENABLED
 from danswer.configs.chat_configs import MAX_CHUNKS_FED_TO_CHAT
 from danswer.configs.constants import MessageType
 from danswer.configs.model_configs import GEN_AI_TEMPERATURE
@@ -80,6 +81,7 @@ from danswer.tools.utils import compute_all_tool_tokens
 from danswer.tools.utils import explicit_tool_calling_supported
 from danswer.utils.logger import setup_logger
 from danswer.utils.timing import log_generator_function_time
+from shared_configs.configs import RERANK_ENABLED
 
 logger = setup_logger()
 
@@ -93,15 +95,25 @@ def translate_citations(
     for db_doc in db_docs:
         if db_doc.document_id not in doc_id_to_saved_doc_id_map:
             doc_id_to_saved_doc_id_map[db_doc.document_id] = db_doc.id
-            #print(f'found doc id: {db_doc.id}')
+            # print(f'found doc id: {db_doc.id}')
 
     citation_to_saved_doc_id_map: dict[int, int] = {}
     for citation in citations_list:
-        #print(f'citation id {citation.document_id} for doc num {citation.citation_num}')
+        # print(f'citation id {citation.document_id} for doc num {citation.citation_num}')
         if citation.citation_num not in citation_to_saved_doc_id_map:
-            citation_to_saved_doc_id_map[
-                citation.citation_num
-            ] = doc_id_to_saved_doc_id_map[citation.document_id]
+            saved_doc_id = doc_id_to_saved_doc_id_map.get(citation.document_id)
+            if saved_doc_id is None:
+                # The LLM can cite a document that isn't in this turn's
+                # reference docs — e.g. it references a doc from earlier in the
+                # conversation, or when chatting with a subset of selected
+                # documents. Skip the stray citation instead of failing the
+                # entire response.
+                logger.warning(
+                    f"Citation {citation.citation_num} references unknown "
+                    f"document_id '{citation.document_id}'; skipping"
+                )
+                continue
+            citation_to_saved_doc_id_map[citation.citation_num] = saved_doc_id
 
     return citation_to_saved_doc_id_map
 
@@ -425,6 +437,10 @@ def stream_chat_message_objects(
             if db_tool_model.in_code_tool_id:
                 tool_cls = get_built_in_tool_by_id(db_tool_model.id, db_session)
                 if tool_cls.__name__ == SearchTool.__name__ and not latest_query_files:
+                    # Chat-page per-conversation toggles (default off, assistant
+                    # settings intentionally ignored in chat). Each is gated by
+                    # its global master switch; we pass explicit skip_* so
+                    # retrieval_preprocessing uses these instead of the persona.
                     search_tool = SearchTool(
                         db_session=db_session,
                         user=user,
@@ -438,6 +454,11 @@ def stream_chat_message_objects(
                         chunks_above=new_msg_req.chunks_above,
                         chunks_below=new_msg_req.chunks_below,
                         full_doc=new_msg_req.full_doc,
+                        skip_rerank=not (RERANK_ENABLED and new_msg_req.use_reranking),
+                        skip_llm_chunk_filter=not (
+                            LLM_RELEVANCE_FILTER_ENABLED
+                            and new_msg_req.use_relevance_filter
+                        ),
                     )
                     tool_dict[db_tool_model.id] = [search_tool]
                 elif tool_cls.__name__ == ImageGenerationTool.__name__:

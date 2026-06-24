@@ -62,7 +62,7 @@ export function AssistantsTab({
   );
 
   return (
-    <div className="mt-4 pb-1 overflow-y-auto h-full flex flex-col gap-y-1">
+    <div className="mt-4 pb-1 overflow-y-auto h-full flex flex-col gap-y-1 no-scrollbar">
       <Text className="mx-3 text-xs mb-4">
         Select an Assistant below to begin a new chat with them!
       </Text>

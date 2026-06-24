@@ -243,18 +243,16 @@ class HighspotConnector(LoadConnector, PollConnector):
                                     logger.warning("Item without ID found, skipping")
                                     continue
 
-                                item_details = self.client.get_item(item_id)
-                                if not item_details:
-                                    logger.warning(
-                                        "Item %s details not found, skipping",
-                                        item_id,
-                                    )
-                                    continue
-
-                                # Time-window filter (poll mode).
+                                # Time-window filter (poll mode) — applied on the
+                                # LIST item's `date_updated` BEFORE the per-item
+                                # get_item() call, so incremental polls skip the
+                                # detail fetch + content download/scrape for items
+                                # unchanged within the window. The list response
+                                # already carries `date_updated`, so this is a true
+                                # delta fetch rather than enumerating every item.
                                 if start or end:
                                     parsed = _parse_doc_updated_at(
-                                        item_details.get("date_updated")
+                                        item.get("date_updated")
                                     )
                                     if parsed is None:
                                         # No usable timestamp — skip in poll
@@ -263,6 +261,14 @@ class HighspotConnector(LoadConnector, PollConnector):
                                     ts = parsed.timestamp()
                                     if (start and ts < start) or (end and ts > end):
                                         continue
+
+                                item_details = self.client.get_item(item_id)
+                                if not item_details:
+                                    logger.warning(
+                                        "Item %s details not found, skipping",
+                                        item_id,
+                                    )
+                                    continue
 
                                 content = self._get_item_content(
                                     item_details,

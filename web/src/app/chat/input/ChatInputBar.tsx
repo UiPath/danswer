@@ -1,6 +1,7 @@
 import React, {
   Dispatch,
   SetStateAction,
+  useContext,
   useEffect,
   useRef,
   useState,
@@ -17,9 +18,11 @@ import {
 import ChatInputOption from "./ChatInputOption";
 import { FaBrain } from "react-icons/fa";
 import { Persona } from "@/app/admin/assistants/interfaces";
+import { assistantDisplayName } from "@/lib/assistants/displayName";
 import { FilterManager, LlmOverrideManager } from "@/lib/hooks";
 import { SelectedFilterDisplay } from "./SelectedFilterDisplay";
 import { useChatContext } from "@/components/context/ChatContext";
+import { SettingsContext } from "@/components/settings/SettingsProvider";
 import { getFinalLLM } from "@/lib/llm/utils";
 import { getModelDisplayName } from "@/lib/llm/models";
 import { FileDescriptor } from "../interfaces";
@@ -40,12 +43,17 @@ export function ChatInputBar({
   retrievalDisabled,
   filterManager,
   llmOverrideManager,
+  useReranking,
+  setUseReranking,
+  useRelevanceFilter,
+  setUseRelevanceFilter,
   onSetSelectedAssistant,
   selectedAssistant,
   files,
   setFiles,
   handleFileUpload,
   setConfigModalActiveTab,
+  configModalActiveTab,
   textAreaRef,
   alternativeAssistant,
 }: {
@@ -59,12 +67,17 @@ export function ChatInputBar({
   retrievalDisabled: boolean;
   filterManager: FilterManager;
   llmOverrideManager: LlmOverrideManager;
+  useReranking: boolean;
+  setUseReranking: (value: boolean) => void;
+  useRelevanceFilter: boolean;
+  setUseRelevanceFilter: (value: boolean) => void;
   selectedAssistant: Persona;
   alternativeAssistant: Persona | null;
   files: FileDescriptor[];
   setFiles: (files: FileDescriptor[]) => void;
   handleFileUpload: (files: File[]) => void;
   setConfigModalActiveTab: (tab: string) => void;
+  configModalActiveTab: string | null;
   textAreaRef: React.RefObject<HTMLTextAreaElement>;
 }) {
   // handle re-sizing of the text area
@@ -104,6 +117,9 @@ export function ChatInputBar({
   };
 
   const { llmProviders } = useChatContext();
+  // Cluster-level enablement — hide the per-conversation rerank/relevance
+  // toggles entirely when the feature is disabled cluster-wide.
+  const settings = useContext(SettingsContext)?.settings;
   const [_, llmName] = getFinalLLM(llmProviders, selectedAssistant, null);
 
   const suggestionsRef = useRef<HTMLDivElement | null>(null);
@@ -202,7 +218,7 @@ export function ChatInputBar({
 
   return (
     <div>
-      <div className="flex justify-center pb-2 max-w-screen-lg mx-auto mb-2">
+      <div className="flex justify-center pb-2 mx-auto mb-2">
         <div
           className="
             w-full
@@ -220,7 +236,7 @@ export function ChatInputBar({
               ref={suggestionsRef}
               className="text-sm absolute inset-x-0 top-0 w-full transform -translate-y-full"
             >
-              <div className="rounded-lg py-1.5 bg-white border border-border-medium overflow-hidden shadow-lg mx-2 px-1.5 mt-2 rounded z-10">
+              <div className="rounded-lg py-1.5 bg-background-search dark:bg-background-strong border border-border-medium overflow-hidden shadow-lg mx-2 px-1.5 mt-2 rounded z-10">
                 {filteredPersonas.map((currentPersona, index) => (
                   <button
                     key={index}
@@ -231,7 +247,9 @@ export function ChatInputBar({
                       updateCurrentPersona(currentPersona);
                     }}
                   >
-                    <p className="font-bold ">{currentPersona.name}</p>
+                    <p className="font-bold ">
+                      {assistantDisplayName(currentPersona)}
+                    </p>
                     <p className="line-clamp-1">
                       {currentPersona.id == selectedAssistant.id &&
                         "(default) "}
@@ -267,11 +285,16 @@ export function ChatInputBar({
               flex-col
               border
               border-border-medium
-              rounded-lg
+              rounded-xl
               overflow-hidden
               bg-background-weak
-              [&:has(textarea:focus)]::ring-1
-              [&:has(textarea:focus)]::ring-black
+              shadow-lg
+              shadow-black/5
+              dark:shadow-black/40
+              transition
+              focus-within:border-accent
+              focus-within:ring-2
+              focus-within:ring-accent/30
             "
           >
             {alternativeAssistant && (
@@ -282,7 +305,7 @@ export function ChatInputBar({
                 >
                   <AssistantIcon assistant={alternativeAssistant} border />
                   <p className="ml-3 text-strong my-auto">
-                    {alternativeAssistant.name}
+                    {assistantDisplayName(alternativeAssistant)}
                   </p>
                   <div className="flex gap-x-1 ml-auto ">
                     <Tooltip
@@ -362,7 +385,7 @@ export function ChatInputBar({
               style={{ scrollbarWidth: "thin" }}
               role="textarea"
               aria-multiline
-              placeholder="Send a message..."
+              placeholder="How can I help you today?"
               value={message}
               onKeyDown={(event) => {
                 if (event.key === "Enter" && !event.shiftKey && canSubmit) {
@@ -383,7 +406,11 @@ export function ChatInputBar({
             <div className="flex items-center space-x-3 mr-12 px-4 pb-2 overflow-hidden">
               <ChatInputOption
                 flexPriority="shrink"
-                name={selectedAssistant ? selectedAssistant.name : "Assistants"}
+                name={
+                  selectedAssistant
+                    ? assistantDisplayName(selectedAssistant)
+                    : "Assistants"
+                }
                 icon={FaBrain}
                 onClick={() => setConfigModalActiveTab("assistants")}
               />
@@ -412,6 +439,36 @@ export function ChatInputBar({
                 />
               )}
 
+              {/* Per-conversation search-quality toggles. Hidden entirely when
+                  the feature is disabled cluster-wide (settings.*_enabled). */}
+              {!retrievalDisabled && settings?.rerank_enabled && (
+                <button
+                  type="button"
+                  onClick={() => setUseReranking(!useReranking)}
+                  title="Rerank retrieved results with a cross-encoder for this conversation (only applies if reranking is enabled by an admin)"
+                  className={`flex-none text-sm rounded px-2 py-1 ${
+                    useReranking ? "bg-hover text-emphasis" : "text-subtle"
+                  }`}
+                >
+                  Rerank: {useReranking ? "On" : "Off"}
+                </button>
+              )}
+
+              {!retrievalDisabled && settings?.llm_relevance_filter_enabled && (
+                <button
+                  type="button"
+                  onClick={() => setUseRelevanceFilter(!useRelevanceFilter)}
+                  title="Apply an LLM relevance filter to retrieved results for this conversation (only applies if enabled by an admin)"
+                  className={`flex-none text-sm rounded px-2 py-1 ${
+                    useRelevanceFilter
+                      ? "bg-hover text-emphasis"
+                      : "text-subtle"
+                  }`}
+                >
+                  Relevance: {useRelevanceFilter ? "On" : "Off"}
+                </button>
+              )}
+
               <ChatInputOption
                 flexPriority="stiff"
                 name="File"
@@ -432,7 +489,11 @@ export function ChatInputBar({
                 }}
               />
             </div>
-            <div className="absolute bottom-2.5 right-10">
+            <div
+              className={`absolute bottom-2.5 right-10 ${
+                configModalActiveTab ? "invisible" : ""
+              }`}
+            >
               <div
                 className={
                   anyFilesUploading && !isStreaming
@@ -456,9 +517,13 @@ export function ChatInputBar({
               >
                 <FiSend
                   size={18}
-                  className={`text-emphasis w-9 h-9 p-2 rounded-lg ${
+                  className={`w-9 h-9 p-2 rounded-lg transition-colors ${
                     anyFilesUploading && !isStreaming ? "opacity-40 " : ""
-                  }${message ? "bg-blue-200" : ""}`}
+                  }${
+                    message
+                      ? "bg-accent text-white hover:bg-accent-hover"
+                      : "text-emphasis"
+                  }`}
                 />
               </div>
             </div>

@@ -27,7 +27,7 @@ export function ChatBanner() {
       <div className="mx-auto text-emphasis text-sm flex flex-col">
         <div className="my-auto">
           <ReactMarkdown
-            className="prose max-w-full"
+            className="prose dark:prose-invert max-w-full"
             components={{
               a: ({ node, ...props }) => (
                 <a

@@ -116,10 +116,19 @@ class User(SQLAlchemyBaseUserTableUUID, Base):
     putting here for simpicity
     """
 
-    # if specified, controls the assistants that are shown to the user + their order
-    # if not specified, all assistants are shown
+    # if specified, controls the ORDER (and pinned default = position 0) of the
+    # assistants shown to the user. Visibility is governed by `hidden_assistants`
+    # below, NOT by membership here. If not specified, the natural order is used.
     chosen_assistants: Mapped[list[int]] = mapped_column(
         postgresql.ARRAY(Integer), nullable=True
+    )
+
+    # Assistants the user has explicitly hidden from their picker. Opt-OUT model:
+    # every accessible assistant is visible by default — so a newly created
+    # (e.g. admin) assistant appears for all users automatically — and a user
+    # removes the ones they don't want here. Empty list = nothing hidden.
+    hidden_assistants: Mapped[list[int]] = mapped_column(
+        postgresql.ARRAY(Integer), nullable=False, server_default="{}"
     )
 
     # relationships
@@ -998,6 +1007,10 @@ class Persona(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[UUID | None] = mapped_column(ForeignKey("user.id"), nullable=True)
     name: Mapped[str] = mapped_column(String)
+    # User-friendly label shown in the chat UI. The immutable `name` stays the
+    # identifier; `display_name` is presentational only and admin-editable.
+    # Backfilled to `name`; chat falls back to `name` if blank.
+    display_name: Mapped[str | None] = mapped_column(String, nullable=True)
     description: Mapped[str] = mapped_column(String)
     # Currently stored but unused, all flows use hybrid
     search_type: Mapped[SearchType] = mapped_column(
@@ -1013,6 +1026,13 @@ class Persona(Base):
     llm_filter_extraction: Mapped[bool] = mapped_column(Boolean)
     recency_bias: Mapped[RecencyBiasSetting] = mapped_column(
         Enum(RecencyBiasSetting, native_enum=False)
+    )
+    # Per-assistant opt-in for cross-encoder reranking (beta). Only takes effect
+    # when reranking is globally available (RERANK_ENABLED + a GPU-backed model
+    # server); see search/preprocessing/preprocessing.py. Default off so existing
+    # assistants and the GPU-free local setup are unchanged until toggled.
+    rerank_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false"
     )
     # Allows the Persona to specify a different LLM version than is controlled
     # globablly via env variables. For flexibility, validity is not currently enforced
@@ -1138,6 +1158,22 @@ class SlackBotConfig(Base):
     )
 
     persona: Mapped[Persona | None] = relationship("Persona")
+
+
+class SlackBotResponseBlocklist(Base):
+    """Senders (by email) whose Slack messages should NOT trigger a Darwin
+    response. DB-driven so the list can be managed without a redeploy. Checked
+    early in danswerbot/slack/handlers/handle_message.py::handle_message."""
+
+    __tablename__ = "slack_bot_response_blocklist"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    # Stored lowercase; matched case-insensitively against the Slack sender's
+    # profile email.
+    email: Mapped[str] = mapped_column(String, unique=True, index=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
 
 class UserSlackPersona(Base):

@@ -96,6 +96,8 @@ export async function* sendMessage({
   systemPromptOverride,
   useExistingUserMessage,
   alternateAssistantId,
+  useReranking,
+  useRelevanceFilter,
 }: {
   message: string;
   fileDescriptors: FileDescriptor[];
@@ -116,6 +118,11 @@ export async function* sendMessage({
   // and will ignore the specified `message`
   useExistingUserMessage?: boolean;
   alternateAssistantId?: number;
+  // Per-conversation search-quality toggles (default off). Each is also gated
+  // server-side by its global master switch (RERANK_ENABLED /
+  // LLM_RELEVANCE_FILTER_ENABLED).
+  useReranking?: boolean;
+  useRelevanceFilter?: boolean;
 }) {
   const documentsAreSelected =
     selectedDocumentIds && selectedDocumentIds.length > 0;
@@ -161,6 +168,8 @@ export async function* sendMessage({
             }
           : null,
       use_existing_user_message: useExistingUserMessage,
+      use_reranking: useReranking ?? false,
+      use_relevance_filter: useRelevanceFilter ?? false,
     }),
   });
   if (!sendMessageResponse.ok) {
@@ -314,6 +323,27 @@ export function getCitedDocumentsFromMessage(message: Message) {
     }
   });
   return documentsWithCitationKey;
+}
+
+// Cutoff timestamps (ISO) matching the date buckets in
+// groupSessionsByDateRange, for lazy-loading each bucket from the backend:
+//   today    (Today):              time_created >= oneDayAgo
+//   prev7    (Previous 7 Days):    sevenDaysAgo  <= time_created < oneDayAgo
+//   prev30   (Previous 30 Days):   thirtyDaysAgo <= time_created < sevenDaysAgo
+//   older    (Over 30 days ago):   time_created < thirtyDaysAgo
+export function getChatHistoryBoundaries(): {
+  oneDayAgo: string;
+  sevenDaysAgo: string;
+  thirtyDaysAgo: string;
+} {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const day = 1000 * 3600 * 24;
+  return {
+    oneDayAgo: new Date(today.getTime() - 1 * day).toISOString(),
+    sevenDaysAgo: new Date(today.getTime() - 7 * day).toISOString(),
+    thirtyDaysAgo: new Date(today.getTime() - 30 * day).toISOString(),
+  };
 }
 
 export function groupSessionsByDateRange(chatSessions: ChatSession[]) {
