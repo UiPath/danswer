@@ -19,6 +19,11 @@ import ChatInputOption from "./ChatInputOption";
 import { FaBrain } from "react-icons/fa";
 import { Persona } from "@/app/admin/assistants/interfaces";
 import { assistantDisplayName } from "@/lib/assistants/displayName";
+import {
+  getMentionQuery,
+  filterAssistantsByMention,
+  stripMentionToken,
+} from "@/lib/assistants/mentions";
 import { FilterManager, LlmOverrideManager } from "@/lib/hooks";
 import { SelectedFilterDisplay } from "./SelectedFilterDisplay";
 import { useChatContext } from "@/components/context/ChatContext";
@@ -136,7 +141,10 @@ export function ChatInputBar({
   const updateCurrentPersona = (persona: Persona) => {
     onSetSelectedAssistant(persona.id == selectedAssistant.id ? null : persona);
     hideSuggestions();
-    setMessage("");
+    // Remove only the "@mention" token the user was typing and keep the rest of
+    // the message intact (previously this cleared the entire input, discarding
+    // any question already typed before/around the mention).
+    setMessage(stripMentionToken(message));
   };
 
   // Click out of assistant suggestions
@@ -157,33 +165,27 @@ export function ChatInputBar({
     };
   }, []);
 
+  // The partial assistant name being typed after "@" (anywhere in the message),
+  // or null when the caret isn't inside an @mention token. See lib/assistants/mentions.
+  const mentionQuery = getMentionQuery(message);
+
   // Complete user input handling
   const handleInputChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
     const text = event.target.value;
     setMessage(text);
 
-    if (!text.startsWith("@")) {
-      hideSuggestions();
-      return;
-    }
-
-    // If looking for an assistant...fup
-    const match = text.match(/(?:\s|^)@(\w*)$/);
-    if (match) {
+    // Show the assistant typeahead whenever the caret is inside an @mention
+    // token — anywhere in the message (previously this only fired when "@" was
+    // the first character of the input).
+    if (getMentionQuery(text) !== null) {
       setShowSuggestions(true);
     } else {
       hideSuggestions();
     }
   };
 
-  const filteredPersonas = personas.filter((persona) =>
-    persona.name.toLowerCase().startsWith(
-      message
-        .slice(message.lastIndexOf("@") + 1)
-        .split(/\s/)[0]
-        .toLowerCase()
-    )
-  );
+  // Match on both the display name and the raw name so typing either works.
+  const filteredPersonas = filterAssistantsByMention(personas, mentionQuery ?? "");
 
   const [assistantIconIndex, setAssistantIconIndex] = useState(0);
 
