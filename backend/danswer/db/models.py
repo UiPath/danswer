@@ -1012,6 +1012,12 @@ class Persona(Base):
     # Backfilled to `name`; chat falls back to `name` if blank.
     display_name: Mapped[str | None] = mapped_column(String, nullable=True)
     description: Mapped[str] = mapped_column(String)
+    # Router-only guidance for the auto-routed Search tab: free-text "route here
+    # for / example questions / do NOT route here (-> other assistant)". Read
+    # ONLY by the assistant router (secondary_llm_flows/assistant_router); NEVER
+    # rendered in the user-facing UI (that's what `description` is for). Router
+    # falls back to `description` when this is blank.
+    routing_instructions: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Currently stored but unused, all flows use hybrid
     search_type: Mapped[SearchType] = mapped_column(
         Enum(SearchType, native_enum=False), default=SearchType.HYBRID

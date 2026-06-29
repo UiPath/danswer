@@ -8,11 +8,34 @@ class PageType(str, Enum):
     SEARCH = "search"
 
 
+class AutoSearchRollout(str, Enum):
+    """Staged rollout state for the auto-routed one-shot Search tab.
+
+    - OFF: nobody (kill-switch).
+    - ADMIN_ONLY: admins only — lets admins clean assistant routing metadata and
+      test the routed answer before GA. This is the DEFAULT, so a fresh deploy
+      lands here automatically (a newly-added Settings field is absent from the
+      already-persisted settings dict, so it takes this default).
+    - EVERYONE: generally available.
+
+    Flip in Admin -> Settings; no redeploy. Enforced on the trusted side in the
+    /search/auto endpoint, not just by hiding the tab.
+    """
+
+    OFF = "off"
+    ADMIN_ONLY = "admin_only"
+    EVERYONE = "everyone"
+
+
 class Settings(BaseModel):
     """General settings"""
 
     chat_page_enabled: bool = True
     search_page_enabled: bool = True
+    # Staged rollout of the auto-routed Search tab. Default ADMIN_ONLY so the
+    # feature ships dark-to-users on deploy; an admin flips it to EVERYONE in
+    # Admin -> Settings when ready. See AutoSearchRollout.
+    auto_search_rollout: AutoSearchRollout = AutoSearchRollout.ADMIN_ONLY
     # Fresh installs land on the chat page by default. NOTE: this only seeds
     # deployments with no stored settings yet — once settings are persisted, the
     # stored value wins, so flip it in Admin → Settings on existing deployments.

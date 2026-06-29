@@ -237,6 +237,23 @@ export function SettingsForm() {
             ]);
         }}
       />
+
+      <Selector
+        label="Auto-Search (assistant routing) rollout"
+        subtext="Staged rollout of the auto-routed Search tab, which picks the right assistant for a question automatically. 'Admins only' lets admins clean assistant routing instructions and test before GA; 'Everyone' makes it generally available; 'Off' disables it. The backend enforces this independently of the UI."
+        options={[
+          { value: "off", name: "Off (disabled)" },
+          { value: "admin_only", name: "Admins only" },
+          { value: "everyone", name: "Everyone" },
+        ]}
+        selected={settings.auto_search_rollout ?? "admin_only"}
+        onSelect={(value) => {
+          value &&
+            updateSettingField([
+              { fieldName: "auto_search_rollout", newValue: value },
+            ]);
+        }}
+      />
       {isEnterpriseEnabled && (
         <>
           <Title className="mb-4">Chat Settings</Title>

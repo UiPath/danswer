@@ -28,6 +28,8 @@ export interface Persona {
   is_public: boolean;
   display_priority: number | null;
   description: string;
+  // Router-only guidance for the auto-routed Search tab; never shown to users.
+  routing_instructions?: string | null;
   document_sets: DocumentSet[];
   prompts: Prompt[];
   tools: ToolSnapshot[];

@@ -10,6 +10,10 @@ export interface Settings {
   // corresponding rerank / relevance toggles.
   rerank_enabled?: boolean;
   llm_relevance_filter_enabled?: boolean;
+  // Staged rollout of the auto-routed Search tab (mirrors backend
+  // AutoSearchRollout). The Search tab + endpoint are gated by this; the
+  // backend enforces it independently of the UI.
+  auto_search_rollout?: "off" | "admin_only" | "everyone";
 }
 
 export interface EnterpriseSettings {

@@ -15,8 +15,24 @@ from danswer.db.models import User
 from danswer.db.tag import get_tags_by_value_prefix_for_source_types
 from danswer.document_index.factory import get_default_document_index
 from danswer.document_index.vespa.index import VespaIndex
+from danswer.auth.schemas import UserRole
+from danswer.configs.constants import MessageType
+from danswer.db.persona import get_persona_by_id
+from danswer.db.persona import get_personas
+from danswer.llm.factory import get_default_llms
+from danswer.one_shot_answer.answer_question import get_search_answer
 from danswer.one_shot_answer.answer_question import stream_search_answer
 from danswer.one_shot_answer.models import DirectQARequest
+from danswer.one_shot_answer.models import ThreadMessage
+from danswer.search.models import OptionalSearchSetting
+from danswer.search.models import RetrievalDetails
+from danswer.secondary_llm_flows.assistant_router import build_router_catalog
+from danswer.secondary_llm_flows.assistant_router import route_question
+from danswer.server.query_and_chat.models import AnsweredByAssistant
+from danswer.server.query_and_chat.models import AutoSearchRequest
+from danswer.server.query_and_chat.models import AutoSearchResponse
+from danswer.server.settings.models import AutoSearchRollout
+from danswer.server.settings.store import load_settings
 from danswer.search.models import IndexFilters
 from danswer.search.models import SearchDoc
 from danswer.search.preprocessing.access_filters import build_access_filters_for_user
@@ -174,3 +190,133 @@ def get_answer_with_quote(
         max_history_tokens=0,
     )
     return StreamingResponse(packets, media_type="application/json")
+
+
+# All-source default persona ("Darwin", id 0) — the router's fail-open fallback
+# when no assistant clearly fits the question.
+DEFAULT_SEARCH_PERSONA_ID = 0
+
+
+def _auto_search_allowed(rollout: AutoSearchRollout, user: User | None) -> bool:
+    """Trusted-side rollout gate for the auto-routed Search tab. OFF blocks
+    everyone; EVERYONE allows all; ADMIN_ONLY allows admins (and the no-auth
+    superuser context where user is None, mirroring get_personas' convention)."""
+    if rollout == AutoSearchRollout.OFF:
+        return False
+    if rollout == AutoSearchRollout.EVERYONE:
+        return True
+    # ADMIN_ONLY
+    if user is None:
+        return True
+    return user.role == UserRole.ADMIN
+
+
+@basic_router.post("/auto-search")
+def auto_search(
+    auto_search_request: AutoSearchRequest,
+    request: Request,
+    user: User = Depends(current_user),
+    db_session: Session = Depends(get_session),
+    # Mirrors /chat/send-message + /stream-answer-with-quote: request-rate cap
+    # first (cheap when off), token-budget check second.
+    _rate_limit: None = Depends(check_message_request_rate_limit),
+    _: None = Depends(check_token_rate_limits),
+) -> AutoSearchResponse:
+    """Auto-route a point-in-time question to the best assistant, then answer it
+    with the existing one-shot engine. Picks the assistant via the LLM router
+    over the user's ACL-filtered, visible assistants; falls back to the
+    all-source default persona when no assistant clearly fits."""
+    # Trusted-side rollout gate — never rely on the FE hiding the tab.
+    if not _auto_search_allowed(load_settings().auto_search_rollout, user):
+        raise HTTPException(
+            status_code=403,
+            detail="Auto-search is not enabled for your account.",
+        )
+
+    question = auto_search_request.message
+    logger.info(f"Auto-search question: {question}")
+
+    # Router catalog = the user's accessible, VISIBLE, non-Slack assistants.
+    # get_personas already enforces ACL (public / per-user / per-group).
+    personas = [
+        persona
+        for persona in get_personas(
+            user_id=user.id if user else None,
+            db_session=db_session,
+            include_default=False,
+            include_slack_bot_personas=False,
+        )
+        if persona.is_visible
+    ]
+    catalog = build_router_catalog(personas)
+
+    # Route (fail-open): any LLM/availability issue -> fall back to all-source.
+    routed_persona_id: int | None = None
+    routed_confidence = 0.0
+    try:
+        _, fast_llm = get_default_llms()
+        route = route_question(question, catalog, fast_llm)
+        routed_persona_id = route.persona_id
+        routed_confidence = route.confidence
+    except Exception as e:
+        logger.warning("Auto-search routing unavailable, using fallback: %s", e)
+
+    target_persona_id = (
+        routed_persona_id
+        if routed_persona_id is not None
+        else DEFAULT_SEARCH_PERSONA_ID
+    )
+
+    # Resolve persona with a trusted-side ACL re-check; on any issue fall back to
+    # the all-source default persona so the box never dead-ends.
+    try:
+        persona = get_persona_by_id(
+            target_persona_id, user=user, db_session=db_session, is_for_edit=False
+        )
+    except Exception:
+        persona = get_persona_by_id(
+            DEFAULT_SEARCH_PERSONA_ID,
+            user=user,
+            db_session=db_session,
+            is_for_edit=False,
+        )
+
+    was_routed = routed_persona_id is not None and persona.id == routed_persona_id
+    prompt_id = persona.prompts[0].id if persona.prompts else 0
+
+    # Answer via the existing one-shot engine. Passing the authenticated `user`
+    # persists the Q + A under their id (one_shot=True) so we capture who-asked-
+    # what for quality analysis; the returned chat_message_id powers 👍/👎 + text
+    # feedback via the existing /chat/create-chat-message-feedback endpoint.
+    qa_response = get_search_answer(
+        query_req=DirectQARequest(
+            messages=[
+                ThreadMessage(message=question, sender=None, role=MessageType.USER)
+            ],
+            prompt_id=prompt_id,
+            persona_id=persona.id,
+            retrieval_options=RetrievalDetails(
+                run_search=OptionalSearchSetting.ALWAYS, real_time=False
+            ),
+        ),
+        user=user,
+        max_document_tokens=None,
+        max_history_tokens=0,
+        db_session=db_session,
+        use_citations=True,
+    )
+
+    return AutoSearchResponse(
+        answer=qa_response.answer,
+        citations=qa_response.citations,
+        docs=qa_response.docs,
+        chat_message_id=qa_response.chat_message_id,
+        error_msg=qa_response.error_msg,
+        answered_by=AnsweredByAssistant(
+            persona_id=persona.id,
+            name=persona.name,
+            display_name=persona.display_name,
+            routed=was_routed,
+            confidence=routed_confidence,
+        ),
+    )

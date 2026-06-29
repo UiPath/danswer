@@ -4,6 +4,8 @@ from typing import Any
 from pydantic import BaseModel
 from pydantic import root_validator
 
+from danswer.chat.models import CitationInfo
+from danswer.chat.models import QADocsResponse
 from danswer.chat.models import RetrievalDocs
 from danswer.configs.constants import DocumentSource
 from danswer.configs.constants import MessageType
@@ -229,6 +231,33 @@ class AdminSearchRequest(BaseModel):
 
 class AdminSearchResponse(BaseModel):
     documents: list[SearchDoc]
+
+
+class AutoSearchRequest(BaseModel):
+    """A single point-in-time question for the auto-routed Search tab."""
+
+    message: str
+
+
+class AnsweredByAssistant(BaseModel):
+    persona_id: int
+    name: str
+    display_name: str | None
+    # True if the router picked this assistant; False if it fell back to the
+    # all-source default persona (low confidence / no clear match).
+    routed: bool
+    confidence: float
+
+
+class AutoSearchResponse(BaseModel):
+    answer: str | None = None
+    citations: list[CitationInfo] | None = None
+    docs: QADocsResponse | None = None
+    # The persisted AI message id — used to attach 👍/👎 + text feedback via the
+    # existing /chat/create-chat-message-feedback endpoint.
+    chat_message_id: int | None = None
+    answered_by: AnsweredByAssistant
+    error_msg: str | None = None
 
 
 class DanswerAnswer(BaseModel):

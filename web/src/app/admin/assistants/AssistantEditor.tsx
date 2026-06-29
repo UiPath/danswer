@@ -173,6 +173,7 @@ export function AssistantEditor({
     name: existingPersona?.name ?? "",
     display_name: existingPersona?.display_name ?? "",
     description: existingPersona?.description ?? "",
+    routing_instructions: existingPersona?.routing_instructions ?? "",
     system_prompt: existingPrompt?.system_prompt ?? "",
     task_prompt: existingPrompt?.task_prompt ?? "",
     is_public: existingPersona?.is_public ?? defaultPublic,
@@ -417,6 +418,15 @@ export function AssistantEditor({
                       name="description"
                       label="Description"
                       subtext="Provide a short descriptions which gives users a hint as to what they should use this Assistant for."
+                    />
+
+                    <TextFormField
+                      name="routing_instructions"
+                      label="Routing instructions (optional, not shown to users)"
+                      isTextArea={true}
+                      subtext={
+                        'Used ONLY by the auto-routed Search tab to decide when to pick this Assistant — never shown to users. Describe what to route here, e.g. "Route here for: Orchestrator questions — scheduling, queues, triggers. Example questions: \'how do I set up a trigger\'. Do NOT route here for: Automation Suite infra (→ AutomationSuite)." Leave blank to fall back to the description.'
+                      }
                     />
 
                     <TextFormField
