@@ -1,0 +1,92 @@
+name: Claude Code Review
+
+# Runs an automated Claude Code review on every PR opened against
+# feature/darwin. The review focuses on security issues but also flags
+# correctness/quality problems.
+#
+# Security notes (see AGENTS.md "Divergence from upstream" + tribal-knowledge
+# cicd-pipeline checklist):
+#   - Uses `pull_request` (NOT `pull_request_target`). pull_request_target
+#     would run untrusted PR code with access to repo secrets — critical risk.
+#     With `pull_request`, forked-PR runs get a read-only GITHUB_TOKEN and the
+#     job simply skips posting (handled gracefully by the action).
+#   - Permissions are minimal: contents:read, only the write scopes needed to
+#     post the review comment. No `contents: write`.
+#   - The Anthropic key is read from a repository secret, never hardcoded.
+#   - PR metadata (title/body/branch names) is passed via the action inputs,
+#     never interpolated into a shell `run:` step, avoiding command injection.
+
+on:
+  pull_request:
+    branches:
+      - feature/darwin
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: Claude-Code-Review-${{ github.head_ref }}
+  cancel-in-progress: true
+
+# Least privilege. Only what the review needs to read the diff and post a comment.
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  claude-review:
+    # Skip drafts and PRs from forks (forked PRs cannot access ANTHROPIC_API_KEY
+    # and GITHUB_TOKEN is read-only there, so the review would be a no-op).
+    if: >
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Claude security review
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          # `/review` runs Claude Code's built-in PR review against the diff and
+          # posts inline + summary comments on the PR.
+          prompt: |
+            REPO_DIR is a checkout of this PR. Review ONLY the changes in this
+            pull request (the diff against the base branch), not the whole repo.
+
+            Act as a security-focused code reviewer for the Danswer/Onyx fork.
+            This repo is ~2 years behind upstream Onyx — review what the code
+            actually does, do not assume upstream patterns apply.
+
+            Prioritise SECURITY issues. Look hard for, and call out, any of:
+              - Injection: SQL/NoSQL string-built queries, command injection
+                (exec/subprocess shell=True with user input), SSRF (user-
+                controlled URLs fetched server-side, missing private-IP/host
+                allowlists), SSTI, path traversal, header/CRLF injection.
+              - AuthN/AuthZ: missing or weak permission checks, BOLA/IDOR
+                (resource access by ID without ownership/tenant scoping),
+                trusting request headers for identity, mass assignment.
+              - Secrets & data exposure: hardcoded credentials/tokens/API keys,
+                secrets in logs, over-fetching (returning password hashes,
+                internal fields, PII), stack traces in error responses.
+              - CI/CD & supply chain (for any .github/workflows or build change):
+                pull_request_target with PR checkout, untrusted github.event.*
+                values used in run: steps, excessive workflow permissions,
+                unpinned third-party actions, secrets reachable from
+                PR-triggered jobs.
+              - Crypto: weak/rng-based tokens, missing TLS verification.
+              - DoS/resource exhaustion: missing pagination/rate limits on
+                expensive or auth endpoints, unbounded loops over user input.
+
+            For each finding give: severity (Critical/High/Medium/Low), the
+            file:line, why it is exploitable, and a concrete fix. If you find no
+            security issues, say so explicitly, then note any correctness or
+            quality concerns. Be precise and avoid false positives — only flag
+            issues you can justify from the diff.
+
+            Post your review as a comment on the PR.
+          claude_args: |
+            --allowed-tools "Read,Grep,Glob,Bash(git diff:*),Bash(git log:*)"
