@@ -39,6 +39,7 @@ class RoutableAssistant(Protocol):
     name: str
     description: str
     routing_instructions: str | None
+    routing_keywords: str | None
 
 
 # Below this, treat the route as "not confident" -> fall back to all-source.
@@ -49,6 +50,8 @@ class RouterCatalogEntry(BaseModel):
     persona_id: int
     name: str
     routing_text: str
+    # Deterministic keyword overrides (lowercased phrases). Empty => no override.
+    keywords: list[str] = []
 
 
 class RouteResult(BaseModel):
@@ -76,14 +79,50 @@ def build_router_catalog(
     catalog: list[RouterCatalogEntry] = []
     for persona in personas:
         text = _routing_text(persona)
-        if not text:
+        keywords = [
+            kw.strip().lower()
+            for kw in (persona.routing_keywords or "").split(",")
+            if kw.strip()
+        ]
+        # An entry with keywords but no routing_text is still useful (keyword
+        # override doesn't need LLM text), so keep it if it has either.
+        if not text and not keywords:
             continue
         catalog.append(
             RouterCatalogEntry(
-                persona_id=persona.id, name=persona.name, routing_text=text
+                persona_id=persona.id,
+                name=persona.name,
+                routing_text=text,
+                keywords=keywords,
             )
         )
     return catalog
+
+
+def keyword_route(
+    question: str, catalog: list[RouterCatalogEntry]
+) -> RouteResult | None:
+    """Deterministic pre-route: if the question contains a configured keyword
+    (case-insensitive substring), route straight to that assistant — BEFORE the
+    LLM router. Returns None when no keyword matches (caller then runs the LLM
+    router exactly as before, so this is purely additive).
+
+    On multiple matches, the LONGEST matching keyword wins (most specific), with
+    the persona id as a stable tiebreak. confidence=1.0 to mark a hard override."""
+    q = (question or "").lower()
+    best: tuple[int, int] | None = None  # (keyword_length, persona_id)
+    best_id: int | None = None
+    for entry in catalog:
+        for kw in entry.keywords:
+            if kw and kw in q:
+                key = (len(kw), -entry.persona_id)
+                if best is None or key > best:
+                    best = key
+                    best_id = entry.persona_id
+    if best_id is None:
+        return None
+    logger.info("assistant router: keyword override -> persona_id=%s", best_id)
+    return RouteResult(persona_id=best_id, confidence=1.0)
 
 
 _ROUTER_PROMPT = """\

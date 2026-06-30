@@ -30,6 +30,8 @@ export interface Persona {
   description: string;
   // Router-only guidance for the auto-routed Search tab; never shown to users.
   routing_instructions?: string | null;
+  // Comma-separated keywords that deterministically route to this assistant.
+  routing_keywords?: string | null;
   document_sets: DocumentSet[];
   prompts: Prompt[];
   tools: ToolSnapshot[];

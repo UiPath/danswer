@@ -74,6 +74,7 @@ def create_update_persona(
             display_name=create_persona_request.display_name,
             description=create_persona_request.description,
             routing_instructions=create_persona_request.routing_instructions,
+            routing_keywords=create_persona_request.routing_keywords,
             num_chunks=create_persona_request.num_chunks,
             llm_relevance_filter=create_persona_request.llm_relevance_filter,
             llm_filter_extraction=create_persona_request.llm_filter_extraction,
@@ -379,6 +380,7 @@ def upsert_persona(
     rerank_enabled: bool = False,
     display_name: str | None = None,
     routing_instructions: str | None = None,
+    routing_keywords: str | None = None,
     prompt_ids: list[int] | None = None,
     document_set_ids: list[int] | None = None,
     tool_ids: list[int] | None = None,
@@ -428,6 +430,7 @@ def upsert_persona(
         persona.display_name = display_name or name
         persona.description = description
         persona.routing_instructions = routing_instructions
+        persona.routing_keywords = routing_keywords
         persona.num_chunks = num_chunks
         persona.llm_relevance_filter = llm_relevance_filter
         persona.llm_filter_extraction = llm_filter_extraction
@@ -462,6 +465,7 @@ def upsert_persona(
             display_name=display_name or name,
             description=description,
             routing_instructions=routing_instructions,
+            routing_keywords=routing_keywords,
             num_chunks=num_chunks,
             llm_relevance_filter=llm_relevance_filter,
             llm_filter_extraction=llm_filter_extraction,

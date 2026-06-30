@@ -174,6 +174,7 @@ export function AssistantEditor({
     display_name: existingPersona?.display_name ?? "",
     description: existingPersona?.description ?? "",
     routing_instructions: existingPersona?.routing_instructions ?? "",
+    routing_keywords: existingPersona?.routing_keywords ?? "",
     system_prompt: existingPrompt?.system_prompt ?? "",
     task_prompt: existingPrompt?.task_prompt ?? "",
     is_public: existingPersona?.is_public ?? defaultPublic,
@@ -426,6 +427,14 @@ export function AssistantEditor({
                       isTextArea={true}
                       subtext={
                         'Used ONLY by the auto-routed Search tab to decide when to pick this Assistant — never shown to users. Describe what to route here, e.g. "Route here for: Orchestrator questions — scheduling, queues, triggers. Example questions: \'how do I set up a trigger\'. Do NOT route here for: Automation Suite infra (→ AutomationSuite)." Leave blank to fall back to the description.'
+                      }
+                    />
+
+                    <TextFormField
+                      name="routing_keywords"
+                      label="Routing keywords (optional, not shown to users)"
+                      subtext={
+                        'Comma-separated phrases that DEFINITELY route a question to this Assistant, checked (case-insensitive) BEFORE the AI router runs — a hard override for unambiguous terms, e.g. "automation suite, as environment, aks deployment, eks deployment". Leave blank to let the AI router decide.'
                       }
                     />
 

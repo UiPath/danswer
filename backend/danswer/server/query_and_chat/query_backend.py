@@ -32,6 +32,7 @@ from danswer.one_shot_answer.models import ThreadMessage
 from danswer.search.models import OptionalSearchSetting
 from danswer.search.models import RetrievalDetails
 from danswer.secondary_llm_flows.assistant_router import build_router_catalog
+from danswer.secondary_llm_flows.assistant_router import keyword_route
 from danswer.secondary_llm_flows.assistant_router import route_question
 from danswer.server.query_and_chat.models import AnsweredByAssistant
 from danswer.server.query_and_chat.models import AutoSearchRequest
@@ -288,13 +289,23 @@ def auto_search(
         # mutation). Fail-open: any LLM/availability issue -> all-source fallback.
         catalog = _get_router_catalog(user, db_session)
         target_persona_id = DEFAULT_SEARCH_PERSONA_ID
-        try:
-            route = route_question(question, catalog, _get_router_llm())
-            if route.persona_id is not None:
-                target_persona_id = route.persona_id
-            routed_confidence = route.confidence
-        except Exception as e:
-            logger.warning("Auto-search routing unavailable, using fallback: %s", e)
+        # 1) Deterministic keyword override (no LLM call) — additive: only fires
+        #    when a configured keyword matches; otherwise falls through to the LLM.
+        kw = keyword_route(question, catalog)
+        if kw is not None and kw.persona_id is not None:
+            target_persona_id = kw.persona_id
+            routed_confidence = kw.confidence
+        else:
+            # 2) LLM router.
+            try:
+                route = route_question(question, catalog, _get_router_llm())
+                if route.persona_id is not None:
+                    target_persona_id = route.persona_id
+                routed_confidence = route.confidence
+            except Exception as e:
+                logger.warning(
+                    "Auto-search routing unavailable, using fallback: %s", e
+                )
 
     # Resolve persona with a trusted-side ACL re-check; on any issue (incl. an
     # explicit persona_id the user can't access) fall back to the all-source

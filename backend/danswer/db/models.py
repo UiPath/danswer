@@ -1018,6 +1018,12 @@ class Persona(Base):
     # rendered in the user-facing UI (that's what `description` is for). Router
     # falls back to `description` when this is blank.
     routing_instructions: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Comma-separated phrases that DETERMINISTICALLY route a question to this
+    # assistant (case-insensitive substring match) BEFORE the LLM router runs —
+    # a hard override for unambiguous terms (e.g. "automation suite, aks
+    # deployment"). Blank => no keyword override; the LLM router decides. See
+    # secondary_llm_flows/assistant_router.keyword_route.
+    routing_keywords: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Currently stored but unused, all flows use hybrid
     search_type: Mapped[SearchType] = mapped_column(
         Enum(SearchType, native_enum=False), default=SearchType.HYBRID
