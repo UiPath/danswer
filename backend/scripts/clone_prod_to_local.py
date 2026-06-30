@@ -49,10 +49,12 @@ IMPORTANT CONSTRAINTS / CAVEATS
 * Re-runnable: DB rows upsert by primary key; Vespa chunks PUT (idempotent).
 """
 import argparse
+import gzip
 import json
 import os
 import sys
 import urllib.parse
+from collections.abc import Iterator
 from pathlib import Path
 
 import httpx
@@ -156,11 +158,15 @@ def _latest_doc_ids(client: httpx.Client, index: str, source: str, n: int) -> li
     return ordered[:n]
 
 
-def _visit_chunks_for_docs(
+def _iter_chunks_for_docs(
     client: httpx.Client, index: str, doc_ids: list[str]
-) -> list[dict]:
-    """All chunks for the given document_ids, via the Vespa visit API."""
-    out: list[dict] = []
+) -> "Iterator[dict]":
+    """Yield chunks for the given document_ids via the Vespa visit API.
+
+    Streams (yields one chunk at a time) rather than accumulating — a source's
+    500 docs can be many chunks each carrying a 768-float embedding, so buffering
+    them all OOM-kills the exporter in a memory-limited pod.
+    """
     url = f"{VESPA_FEED_CONTAINER_URL}/document/v1/default/{index}/docid"
     for i in range(0, len(doc_ids), DOC_ID_BATCH):
         batch = doc_ids[i : i + DOC_ID_BATCH]
@@ -174,11 +180,10 @@ def _visit_chunks_for_docs(
             r.raise_for_status()
             data = r.json()
             for doc in data.get("documents", []):
-                out.append({"id": doc["id"], "fields": doc["fields"]})
+                yield {"id": doc["id"], "fields": doc["fields"]}
             cont = data.get("continuation")
             if not cont:
                 break
-    return out
 
 
 def export(args: argparse.Namespace) -> None:
@@ -196,14 +201,20 @@ def export(args: argparse.Namespace) -> None:
             for src in sources:
                 doc_ids = _latest_doc_ids(client, index, src, args.per_source)
                 if not doc_ids:
-                    print(f"[export]   {src}: 0 documents")
+                    print(f"[export]   {src}: 0 documents", flush=True)
                     continue
-                chunks = _visit_chunks_for_docs(client, index, doc_ids)
-                path = out_dir / "vespa" / f"{src}.jsonl"
-                with path.open("w") as f:
-                    for c in chunks:
+                # Stream straight to a gzip file: bounded memory + a much smaller
+                # bundle (embedding float-text compresses well).
+                path = out_dir / "vespa" / f"{src}.jsonl.gz"
+                n = 0
+                with gzip.open(path, "wt") as f:
+                    for c in _iter_chunks_for_docs(client, index, doc_ids):
                         f.write(json.dumps(c) + "\n")
-                print(f"[export]   {src}: {len(doc_ids)} docs, {len(chunks)} chunks -> {path.name}")
+                        n += 1
+                print(
+                    f"[export]   {src}: {len(doc_ids)} docs, {n} chunks -> {path.name}",
+                    flush=True,
+                )
 
     if not args.vespa_only:
         db_dump: dict[str, list[dict]] = {}
@@ -221,15 +232,18 @@ def export(args: argparse.Namespace) -> None:
 # --------------------------------------------------------------------------- #
 def _import_vespa(out_dir: Path, local_index: str, make_public: bool) -> None:
     vespa_dir = out_dir / "vespa"
-    files = sorted(vespa_dir.glob("*.jsonl"))
+    files = sorted(vespa_dir.glob("*.jsonl.gz")) + sorted(vespa_dir.glob("*.jsonl"))
     if not files:
-        print("[import] no vespa/*.jsonl found, skipping Vespa")
+        print("[import] no vespa/*.jsonl(.gz) found, skipping Vespa")
         return
     total = 0
     with httpx.Client(timeout=HTTP_TIMEOUT) as client:
         for path in files:
             n = 0
-            for line in path.read_text().splitlines():
+            opener = gzip.open if path.suffix == ".gz" else open
+            with opener(path, "rt") as fh:
+                lines = fh.readlines()
+            for line in lines:
                 if not line.strip():
                     continue
                 rec = json.loads(line)
