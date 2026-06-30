@@ -87,6 +87,16 @@ MAX_PROMPT_DOCS_PER_SOURCE = int(os.environ.get("MAX_PROMPT_DOCS_PER_SOURCE") or
 AUTHORITATIVE_CITATION_RETENTION_ENABLED = (
     os.environ.get("AUTHORITATIVE_CITATION_RETENTION_ENABLED", "").lower() == "true"
 )
+# Optional model override for the assistant ROUTER (the one-shot Search tab's
+# automatic assistant picker). When BOTH are set, routing uses this gateway
+# vendor/model instead of the default fast model — e.g. point it at Claude
+# (ASSISTANT_ROUTER_LLM_VENDOR=awsbedrock + the gateway's Claude model id) for
+# sharper assistant selection. Empty => use the default fast LLM. Note: a heavier
+# model improves selection precision but adds latency/cost to the (already extra)
+# router call; routing is a classification task that the fast model handles well,
+# so treat this as an A/B lever rather than a default.
+ASSISTANT_ROUTER_LLM_VENDOR = os.environ.get("ASSISTANT_ROUTER_LLM_VENDOR") or ""
+ASSISTANT_ROUTER_LLM_MODEL = os.environ.get("ASSISTANT_ROUTER_LLM_MODEL") or ""
 # Versioned-docs dedup at final doc selection. Documentation sites publish the
 # SAME page under one URL per product version (e.g. docs.uipath.com/.../2024.10/…
 # and /.../2023.10/… and /.../2.2510/…). Retrieval then floods the LLM context

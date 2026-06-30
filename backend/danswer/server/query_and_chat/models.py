@@ -237,6 +237,10 @@ class AutoSearchRequest(BaseModel):
     """A single point-in-time question for the auto-routed Search tab."""
 
     message: str
+    # When the user explicitly picks an assistant via "@mention", its id is sent
+    # here — the router (LLM selection) step is skipped and this assistant is
+    # invoked directly (still ACL-re-checked on the trusted side). None => auto-route.
+    persona_id: int | None = None
 
 
 class AnsweredByAssistant(BaseModel):

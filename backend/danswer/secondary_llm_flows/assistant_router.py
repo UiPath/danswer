@@ -19,15 +19,26 @@ Design notes:
 import ast
 import json
 import re
+from typing import Protocol
 
 from pydantic import BaseModel
 
-from danswer.db.models import Persona
 from danswer.llm.interfaces import LLM
 from danswer.llm.utils import message_to_string
 from danswer.utils.logger import setup_logger
 
 logger = setup_logger()
+
+
+class RoutableAssistant(Protocol):
+    """Structural type for anything the router can catalog — satisfied by both
+    the Persona ORM model and PersonaSnapshot (the cached form). The endpoint
+    feeds cached PersonaSnapshots; the unit tests feed lightweight stand-ins."""
+
+    id: int
+    name: str
+    description: str
+    routing_instructions: str | None
 
 
 # Below this, treat the route as "not confident" -> fall back to all-source.
@@ -46,7 +57,7 @@ class RouteResult(BaseModel):
     confidence: float
 
 
-def _routing_text(persona: Persona) -> str:
+def _routing_text(persona: RoutableAssistant) -> str:
     """Router signal for a persona: the router-only `routing_instructions`, or
     `description` when that's blank (graceful fallback for un-curated assistants)."""
     instructions = (persona.routing_instructions or "").strip()
@@ -55,7 +66,9 @@ def _routing_text(persona: Persona) -> str:
     return (persona.description or "").strip()
 
 
-def build_router_catalog(personas: list[Persona]) -> list[RouterCatalogEntry]:
+def build_router_catalog(
+    personas: list[RoutableAssistant],
+) -> list[RouterCatalogEntry]:
     """Build the routable-assistant catalog from an ALREADY ACL-filtered list.
 
     Caller passes the user's accessible + visible + non-Slack personas. Entries

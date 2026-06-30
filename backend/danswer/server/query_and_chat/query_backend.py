@@ -16,10 +16,15 @@ from danswer.db.tag import get_tags_by_value_prefix_for_source_types
 from danswer.document_index.factory import get_default_document_index
 from danswer.document_index.vespa.index import VespaIndex
 from danswer.auth.schemas import UserRole
+from danswer.configs.chat_configs import ASSISTANT_ROUTER_LLM_MODEL
+from danswer.configs.chat_configs import ASSISTANT_ROUTER_LLM_VENDOR
 from danswer.configs.constants import MessageType
+from danswer.db.constants import SLACK_BOT_PERSONA_PREFIX
 from danswer.db.persona import get_persona_by_id
-from danswer.db.persona import get_personas
+from danswer.db.persona_cache import get_personas_for_user_cached
 from danswer.llm.factory import get_default_llms
+from danswer.llm.factory import get_llm
+from danswer.llm.interfaces import LLM
 from danswer.one_shot_answer.answer_question import get_search_answer
 from danswer.one_shot_answer.answer_question import stream_search_answer
 from danswer.one_shot_answer.models import DirectQARequest
@@ -211,6 +216,41 @@ def _auto_search_allowed(rollout: AutoSearchRollout, user: User | None) -> bool:
     return user.role == UserRole.ADMIN
 
 
+def _get_router_llm() -> LLM:
+    """The LLM used for assistant routing. When ASSISTANT_ROUTER_LLM_VENDOR +
+    ASSISTANT_ROUTER_LLM_MODEL are set (e.g. awsbedrock + Claude Sonnet), route
+    with that model for sharper selection; otherwise use the default fast LLM."""
+    if ASSISTANT_ROUTER_LLM_VENDOR and ASSISTANT_ROUTER_LLM_MODEL:
+        return get_llm(
+            provider=ASSISTANT_ROUTER_LLM_VENDOR, model=ASSISTANT_ROUTER_LLM_MODEL
+        )
+    _, fast_llm = get_default_llms()
+    return fast_llm
+
+
+def _get_router_catalog(user: User | None, db_session: Session) -> list:
+    """Build the router catalog from the user's accessible assistants.
+
+    Uses the Redis-backed persona cache (get_personas_for_user_cached), which is
+    ACL-filtered AND write-through invalidated on EVERY persona mutation (see
+    invalidate_personas_all() calls in db/persona.py) — so the catalog bursts and
+    repopulates whenever an admin updates an assistant, cross-worker, not just on
+    a TTL. When PERSONA_CACHE_ENABLED is false it falls back to a direct DB read.
+    We then drop the default ('Darwin', the fallback), Slack-bot, and hidden
+    personas — none are routing targets."""
+    snapshots = get_personas_for_user_cached(
+        user_id=user.id if user else None, db_session=db_session
+    )
+    routable = [
+        snapshot
+        for snapshot in snapshots
+        if snapshot.is_visible
+        and not snapshot.default_persona
+        and not snapshot.name.startswith(SLACK_BOT_PERSONA_PREFIX)
+    ]
+    return build_router_catalog(routable)
+
+
 @basic_router.post("/auto-search")
 def auto_search(
     auto_search_request: AutoSearchRequest,
@@ -236,39 +276,29 @@ def auto_search(
     question = auto_search_request.message
     logger.info(f"Auto-search question: {question}")
 
-    # Router catalog = the user's accessible, VISIBLE, non-Slack assistants.
-    # get_personas already enforces ACL (public / per-user / per-group).
-    personas = [
-        persona
-        for persona in get_personas(
-            user_id=user.id if user else None,
-            db_session=db_session,
-            include_default=False,
-            include_slack_bot_personas=False,
-        )
-        if persona.is_visible
-    ]
-    catalog = build_router_catalog(personas)
-
-    # Route (fail-open): any LLM/availability issue -> fall back to all-source.
-    routed_persona_id: int | None = None
     routed_confidence = 0.0
-    try:
-        _, fast_llm = get_default_llms()
-        route = route_question(question, catalog, fast_llm)
-        routed_persona_id = route.persona_id
-        routed_confidence = route.confidence
-    except Exception as e:
-        logger.warning("Auto-search routing unavailable, using fallback: %s", e)
+    if auto_search_request.persona_id is not None:
+        # User explicitly @mentioned an assistant — skip the LLM router and
+        # invoke it directly. Still ACL-re-checked below via get_persona_by_id.
+        target_persona_id = auto_search_request.persona_id
+        routed_confidence = 1.0
+    else:
+        # Auto-route. Catalog = the user's accessible, VISIBLE, non-Slack
+        # assistants via the Redis persona cache (busted on every assistant
+        # mutation). Fail-open: any LLM/availability issue -> all-source fallback.
+        catalog = _get_router_catalog(user, db_session)
+        target_persona_id = DEFAULT_SEARCH_PERSONA_ID
+        try:
+            route = route_question(question, catalog, _get_router_llm())
+            if route.persona_id is not None:
+                target_persona_id = route.persona_id
+            routed_confidence = route.confidence
+        except Exception as e:
+            logger.warning("Auto-search routing unavailable, using fallback: %s", e)
 
-    target_persona_id = (
-        routed_persona_id
-        if routed_persona_id is not None
-        else DEFAULT_SEARCH_PERSONA_ID
-    )
-
-    # Resolve persona with a trusted-side ACL re-check; on any issue fall back to
-    # the all-source default persona so the box never dead-ends.
+    # Resolve persona with a trusted-side ACL re-check; on any issue (incl. an
+    # explicit persona_id the user can't access) fall back to the all-source
+    # default persona so the box never dead-ends.
     try:
         persona = get_persona_by_id(
             target_persona_id, user=user, db_session=db_session, is_for_edit=False
@@ -281,7 +311,9 @@ def auto_search(
             is_for_edit=False,
         )
 
-    was_routed = routed_persona_id is not None and persona.id == routed_persona_id
+    # "routed" = a specific assistant answered (explicit @mention OR LLM-routed),
+    # vs the all-source fallback. Drives the "(searched all sources)" UI suffix.
+    was_routed = persona.id != DEFAULT_SEARCH_PERSONA_ID
     prompt_id = persona.prompts[0].id if persona.prompts else 0
 
     # Answer via the existing one-shot engine. Passing the authenticated `user`
