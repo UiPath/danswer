@@ -139,6 +139,20 @@ def _token_present(token: str, words: set[str]) -> bool:
     return False
 
 
+def _word_token_match(token: str, word: str) -> bool:
+    """One position: exact word, or start-anchored prefix for tokens >= 4 chars."""
+    return word == token or (len(token) >= _PREFIX_MIN_LEN and word.startswith(token))
+
+
+def _is_contiguous(tokens: list[str], word_list: list[str]) -> bool:
+    """True if the keyword's tokens appear as an adjacent, in-order run of words."""
+    n = len(tokens)
+    for i in range(len(word_list) - n + 1):
+        if all(_word_token_match(tokens[j], word_list[i + j]) for j in range(n)):
+            return True
+    return False
+
+
 def keyword_route(
     question: str, catalog: list[RouterCatalogEntry]
 ) -> RouteResult | None:
@@ -146,41 +160,56 @@ def keyword_route(
     router — when the question matches one of its configured keywords. Returns None
     when nothing matches (caller then runs the LLM router), so this is additive.
 
-    An UNQUOTED keyword is FUZZY: it is split into words and matches when EVERY one
-    of those words appears in the question, in any order/position. Each word matches
-    a question word exactly, or (for words >= 4 chars) as a start-anchored prefix
-    (so "sla expir" hits "the SLA on that task expired", "round robin" hits
-    "assign round-robin to the group"). A single-word keyword reduces to
-    word-present.
+    Keyword forms (all in the one comma-separated column):
+    - FUZZY (unquoted, e.g. `task sla`): matches when EVERY word appears in the
+      question, any order/position — exact, or a start-anchored prefix for words
+      >= 4 chars (so `sla expir` hits "the SLA ... expired").
+    - EXACT (quoted, e.g. `"as environment"`): matches only as a contiguous phrase.
+      Use for abbreviations that are also common words (AS = Automation Suite).
+    - ALWAYS-WINS (`!` prefix, e.g. `!automation suite` or `!"as environment"`):
+      a priority flag — if it matches it outranks every non-priority match.
 
-    A "QUOTED" keyword matches only as an EXACT CONTIGUOUS phrase (case-insensitive
-    substring) — use it when the words are only meaningful adjacent, e.g. an
-    abbreviation that is also a common word: "as environment" (AS = Automation
-    Suite) must appear together, not as "as" and "environment" scattered.
-
-    On multiple matches the MOST SPECIFIC keyword wins — more words first, then
-    more characters — with persona id as a stable tiebreak. confidence=1.0."""
-    words = _words(question)
+    Ranking among matches (highest wins):
+      (priority, contiguous, exact-word-count, num_words, char_len, -persona_id)
+    So an explicitly-tagged keyword wins first; otherwise a keyword whose words
+    appear ADJACENT and EXACT beats one that only matched scattered / via prefix
+    (e.g. `automation suite` verbatim beats `integration service` matched on the
+    incidental words "integrations"/"services"). confidence=1.0."""
+    word_list = _WORD_RE.findall((question or "").lower())
+    words = set(word_list)
     if not words:
         return None
     q_lower = question.lower()
-    best_key: tuple[int, int, int] | None = None  # (num_words, char_len, -persona_id)
+    best_key: tuple | None = None
     best_id: int | None = None
     for entry in catalog:
-        for kw in entry.keywords:
-            kw = kw.strip()
+        for raw in entry.keywords:
+            kw = raw.strip()
+            priority = kw.startswith("!")
+            if priority:
+                kw = kw[1:].strip()
             if len(kw) >= 2 and kw[0] == '"' and kw[-1] == '"':
                 # Quoted -> exact contiguous phrase match.
                 phrase = kw[1:-1].strip()
                 tokens = _keyword_tokens(phrase)
                 if not phrase or phrase not in q_lower:
                     continue
+                contiguous = True
             else:
                 # Unquoted -> fuzzy: all words present, any order/position.
                 tokens = _keyword_tokens(kw)
                 if not tokens or not all(_token_present(t, words) for t in tokens):
                     continue
-            key = (len(tokens), len("".join(tokens)), -entry.persona_id)
+                contiguous = _is_contiguous(tokens, word_list)
+            exact = sum(1 for t in tokens if t in words)
+            key = (
+                priority,
+                contiguous,
+                exact,
+                len(tokens),
+                len("".join(tokens)),
+                -entry.persona_id,
+            )
             if best_key is None or key > best_key:
                 best_key = key
                 best_id = entry.persona_id

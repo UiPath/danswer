@@ -132,6 +132,7 @@ function RoutingIntentsField() {
 interface KeywordRow {
   text: string;
   exact: boolean;
+  priority: boolean;
 }
 
 function parseKeywords(value: string): KeywordRow[] {
@@ -139,20 +140,31 @@ function parseKeywords(value: string): KeywordRow[] {
     return [];
   }
   return value.split(",").map((raw) => {
-    const t = raw.trim();
-    if (t.length >= 2 && t.startsWith('"') && t.endsWith('"')) {
-      return { text: t.slice(1, -1).trim(), exact: true };
+    let t = raw.trim();
+    let priority = false;
+    if (t.startsWith("!")) {
+      priority = true;
+      t = t.slice(1).trim();
     }
-    return { text: t, exact: false };
+    let exact = false;
+    if (t.length >= 2 && t.startsWith('"') && t.endsWith('"')) {
+      exact = true;
+      t = t.slice(1, -1).trim();
+    }
+    return { text: t, exact, priority };
   });
 }
 
 function serializeKeywords(rows: KeywordRow[]): string {
   return rows
-    .map((r) => r.text.trim())
-    .map((text, i) => ({ text, exact: rows[i].exact }))
-    .filter((r) => r.text)
-    .map((r) => (r.exact ? `"${r.text}"` : r.text))
+    .filter((r) => r.text.trim())
+    .map((r) => {
+      let s = r.exact ? `"${r.text.trim()}"` : r.text.trim();
+      if (r.priority) {
+        s = `!${s}`;
+      }
+      return s;
+    })
     .join(", ");
 }
 
@@ -171,7 +183,7 @@ function RoutingKeywordsField() {
       <Label>Routing keywords (optional, not shown to users)</Label>
       <SubLabel>
         {
-          "Keywords that DEFINITELY route a question here (checked case-insensitively BEFORE the AI router). “All words” fires when every word of the keyword appears in the question, in any order (e.g. “task sla” matches “the SLA on this task”). “Exact phrase” requires the words adjacent — use it for an abbreviation that is also a common word, e.g. “as environment” (AS = Automation Suite)."
+          "Keywords that DEFINITELY route a question here (checked case-insensitively BEFORE the AI router). “All words” fires when every word of the keyword appears in the question, in any order (e.g. “task sla” matches “the SLA on this task”). “Exact phrase” requires the words adjacent — use it for an abbreviation that is also a common word, e.g. “as environment” (AS = Automation Suite). Tick “Always wins” to make this keyword beat any other assistant’s match when both fire (use only for unambiguous product terms)."
         }
       </SubLabel>
       <div className="mt-2 flex flex-col gap-2">
@@ -209,6 +221,24 @@ function RoutingKeywordsField() {
               <option value="all">All words</option>
               <option value="exact">Exact phrase</option>
             </select>
+            <label
+              className="flex shrink-0 items-center gap-1 text-sm text-subtle"
+              title="Always wins: if this keyword matches, it beats any other assistant's match"
+            >
+              <input
+                type="checkbox"
+                checked={row.priority}
+                onChange={(e) =>
+                  setRows(
+                    rows.map((r, j) =>
+                      j === i ? { ...r, priority: e.target.checked } : r
+                    )
+                  )
+                }
+                className="h-3.5 w-3.5"
+              />
+              Always wins
+            </label>
             <button
               type="button"
               onClick={() => setRows(rows.filter((_, j) => j !== i))}
@@ -222,7 +252,9 @@ function RoutingKeywordsField() {
         ))}
         <button
           type="button"
-          onClick={() => setRows([...rows, { text: "", exact: false }])}
+          onClick={() =>
+            setRows([...rows, { text: "", exact: false, priority: false }])
+          }
           className="mt-1 inline-flex items-center gap-1.5 self-start text-sm text-link hover:underline"
         >
           <FiPlus size={15} /> Add keyword

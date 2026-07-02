@@ -314,6 +314,49 @@ def test_keyword_route_quoted_and_fuzzy_coexist() -> None:
     assert keyword_route("the sla on this task", cat).persona_id == 2
 
 
+# quality-aware ranking: contiguous/exact match beats scattered/prefix match
+_AS_IS = [
+    _entry(1, "AutomationSuite", ["automation suite"]),
+    _entry(2, "IntegrationService", ["integration service"]),
+]
+# both fuzzy-match this AutomationSuite question: "automation suite" is verbatim,
+# "integration service" only via the incidental plurals integration(s)/service(s)
+_ARCH_Q = "architecture diagram for the automation suite release with integrations and different services"
+
+
+def test_keyword_route_contiguous_exact_beats_scattered_prefix() -> None:
+    # AutomationSuite wins: its words are adjacent + exact; IntegrationService's
+    # matched only scattered via prefix. (Char length would have picked IS before.)
+    assert keyword_route(_ARCH_Q, _AS_IS).persona_id == 1
+
+
+def test_keyword_route_priority_always_wins() -> None:
+    # Tag IntegrationService's keyword as always-wins ("!") -> it beats the
+    # stronger AutomationSuite match.
+    cat = [
+        _entry(1, "AutomationSuite", ["automation suite"]),
+        _entry(2, "IntegrationService", ["!integration service"]),
+    ]
+    assert keyword_route(_ARCH_Q, cat).persona_id == 2
+
+
+def test_keyword_route_priority_beats_across_the_board() -> None:
+    # A priority keyword outranks a non-priority one even if the latter is more
+    # specific (more words / longer).
+    cat = [
+        _entry(1, "A", ["!coupa"]),
+        _entry(2, "B", ["procure to pay solution"]),
+    ]
+    assert keyword_route("coupa invoice in the procure to pay solution", cat).persona_id == 1
+
+
+def test_keyword_route_priority_exact_combo() -> None:
+    cat = [_entry(1, "AC", ['!"validation station"'])]
+    assert keyword_route("stuck in the validation station today", cat).persona_id == 1
+    # quoted still requires the contiguous phrase even with priority
+    assert keyword_route("validation of the station data", cat) is None
+
+
 # --- parse_intents + intent_route (semantic pre-route) ----------------------
 
 
