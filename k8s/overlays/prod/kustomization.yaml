@@ -30,10 +30,10 @@ namespace: darwin
 images:
   - name: danswer-backend
     newName: sfbrdevhelmweacr.azurecr.io/danswer/danswer-backend
-    newTag: vha-207
+    newTag: vha-208
   - name: danswer-web-server
     newName: sfbrdevhelmweacr.azurecr.io/danswer/danswer-web-server
-    newTag: vha-105
+    newTag: vha-106
   - name: danswer-model-server
     newName: danswer/danswer-model-server
     newTag: v0.3.94

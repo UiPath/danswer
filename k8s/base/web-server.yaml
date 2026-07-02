@@ -38,6 +38,24 @@ spec:
         ports:
         - containerPort: 3000
           protocol: TCP
+        # Zero-downtime rolling upgrade: the Service only sends traffic once the
+        # new pod actually serves, and (with maxUnavailable rounding to 0) the old
+        # pod is kept until the new one is Ready — so no request hits a booting pod.
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 3000
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        # Grace for the Next.js server to come up before readiness is enforced.
+        startupProbe:
+          httpGet:
+            path: /
+            port: 3000
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 30
         resources:
           requests:
             cpu: 500m
