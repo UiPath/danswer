@@ -50,11 +50,19 @@ interface AutoSearchDoc {
   semantic_identifier: string;
   link: string | null;
 }
+interface SearchedAssistant {
+  persona_id: number;
+  name: string;
+  display_name: string | null;
+}
 interface AutoSearchResponse {
   answer: string | null;
   docs: { top_documents: AutoSearchDoc[] } | null;
   chat_message_id: number | null;
   answered_by: AnsweredBy;
+  // Next-best assistants (router ranks 2..N) shown as clickable "Recommended
+  // assistants" chips: click one to chat further with it if #1 wasn't right.
+  other_recommended: SearchedAssistant[];
   error_msg: string | null;
 }
 
@@ -181,13 +189,15 @@ export function AutoSearch({ userRole }: { userRole: string | null }) {
     textAreaRef.current?.focus();
   }
 
-  async function runSearch(override?: string) {
+  async function runSearch(override?: string, explicitPersonaId?: number) {
     const rawText = override ?? question;
     // Explicit @mention pick (only honored when its annotation is still present
-    // and this isn't a recent-search re-run) => skip routing, invoke directly.
-    let personaId: number | null = null;
+    // and this isn't a recent-search re-run or a "try another assistant" retry)
+    // => skip routing, invoke directly.
+    let personaId: number | null = explicitPersonaId ?? null;
     let toSearch = rawText;
     if (
+      explicitPersonaId === undefined &&
       override === undefined &&
       forcedPersona &&
       hasMentionLabel(rawText, assistantDisplayName(forcedPersona))
@@ -252,6 +262,7 @@ export function AutoSearch({ userRole }: { userRole: string | null }) {
   const answeredByLabel =
     answeredBy &&
     (answeredBy.display_name?.trim() ? answeredBy.display_name : answeredBy.name);
+  const otherRecommended = result?.other_recommended ?? [];
   const topDocs = result?.docs?.top_documents ?? [];
 
   const hasActivity = isLoading || !!result || !!error;
@@ -475,6 +486,29 @@ export function AutoSearch({ userRole }: { userRole: string | null }) {
                     </li>
                   ))}
                 </ul>
+              </div>
+            )}
+
+            {otherRecommended.length > 0 && (
+              <div className="mt-7 border-t border-border-medium pt-5">
+                <div className="text-xs font-semibold uppercase tracking-wide text-subtle mb-3">
+                  Recommended assistants
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {otherRecommended.map((a) => (
+                    <button
+                      key={a.persona_id}
+                      onClick={() => runSearch(question, a.persona_id)}
+                      disabled={isLoading}
+                      title={`Ask ${
+                        a.display_name?.trim() ? a.display_name : a.name
+                      } instead`}
+                      className="rounded-full border border-border-medium px-3 py-1 text-sm text-default hover:bg-hover transition-colors disabled:opacity-50"
+                    >
+                      {a.display_name?.trim() ? a.display_name : a.name}
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
 

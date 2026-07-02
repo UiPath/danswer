@@ -32,6 +32,8 @@ export interface Persona {
   routing_instructions?: string | null;
   // Comma-separated keywords that deterministically route to this assistant.
   routing_keywords?: string | null;
+  // Newline-separated intent phrases for the semantic pre-route (one per line).
+  routing_intents?: string | null;
   document_sets: DocumentSet[];
   prompts: Prompt[];
   tools: ToolSnapshot[];

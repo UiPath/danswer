@@ -11,6 +11,7 @@ from danswer.auth.users import current_user
 from danswer.configs.constants import DocumentSource
 from danswer.db.embedding_model import get_current_db_embedding_model
 from danswer.db.engine import get_session
+from danswer.db.models import Persona
 from danswer.db.models import User
 from danswer.db.tag import get_tags_by_value_prefix_for_source_types
 from danswer.document_index.factory import get_default_document_index
@@ -18,6 +19,8 @@ from danswer.document_index.vespa.index import VespaIndex
 from danswer.auth.schemas import UserRole
 from danswer.configs.chat_configs import ASSISTANT_ROUTER_LLM_MODEL
 from danswer.configs.chat_configs import ASSISTANT_ROUTER_LLM_VENDOR
+from danswer.configs.chat_configs import AUTO_SEARCH_TOP_N
+from danswer.configs.chat_configs import AUTO_SEARCH_INTENT_THRESHOLD
 from danswer.configs.constants import MessageType
 from danswer.db.constants import SLACK_BOT_PERSONA_PREFIX
 from danswer.db.persona import get_persona_by_id
@@ -32,11 +35,13 @@ from danswer.one_shot_answer.models import ThreadMessage
 from danswer.search.models import OptionalSearchSetting
 from danswer.search.models import RetrievalDetails
 from danswer.secondary_llm_flows.assistant_router import build_router_catalog
+from danswer.secondary_llm_flows.assistant_router import intent_route
 from danswer.secondary_llm_flows.assistant_router import keyword_route
 from danswer.secondary_llm_flows.assistant_router import route_question
 from danswer.server.query_and_chat.models import AnsweredByAssistant
 from danswer.server.query_and_chat.models import AutoSearchRequest
 from danswer.server.query_and_chat.models import AutoSearchResponse
+from danswer.server.query_and_chat.models import SearchedAssistant
 from danswer.server.settings.models import AutoSearchRollout
 from danswer.server.settings.store import load_settings
 from danswer.search.models import IndexFilters
@@ -267,8 +272,9 @@ def auto_search(
     with the existing one-shot engine. Picks the assistant via the LLM router
     over the user's ACL-filtered, visible assistants; falls back to the
     all-source default persona when no assistant clearly fits."""
+    settings = load_settings()
     # Trusted-side rollout gate — never rely on the FE hiding the tab.
-    if not _auto_search_allowed(load_settings().auto_search_rollout, user):
+    if not _auto_search_allowed(settings.auto_search_rollout, user):
         raise HTTPException(
             status_code=403,
             detail="Auto-search is not enabled for your account.",
@@ -278,6 +284,10 @@ def auto_search(
     logger.info(f"Auto-search question: {question}")
 
     routed_confidence = 0.0
+    # The router's best-first top-N ranking. The #1 answers the question (single
+    # scope); the rest become "recommended assistants" the user can chat with next.
+    # Empty for keyword routes and @mentions (nothing to recommend).
+    ranked_ids: list[int] = []
     if auto_search_request.persona_id is not None:
         # User explicitly @mentioned an assistant — skip the LLM router and
         # invoke it directly. Still ACL-re-checked below via get_persona_by_id.
@@ -292,40 +302,76 @@ def auto_search(
         # 1) Deterministic keyword override (no LLM call) — additive: only fires
         #    when a configured keyword matches; otherwise falls through to the LLM.
         kw = keyword_route(question, catalog)
+        # Semantic intent pre-route is OFF unless an admin enables it (default off).
+        intent = (
+            intent_route(
+                question,
+                catalog,
+                _get_router_llm(),
+                min_confidence=AUTO_SEARCH_INTENT_THRESHOLD,
+            )
+            if kw is None and settings.auto_search_intent_enabled
+            else None
+        )
         if kw is not None and kw.persona_id is not None:
             target_persona_id = kw.persona_id
             routed_confidence = kw.confidence
+        elif intent is not None and intent.persona_id is not None:
+            # 2) Semantic intent pre-route: an LLM matches the question against all
+            #    assistants' intent phrases (high-confidence gate). Single scope
+            #    like the keyword route; no recommendations. On no confident match
+            #    it returns None and we fall through to the instruction router.
+            target_persona_id = intent.persona_id
+            routed_confidence = intent.confidence
         else:
-            # 2) LLM router.
+            # 3) LLM router — returns a best-first top-N ranking in one call. The #1
+            #    answers (single scope); ranks 2..N become the recommendations.
             try:
-                route = route_question(question, catalog, _get_router_llm())
+                route = route_question(
+                    question, catalog, _get_router_llm(), top_n=AUTO_SEARCH_TOP_N
+                )
                 if route.persona_id is not None:
                     target_persona_id = route.persona_id
                 routed_confidence = route.confidence
+                ranked_ids = route.ranked_ids
             except Exception as e:
                 logger.warning(
                     "Auto-search routing unavailable, using fallback: %s", e
                 )
 
-    # Resolve persona with a trusted-side ACL re-check; on any issue (incl. an
-    # explicit persona_id the user can't access) fall back to the all-source
-    # default persona so the box never dead-ends.
-    try:
-        persona = get_persona_by_id(
-            target_persona_id, user=user, db_session=db_session, is_for_edit=False
-        )
-    except Exception:
-        persona = get_persona_by_id(
-            DEFAULT_SEARCH_PERSONA_ID,
-            user=user,
-            db_session=db_session,
-            is_for_edit=False,
-        )
+    def _resolve(pid: int) -> Persona | None:
+        """ACL-checked persona fetch; None if inaccessible/missing."""
+        try:
+            return get_persona_by_id(
+                pid, user=user, db_session=db_session, is_for_edit=False
+            )
+        except Exception:
+            return None
 
-    # "routed" = a specific assistant answered (explicit @mention OR LLM-routed),
-    # vs the all-source fallback. Drives the "(searched all sources)" UI suffix.
+    # SINGLE-SCOPE: answer with the ONE routed assistant (its own document sets
+    # fence retrieval). On any issue (incl. an explicit persona_id the user can't
+    # access) fall back to the all-source default persona so the box never dead-ends.
+    persona = _resolve(target_persona_id) or get_persona_by_id(
+        DEFAULT_SEARCH_PERSONA_ID, user=user, db_session=db_session, is_for_edit=False
+    )
     was_routed = persona.id != DEFAULT_SEARCH_PERSONA_ID
     prompt_id = persona.prompts[0].id if persona.prompts else 0
+
+    # Recommended assistants: the router's next-best picks (ranks 2..N), which the
+    # user can click to chat further if #1 wasn't right. Only populated on the LLM
+    # route (ranked_ids is empty for keyword routes / @mentions). No extra LLM call.
+    other_recommended: list[SearchedAssistant] = []
+    for alt_id in ranked_ids:
+        if alt_id == persona.id or len(other_recommended) >= 2:
+            continue
+        alt = _resolve(alt_id)
+        if alt is None:
+            continue
+        other_recommended.append(
+            SearchedAssistant(
+                persona_id=alt.id, name=alt.name, display_name=alt.display_name
+            )
+        )
 
     # Answer via the existing one-shot engine. Passing the authenticated `user`
     # persists the Q + A under their id (one_shot=True) so we capture who-asked-
@@ -355,6 +401,7 @@ def auto_search(
         docs=qa_response.docs,
         chat_message_id=qa_response.chat_message_id,
         error_msg=qa_response.error_msg,
+        other_recommended=other_recommended,
         answered_by=AnsweredByAssistant(
             persona_id=persona.id,
             name=persona.name,

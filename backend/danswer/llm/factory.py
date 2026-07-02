@@ -55,6 +55,11 @@ def get_llm(
     timeout: int = QA_TIMEOUT,
     additional_headers: dict[str, str] | None = None,
 ) -> LLM:
+    # NOTE: all LLMs (answer generation AND the assistant router) go through
+    # CustomModelServer, which builds its gateway URL from (provider, model) —
+    # i.e. GEN_AI_VENDOR/GEN_AI_MODEL_NAME by default (or the router's overrides).
+    # It does NOT read GEN_AI_API_ENDPOINT or the DB llm_provider row, so those
+    # can look stale/wrong without affecting the model that actually answers.
     return CustomModelServer(
         timeout=timeout,
         api_key=api_key,

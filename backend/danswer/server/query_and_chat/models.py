@@ -253,6 +253,15 @@ class AnsweredByAssistant(BaseModel):
     confidence: float
 
 
+class SearchedAssistant(BaseModel):
+    """A next-best assistant the router ranked below the one that answered — shown
+    as 'Recommended assistants' the user can chat with next if #1 wasn't right."""
+
+    persona_id: int
+    name: str
+    display_name: str | None
+
+
 class AutoSearchResponse(BaseModel):
     answer: str | None = None
     citations: list[CitationInfo] | None = None
@@ -261,6 +270,10 @@ class AutoSearchResponse(BaseModel):
     # existing /chat/create-chat-message-feedback endpoint.
     chat_message_id: int | None = None
     answered_by: AnsweredByAssistant
+    # Next-best assistants (router ranks 2..N) offered as a chat-further affordance
+    # from the SAME router call — no extra LLM call. Empty for keyword routes and
+    # explicit @mentions (nothing to recommend).
+    other_recommended: list[SearchedAssistant] = []
     error_msg: str | None = None
 
 

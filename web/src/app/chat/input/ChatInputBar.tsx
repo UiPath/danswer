@@ -194,7 +194,10 @@ export function ChatInputBar({
       (e.key === "Tab" || e.key == "Enter")
     ) {
       e.preventDefault();
-      if (assistantIconIndex == filteredPersonas.length) {
+      if (
+        settings?.enable_assistant_creation &&
+        assistantIconIndex == filteredPersonas.length
+      ) {
         window.open("/assistants/new", "_blank");
         hideSuggestions();
         setMessage("");
@@ -206,7 +209,12 @@ export function ChatInputBar({
     } else if (e.key === "ArrowDown") {
       e.preventDefault();
       setAssistantIconIndex((assistantIconIndex) =>
-        Math.min(assistantIconIndex + 1, filteredPersonas.length)
+        Math.min(
+          assistantIconIndex + 1,
+          settings?.enable_assistant_creation
+            ? filteredPersonas.length
+            : filteredPersonas.length - 1
+        )
       );
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
@@ -257,17 +265,19 @@ export function ChatInputBar({
                     </p>
                   </button>
                 ))}
-                <a
-                  key={filteredPersonas.length}
-                  target="_blank"
-                  className={`${
-                    assistantIconIndex == filteredPersonas.length && "bg-hover"
-                  } px-3 flex gap-x-1 py-2 w-full  items-center  hover:bg-hover-light cursor-pointer"`}
-                  href="/assistants/new"
-                >
-                  <FiPlus size={17} />
-                  <p>Create a new assistant</p>
-                </a>
+                {settings?.enable_assistant_creation && (
+                  <a
+                    key={filteredPersonas.length}
+                    target="_blank"
+                    className={`${
+                      assistantIconIndex == filteredPersonas.length && "bg-hover"
+                    } px-3 flex gap-x-1 py-2 w-full  items-center  hover:bg-hover-light cursor-pointer"`}
+                    href="/assistants/new"
+                  >
+                    <FiPlus size={17} />
+                    <p>Create a new assistant</p>
+                  </a>
+                )}
               </div>
             </div>
           )}

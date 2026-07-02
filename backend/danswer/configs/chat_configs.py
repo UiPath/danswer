@@ -97,6 +97,19 @@ AUTHORITATIVE_CITATION_RETENTION_ENABLED = (
 # so treat this as an A/B lever rather than a default.
 ASSISTANT_ROUTER_LLM_VENDOR = os.environ.get("ASSISTANT_ROUTER_LLM_VENDOR") or ""
 ASSISTANT_ROUTER_LLM_MODEL = os.environ.get("ASSISTANT_ROUTER_LLM_MODEL") or ""
+# How many assistants the auto-routed Search tab's router ranks per question. The
+# #1 answers the question (single scope = its own document sets); ranks 2..N are
+# surfaced as "recommended assistants" the user can chat with next if #1 wasn't
+# right. Default 3 => 1 answerer + up to 2 recommendations.
+AUTO_SEARCH_TOP_N = int(os.environ.get("AUTO_SEARCH_TOP_N") or 3)
+# Semantic intent pre-route (between the keyword pre-route and the LLM instruction
+# router). An LLM matches the question against all assistants' routing_intents
+# phrases in one call; it routes only when the LLM's reported confidence is >= this
+# value. High by default, because a fire is a deterministic route that skips the
+# instruction router — raise it to fire less (more falls through to the router).
+AUTO_SEARCH_INTENT_THRESHOLD = float(
+    os.environ.get("AUTO_SEARCH_INTENT_THRESHOLD") or 0.8
+)
 # Versioned-docs dedup at final doc selection. Documentation sites publish the
 # SAME page under one URL per product version (e.g. docs.uipath.com/.../2024.10/…
 # and /.../2023.10/… and /.../2.2510/…). Retrieval then floods the LLM context

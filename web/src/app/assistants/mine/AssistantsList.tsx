@@ -34,7 +34,8 @@
  * callers but no longer used here.
  */
 
-import { useMemo, useRef, useState } from "react";
+import { useContext, useMemo, useRef, useState } from "react";
+import { SettingsContext } from "@/components/settings/SettingsProvider";
 import { MinimalUserSnapshot, User } from "@/lib/types";
 import { Persona } from "@/app/admin/assistants/interfaces";
 import { Text } from "@tremor/react";
@@ -539,6 +540,8 @@ interface AssistantsListProps {
 
 export function AssistantsList({ user, assistants }: AssistantsListProps) {
   const router = useRouter();
+  const enableAssistantCreation = useContext(SettingsContext)?.settings
+    ?.enable_assistant_creation;
   const { popup, setPopup } = usePopup();
 
   // Opt-out model: `chosenOrder` controls ORDER only (and default = position
@@ -826,8 +829,7 @@ export function AssistantsList({ user, assistants }: AssistantsListProps) {
       )}
 
       <div className="mx-auto w-searchbar-xs 2xl:w-searchbar-sm 3xl:w-searchbar pb-12">
-        {/* Header: title + 1-line subtitle + create button + browse link.
-            Cut the two-tile nav block and the explanatory paragraph. */}
+        {/* Header: title + 1-line subtitle + create button (flag-gated) + browse link. */}
         <div className="flex items-start justify-between gap-4 mb-3">
           <div className="min-w-0">
             <AssistantsPageTitle>My Assistants</AssistantsPageTitle>
@@ -836,17 +838,19 @@ export function AssistantsList({ user, assistants }: AssistantsListProps) {
               default, and reorder by dragging.
             </Text>
           </div>
-          <Link
-            href="/assistants/new"
-            className="
-              flex items-center gap-1.5 flex-shrink-0
-              px-4 py-2 rounded-md
-              bg-accent text-inverted font-medium
-              hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-accent
-            "
-          >
-            <FiPlus size={16} /> Create
-          </Link>
+          {enableAssistantCreation && (
+            <Link
+              href="/assistants/new"
+              className="
+                flex items-center gap-1.5 flex-shrink-0
+                px-4 py-2 rounded-md
+                bg-accent text-inverted font-medium
+                hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-accent
+              "
+            >
+              <FiPlus size={16} /> Create
+            </Link>
+          )}
         </div>
 
         <div className="mb-4">

@@ -1024,6 +1024,13 @@ class Persona(Base):
     # deployment"). Blank => no keyword override; the LLM router decides. See
     # secondary_llm_flows/assistant_router.keyword_route.
     routing_keywords: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Newline-separated intent phrases for the SEMANTIC pre-route: each line is one
+    # natural-language exemplar (e.g. "a task is stuck in the completed tab"). The
+    # auto-router embeds these and routes a question here when its nearest exemplar
+    # clears the similarity gate — BETWEEN the keyword pre-route and the LLM router.
+    # Blank => no semantic override. Stored in Postgres only (never in Vespa); the
+    # embeddings are cached per-assistant. See assistant_router.intent_route.
+    routing_intents: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Currently stored but unused, all flows use hybrid
     search_type: Mapped[SearchType] = mapped_column(
         Enum(SearchType, native_enum=False), default=SearchType.HYBRID

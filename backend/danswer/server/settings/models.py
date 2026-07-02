@@ -36,10 +36,21 @@ class Settings(BaseModel):
     # feature ships dark-to-users on deploy; an admin flips it to EVERYONE in
     # Admin -> Settings when ready. See AutoSearchRollout.
     auto_search_rollout: AutoSearchRollout = AutoSearchRollout.ADMIN_ONLY
+    # Semantic intent pre-route (the LLM phrase router between keyword and the LLM
+    # instruction router). Default False — OFF — so it stays dark until an admin
+    # enables it in Admin → Settings; keyword + instruction routing are unaffected.
+    auto_search_intent_enabled: bool = False
     # Fresh installs land on the chat page by default. NOTE: this only seeds
     # deployments with no stored settings yet — once settings are persisted, the
     # stored value wins, so flip it in Admin → Settings on existing deployments.
     default_page: PageType = PageType.CHAT
+    # Show the "Create assistant" entry points to end users: the Create buttons on
+    # the My Assistants + Assistant Gallery pages and the "Create a new assistant"
+    # row in the chat @-mention menu. Default False so creation ships hidden on
+    # deploy (a newly-added Settings field is absent from the already-persisted
+    # settings dict, so it takes this default); an admin flips it in Admin →
+    # Settings. Gates UI only; the /assistants/new route itself still exists.
+    enable_assistant_creation: bool = False
     maximum_chat_retention_days: int | None = None
     # Env-driven (CHAT_FILE_MAX_SIZE_MB), injected in load_settings — surfaced
     # here so the chat UI pre-checks against the SAME value the backend enforces

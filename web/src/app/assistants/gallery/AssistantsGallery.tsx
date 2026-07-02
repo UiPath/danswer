@@ -44,7 +44,8 @@
  * All mutations are optimistic + undoable, mirroring the Manage page.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useContext, useEffect, useMemo, useState } from "react";
+import { SettingsContext } from "@/components/settings/SettingsProvider";
 import { Persona } from "@/app/admin/assistants/interfaces";
 import { User } from "@/lib/types";
 import { AssistantIcon } from "@/components/assistants/AssistantIcon";
@@ -345,6 +346,8 @@ export function AssistantsGallery({
   columns?: number;
 }) {
   const router = useRouter();
+  const enableAssistantCreation = useContext(SettingsContext)?.settings
+    ?.enable_assistant_creation;
 
   // User-chosen column count. `null` until the localStorage read in
   // the effect below; SSR + first paint use the prop value so we
@@ -622,17 +625,19 @@ export function AssistantsGallery({
               your chat picker.
             </p>
           </div>
-          <Link
-            href="/assistants/new"
-            className="
-              flex items-center gap-1.5 flex-shrink-0
-              px-4 py-2 rounded-md
-              bg-accent text-inverted font-medium
-              hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-accent
-            "
-          >
-            <FiPlus size={16} /> Create new
-          </Link>
+          {enableAssistantCreation && (
+            <Link
+              href="/assistants/new"
+              className="
+                flex items-center gap-1.5 flex-shrink-0
+                px-4 py-2 rounded-md
+                bg-accent text-inverted font-medium
+                hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-accent
+              "
+            >
+              <FiPlus size={16} /> Create new
+            </Link>
+          )}
         </div>
 
         <div className="mb-4">

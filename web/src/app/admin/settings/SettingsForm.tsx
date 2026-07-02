@@ -238,6 +238,41 @@ export function SettingsForm() {
         }}
       />
 
+      <Checkbox
+        label="Allow users to create assistants?"
+        sublabel={`If set, the "Create" buttons on the My Assistants and Assistant
+        Gallery pages, and the "Create a new assistant" row in the chat @-mention
+        menu, are shown. If unset, assistant creation is hidden from end users
+        (assistants are managed centrally). This hides the UI only.`}
+        checked={settings.enable_assistant_creation ?? false}
+        onChange={(e) => {
+          updateSettingField([
+            {
+              fieldName: "enable_assistant_creation",
+              newValue: e.target.checked,
+            },
+          ]);
+        }}
+      />
+
+      <Checkbox
+        label="Enable semantic intent routing?"
+        sublabel={`If set, the auto-routed Search tab adds a semantic step (an LLM
+        matches the question against each assistant's routing "intent phrases")
+        between keyword routing and the AI router. Off by default — keyword and AI
+        routing are unaffected. Enable only after populating assistants' intent
+        phrases.`}
+        checked={settings.auto_search_intent_enabled ?? false}
+        onChange={(e) => {
+          updateSettingField([
+            {
+              fieldName: "auto_search_intent_enabled",
+              newValue: e.target.checked,
+            },
+          ]);
+        }}
+      />
+
       <Selector
         label="Auto-Search (assistant routing) rollout"
         subtext="Staged rollout of the auto-routed Search tab, which picks the right assistant for a question automatically. 'Admins only' lets admins clean assistant routing instructions and test before GA; 'Everyone' makes it generally available; 'Off' disables it. The backend enforces this independently of the UI."
