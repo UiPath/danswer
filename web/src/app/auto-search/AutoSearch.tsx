@@ -37,6 +37,20 @@ const LOADING_PHRASES = [
   "Almost there",
 ];
 const LOADING_PHRASE_INTERVAL_MS = 1800;
+// Typewriter timings for the empty search box's example placeholder.
+const TYPE_MS = 45; // per character while typing
+const HOLD_MS = 1800; // pause once a full example is typed, before the next
+// Example prompts that teach the "@assistant" convention, cycled through the empty
+// search box's placeholder. Each is bound to a real assistant by a name fragment
+// (case/space-insensitive); unmatched ones are dropped so we never show an
+// assistant the user doesn't have.
+const EXAMPLE_PROMPTS: { match: string; question: string }[] = [
+  { match: "integration", question: "why is my Salesforce connection failing?" },
+  { match: "ownership", question: "who is the TAM or CSM of the ABC account?" },
+  { match: "action center", question: "how do I reassign a task to someone else?" },
+  { match: "orchestrator", question: "how do I schedule a process to run hourly?" },
+  { match: "automation suite", question: "how do I back up my cluster?" },
+];
 
 // Mirrors the backend AutoSearchResponse shape.
 interface AnsweredBy {
@@ -63,6 +77,17 @@ interface AutoSearchResponse {
   // Next-best assistants (router ranks 2..N) shown as clickable "Recommended
   // assistants" chips: click one to chat further with it if #1 wasn't right.
   other_recommended: SearchedAssistant[];
+  error_msg: string | null;
+  // Compare: when compare_enabled, the UI shows two tabs — the top-1 answer (here)
+  // and a second answer over the union of union_assistants' document sets, which is
+  // lazy-fetched from /query/auto-search/union so it never blocks this answer.
+  compare_enabled: boolean;
+  union_assistants: SearchedAssistant[];
+}
+// The lazily-fetched second answer (union of the top assistants' document sets).
+interface AutoSearchUnionResponse {
+  answer: string | null;
+  docs: { top_documents: AutoSearchDoc[] } | null;
   error_msg: string | null;
 }
 
@@ -100,6 +125,13 @@ export function AutoSearch({ userRole }: { userRole: string | null }) {
   const [isLoading, setIsLoading] = useState(false);
   const [result, setResult] = useState<AutoSearchResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Compare view: which tab is showing, and the lazily-fetched union answer.
+  const [activeTab, setActiveTab] = useState<"top" | "union">("top");
+  const [unionResult, setUnionResult] = useState<AutoSearchUnionResponse | null>(
+    null
+  );
+  const [unionLoading, setUnionLoading] = useState(false);
+  const [unionError, setUnionError] = useState<string | null>(null);
   // chat_message_id -> the feedback already submitted for it (one per answer).
   const [feedbackGiven, setFeedbackGiven] = useState<"like" | "dislike" | null>(
     null
@@ -109,6 +141,24 @@ export function AutoSearch({ userRole }: { userRole: string | null }) {
   // Recent searches — kept client-side (localStorage), point-in-time history.
   const [recents, setRecents] = useState<string[]>([]);
   const [loadingPhraseIdx, setLoadingPhraseIdx] = useState(0);
+  // Typewriter state for the rotating "@assistant …" example placeholder.
+  const [phraseIdx, setPhraseIdx] = useState(0);
+  const [charCount, setCharCount] = useState(0);
+
+  // Build the rotating placeholder examples from real, accessible assistants.
+  // Match on a name fragment ignoring case + non-letters, so "action center"
+  // resolves the camelCase persona "ActionCenter".
+  const examplePlaceholders = EXAMPLE_PROMPTS.map((e) => {
+    const target = e.match.toLowerCase().replace(/[^a-z]/g, "");
+    const persona = assistants.find(
+      (a) =>
+        a.name.toLowerCase().replace(/[^a-z]/g, "").includes(target) ||
+        assistantDisplayName(a).toLowerCase().replace(/[^a-z]/g, "").includes(target)
+    );
+    return persona
+      ? `@${assistantDisplayName(persona)} ${e.question}`
+      : null;
+  }).filter((x): x is string => x !== null);
 
   // Auto-grow the textarea like ChatInputBar.
   useEffect(() => {
@@ -141,6 +191,32 @@ export function AutoSearch({ userRole }: { userRole: string | null }) {
     );
     return () => clearInterval(id);
   }, [isLoading]);
+
+  // Typewriter: type the current example out character-by-character, hold, then
+  // advance to the next — so users discover the "@assistant" convention. Runs only
+  // while the box is empty; once the user types, the overlay is hidden.
+  useEffect(() => {
+    if (question.trim() !== "" || examplePlaceholders.length === 0) return;
+    const current = examplePlaceholders[phraseIdx % examplePlaceholders.length];
+    if (charCount < current.length) {
+      const id = setTimeout(() => setCharCount((c) => c + 1), TYPE_MS);
+      return () => clearTimeout(id);
+    }
+    const id = setTimeout(() => {
+      setCharCount(0);
+      setPhraseIdx((i) => (i + 1) % examplePlaceholders.length);
+    }, HOLD_MS);
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [question, phraseIdx, charCount, examplePlaceholders.length]);
+
+  const typedPlaceholder =
+    examplePlaceholders.length > 0
+      ? examplePlaceholders[phraseIdx % examplePlaceholders.length].slice(
+          0,
+          charCount
+        )
+      : "";
 
   function pushRecent(q: string) {
     setRecents((prev) => {
@@ -189,6 +265,7 @@ export function AutoSearch({ userRole }: { userRole: string | null }) {
     textAreaRef.current?.focus();
   }
 
+
   async function runSearch(override?: string, explicitPersonaId?: number) {
     const rawText = override ?? question;
     // Explicit @mention pick (only honored when its annotation is still present
@@ -215,6 +292,11 @@ export function AutoSearch({ userRole }: { userRole: string | null }) {
     setShowFeedbackBox(false);
     setFeedbackText("");
     setShowMentions(false);
+    // Reset compare state for the new query.
+    setActiveTab("top");
+    setUnionResult(null);
+    setUnionError(null);
+    setUnionLoading(false);
     try {
       const response = await fetch("/api/query/auto-search", {
         method: "POST",
@@ -226,13 +308,43 @@ export function AutoSearch({ userRole }: { userRole: string | null }) {
         setError(detail || `Search failed (${response.status}).`);
         return;
       }
-      setResult((await response.json()) as AutoSearchResponse);
+      const data = (await response.json()) as AutoSearchResponse;
+      setResult(data);
       pushRecent(trimmed);
       setForcedPersona(null); // one-shot: don't carry the pick to the next query
+      // Lazily fetch the union (compare) answer AFTER the primary answer is shown,
+      // so the two never block each other. The top-1 answer is already on screen.
+      if (data.compare_enabled && data.union_assistants.length > 0) {
+        void fetchUnionAnswer(
+          trimmed,
+          data.union_assistants.map((a) => a.persona_id)
+        );
+      }
     } catch {
       setError("Something went wrong running the search.");
     } finally {
       setIsLoading(false);
+    }
+  }
+
+  async function fetchUnionAnswer(message: string, personaIds: number[]) {
+    setUnionLoading(true);
+    setUnionError(null);
+    try {
+      const response = await fetch("/api/query/auto-search/union", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message, persona_ids: personaIds }),
+      });
+      if (!response.ok) {
+        setUnionError(`Compare answer failed (${response.status}).`);
+        return;
+      }
+      setUnionResult((await response.json()) as AutoSearchUnionResponse);
+    } catch {
+      setUnionError("Something went wrong generating the compare answer.");
+    } finally {
+      setUnionLoading(false);
     }
   }
 
@@ -264,6 +376,56 @@ export function AutoSearch({ userRole }: { userRole: string | null }) {
     (answeredBy.display_name?.trim() ? answeredBy.display_name : answeredBy.name);
   const otherRecommended = result?.other_recommended ?? [];
   const topDocs = result?.docs?.top_documents ?? [];
+  // Compare state. compareOn just means "show tabs" — the union answer may still
+  // be loading (it's fetched lazily), so the union tab shows its own progress.
+  const compareOn = !!result?.compare_enabled;
+  const unionAssistants = result?.union_assistants ?? [];
+  const unionAnswer = unionResult?.answer ?? null;
+  const unionDocs = unionResult?.docs?.top_documents ?? [];
+  const unionDisplayError = unionError || unionResult?.error_msg || null;
+  const assistantLabel = (a: SearchedAssistant) =>
+    a.display_name?.trim() ? a.display_name : a.name;
+  // "A", "A and B", "A, B and C"
+  const formatAssistantList = (names: string[]) =>
+    names.length <= 1
+      ? names.join("")
+      : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+
+  const sourcesBlock = (docs: AutoSearchDoc[]) =>
+    docs.length > 0 ? (
+      <div className="mt-7 border-t border-border-medium pt-5">
+        <div className="text-xs font-semibold uppercase tracking-wide text-subtle mb-3">
+          Sources
+        </div>
+        <ul className="flex flex-col gap-1.5">
+          {docs.slice(0, 8).map((doc, i) => (
+            <li key={i} className="flex items-baseline gap-2 text-sm">
+              <span className="text-subtle tabular-nums w-4 shrink-0">{i + 1}</span>
+              {doc.link ? (
+                <a
+                  href={doc.link}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-link hover:underline line-clamp-1"
+                >
+                  {doc.semantic_identifier || doc.link}
+                </a>
+              ) : (
+                <span className="line-clamp-1">{doc.semantic_identifier}</span>
+              )}
+            </li>
+          ))}
+        </ul>
+      </div>
+    ) : null;
+
+  const answerBody = (text: string | null) => (
+    <div className="prose dark:prose-invert max-w-none text-base leading-relaxed">
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+        {text || result?.error_msg || "No answer was generated."}
+      </ReactMarkdown>
+    </div>
+  );
 
   const hasActivity = isLoading || !!result || !!error;
 
@@ -294,6 +456,18 @@ export function AutoSearch({ userRole }: { userRole: string | null }) {
       )}
 
       <div className="relative flex flex-col w-full rounded-2xl border border-border-medium bg-background-weak shadow-lg shadow-black/5 dark:shadow-black/30 transition focus-within:border-accent focus-within:ring-2 focus-within:ring-accent/30 overflow-hidden">
+        {/* Typewriter example overlay — only while the box is empty. Aligned to the
+            textarea's text (same padding/size) and click-through so the box stays
+            usable. A trailing caret fades to read as a live cursor. */}
+        {question === "" && examplePlaceholders.length > 0 && (
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute left-0 top-0 pl-5 pr-14 py-4 text-base text-subtle whitespace-pre-wrap break-word"
+          >
+            {typedPlaceholder}
+            <span className="animate-pulse text-accent">▏</span>
+          </div>
+        )}
         <textarea
           ref={textAreaRef}
           autoFocus
@@ -307,7 +481,9 @@ export function AutoSearch({ userRole }: { userRole: string | null }) {
               : "overflow-hidden"
           }`}
           style={{ scrollbarWidth: "thin" }}
-          placeholder="Ask anything…"
+          // The animated example lives in the overlay below; only fall back to a
+          // static native placeholder when there are no examples to type.
+          placeholder={examplePlaceholders.length > 0 ? "" : "Ask anything…"}
           value={question}
           onChange={(e) => handleQuestionChange(e.target.value)}
           onKeyDown={(e) => {
@@ -439,54 +615,108 @@ export function AutoSearch({ userRole }: { userRole: string | null }) {
 
         {result && !error && !isLoading && (
           <div className="mt-8">
-            {answeredByLabel && (
-              <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-border-medium bg-background-weak px-3 py-1 text-xs text-subtle">
-                <span className="h-1.5 w-1.5 rounded-full bg-accent" />
-                Answered by{" "}
-                <span className="font-semibold text-default">
-                  {answeredByLabel}
-                </span>
-                {!answeredBy?.routed && <span>· all sources</span>}
-              </div>
-            )}
-
-            <div className="prose dark:prose-invert max-w-none text-base leading-relaxed">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                {result.answer ||
-                  result.error_msg ||
-                  "No answer was generated."}
-              </ReactMarkdown>
-            </div>
-
-            {topDocs.length > 0 && (
-              <div className="mt-7 border-t border-border-medium pt-5">
-                <div className="text-xs font-semibold uppercase tracking-wide text-subtle mb-3">
-                  Sources
+            {compareOn ? (
+              // Two answers in tabs, each full width. The union tab lazy-loads so
+              // it never blocks the top-1 answer already shown here.
+              <div>
+                <div
+                  role="tablist"
+                  className="mb-5 flex gap-6 border-b border-border-medium"
+                >
+                  <button
+                    role="tab"
+                    aria-selected={activeTab === "top"}
+                    onClick={() => setActiveTab("top")}
+                    className={`-mb-px border-b-2 pb-2.5 text-sm font-medium transition-colors ${
+                      activeTab === "top"
+                        ? "border-accent text-default"
+                        : "border-transparent text-subtle hover:text-default"
+                    }`}
+                  >
+                    Top match
+                  </button>
+                  <button
+                    role="tab"
+                    aria-selected={activeTab === "union"}
+                    onClick={() => setActiveTab("union")}
+                    className={`-mb-px flex items-center gap-2 border-b-2 pb-2.5 text-sm font-medium transition-colors ${
+                      activeTab === "union"
+                        ? "border-accent text-default"
+                        : "border-transparent text-subtle hover:text-default"
+                    }`}
+                  >
+                    All top matches
+                    {unionLoading && (
+                      <span className="h-3 w-3 animate-spin rounded-full border-2 border-border-medium border-t-accent" />
+                    )}
+                  </button>
                 </div>
-                <ul className="flex flex-col gap-1.5">
-                  {topDocs.slice(0, 8).map((doc, i) => (
-                    <li key={i} className="flex items-baseline gap-2 text-sm">
-                      <span className="text-subtle tabular-nums w-4 shrink-0">
-                        {i + 1}
-                      </span>
-                      {doc.link ? (
-                        <a
-                          href={doc.link}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-link hover:underline line-clamp-1"
-                        >
-                          {doc.semantic_identifier || doc.link}
-                        </a>
-                      ) : (
-                        <span className="line-clamp-1">
-                          {doc.semantic_identifier}
+
+                {activeTab === "top" ? (
+                  <div>
+                    {answeredByLabel && (
+                      <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-border-medium bg-background-weak px-3 py-1 text-xs text-subtle">
+                        <span className="h-1.5 w-1.5 rounded-full bg-accent" />
+                        Answered by{" "}
+                        <span className="font-semibold text-default">
+                          {answeredByLabel}
                         </span>
-                      )}
-                    </li>
-                  ))}
-                </ul>
+                        {!answeredBy?.routed && <span>· all sources</span>}
+                      </div>
+                    )}
+                    {answerBody(result.answer)}
+                    {sourcesBlock(topDocs)}
+                  </div>
+                ) : (
+                  <div>
+                    {unionAssistants.length > 0 && (
+                      <div className="mb-3 text-xs text-subtle">
+                        Combined from{" "}
+                        <span className="text-default">
+                          {formatAssistantList(
+                            unionAssistants.map(assistantLabel)
+                          )}
+                        </span>
+                      </div>
+                    )}
+                    {unionLoading ? (
+                      <div className="flex items-center gap-3 py-8 text-sm text-subtle">
+                        <span className="h-4 w-4 animate-spin rounded-full border-2 border-border-medium border-t-accent" />
+                        Generating a combined answer across{" "}
+                        {unionAssistants.length} assistants…
+                      </div>
+                    ) : unionDisplayError ? (
+                      <div className="py-4 text-sm text-error">
+                        {unionDisplayError}
+                      </div>
+                    ) : unionAnswer ? (
+                      <>
+                        {answerBody(unionAnswer)}
+                        {sourcesBlock(unionDocs)}
+                      </>
+                    ) : (
+                      <div className="py-4 text-sm text-subtle">
+                        No combined answer available.
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
+            ) : (
+              <>
+                {answeredByLabel && (
+                  <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-border-medium bg-background-weak px-3 py-1 text-xs text-subtle">
+                    <span className="h-1.5 w-1.5 rounded-full bg-accent" />
+                    Answered by{" "}
+                    <span className="font-semibold text-default">
+                      {answeredByLabel}
+                    </span>
+                    {!answeredBy?.routed && <span>· all sources</span>}
+                  </div>
+                )}
+                {answerBody(result.answer)}
+                {sourcesBlock(topDocs)}
+              </>
             )}
 
             {otherRecommended.length > 0 && (

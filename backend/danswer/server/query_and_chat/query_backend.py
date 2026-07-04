@@ -21,6 +21,13 @@ from danswer.configs.chat_configs import ASSISTANT_ROUTER_LLM_MODEL
 from danswer.configs.chat_configs import ASSISTANT_ROUTER_LLM_VENDOR
 from danswer.configs.chat_configs import AUTO_SEARCH_TOP_N
 from danswer.configs.chat_configs import AUTO_SEARCH_INTENT_THRESHOLD
+from danswer.configs.chat_configs import AUTO_SEARCH_UNION_PERSONA_ID
+from danswer.configs.chat_configs import AUTO_SEARCH_UNION_LLM_VENDOR
+from danswer.configs.chat_configs import AUTO_SEARCH_UNION_LLM_MODEL
+from danswer.configs.chat_configs import AUTO_SEARCH_DEFAULT_LLM_VENDOR
+from danswer.configs.chat_configs import AUTO_SEARCH_DEFAULT_LLM_MODEL
+from danswer.llm.override_models import LLMOverride
+from danswer.search.models import BaseFilters
 from danswer.configs.constants import MessageType
 from danswer.db.constants import SLACK_BOT_PERSONA_PREFIX
 from danswer.db.persona import get_persona_by_id
@@ -41,6 +48,8 @@ from danswer.secondary_llm_flows.assistant_router import route_question
 from danswer.server.query_and_chat.models import AnsweredByAssistant
 from danswer.server.query_and_chat.models import AutoSearchRequest
 from danswer.server.query_and_chat.models import AutoSearchResponse
+from danswer.server.query_and_chat.models import AutoSearchUnionRequest
+from danswer.server.query_and_chat.models import AutoSearchUnionResponse
 from danswer.server.query_and_chat.models import SearchedAssistant
 from danswer.server.settings.models import AutoSearchRollout
 from danswer.server.settings.store import load_settings
@@ -377,6 +386,16 @@ def auto_search(
     # persists the Q + A under their id (one_shot=True) so we capture who-asked-
     # what for quality analysis; the returned chat_message_id powers 👍/👎 + text
     # feedback via the existing /chat/create-chat-message-feedback endpoint.
+    # Optional model override for the top-1 answer (default: the persona's own
+    # model). Configurable so admins can A/B the default answerer.
+    default_llm_override = (
+        LLMOverride(
+            model_provider=AUTO_SEARCH_DEFAULT_LLM_VENDOR,
+            model_version=AUTO_SEARCH_DEFAULT_LLM_MODEL,
+        )
+        if AUTO_SEARCH_DEFAULT_LLM_VENDOR and AUTO_SEARCH_DEFAULT_LLM_MODEL
+        else None
+    )
     qa_response = get_search_answer(
         query_req=DirectQARequest(
             messages=[
@@ -393,7 +412,27 @@ def auto_search(
         max_history_tokens=0,
         db_session=db_session,
         use_citations=True,
+        llm_override=default_llm_override,
     )
+
+    # SIDE-BY-SIDE COMPARE (metadata only): mark that a union answer is available
+    # and list the assistants it should span (the router's top-N). The union answer
+    # itself is produced by /query/auto-search/union, lazy-fetched by the UI AFTER
+    # this response — so the top-1 answer is never held up by a second generation.
+    # Only offered on LLM-router picks (ranked_ids populated); keyword routes /
+    # @mentions stay single-answer.
+    compare_enabled = False
+    union_assistants: list[SearchedAssistant] = []
+    if settings.auto_search_compare_enabled and ranked_ids:
+        for pid in ranked_ids[:AUTO_SEARCH_TOP_N]:
+            alt = _resolve(pid)
+            if alt is not None:
+                union_assistants.append(
+                    SearchedAssistant(
+                        persona_id=alt.id, name=alt.name, display_name=alt.display_name
+                    )
+                )
+        compare_enabled = len(union_assistants) > 0
 
     return AutoSearchResponse(
         answer=qa_response.answer,
@@ -409,4 +448,96 @@ def auto_search(
             routed=was_routed,
             confidence=routed_confidence,
         ),
+        compare_enabled=compare_enabled,
+        union_assistants=union_assistants,
+    )
+
+
+@basic_router.post("/auto-search/union")
+def auto_search_union(
+    union_request: AutoSearchUnionRequest,
+    request: Request,
+    user: User = Depends(current_user),
+    db_session: Session = Depends(get_session),
+    _rate_limit: None = Depends(check_message_request_rate_limit),
+    _: None = Depends(check_token_rate_limits),
+) -> AutoSearchUnionResponse:
+    """Second (compare) answer for the Search tab: answer the question over the UNION
+    of the given assistants' document sets, using the compare model (default Sonnet).
+    Lazy-fetched by the UI after the primary answer arrives, so neither answer blocks
+    the other. The caller passes the persona ids from AutoSearchResponse.union_assistants
+    (no re-routing here — the union scope stays consistent with the primary response)."""
+    settings = load_settings()
+    if not _auto_search_allowed(settings.auto_search_rollout, user):
+        raise HTTPException(
+            status_code=403, detail="Auto-search is not enabled for your account."
+        )
+    if not settings.auto_search_compare_enabled:
+        raise HTTPException(status_code=403, detail="Compare answers are disabled.")
+
+    question = union_request.message
+
+    # Union the requested assistants' document sets (ACL-checked fetch; skip any the
+    # user can't access). The union persona is fence-less, so this set IS the scope.
+    union_set_names: set[str] = set()
+    resolved = 0
+    for pid in union_request.persona_ids:
+        try:
+            alt = get_persona_by_id(
+                pid, user=user, db_session=db_session, is_for_edit=False
+            )
+        except Exception:
+            continue
+        resolved += 1
+        union_set_names.update(ds.name for ds in alt.document_sets)
+    if resolved == 0:
+        return AutoSearchUnionResponse(error_msg="No accessible assistants to compare.")
+
+    try:
+        union_persona = get_persona_by_id(
+            AUTO_SEARCH_UNION_PERSONA_ID, user=user, db_session=db_session, is_for_edit=False
+        )
+    except Exception:
+        union_persona = get_persona_by_id(
+            DEFAULT_SEARCH_PERSONA_ID, user=user, db_session=db_session, is_for_edit=False
+        )
+    union_prompt_id = union_persona.prompts[0].id if union_persona.prompts else 0
+    union_override = (
+        LLMOverride(
+            model_provider=AUTO_SEARCH_UNION_LLM_VENDOR,
+            model_version=AUTO_SEARCH_UNION_LLM_MODEL,
+        )
+        if AUTO_SEARCH_UNION_LLM_VENDOR and AUTO_SEARCH_UNION_LLM_MODEL
+        else None
+    )
+    try:
+        union_response = get_search_answer(
+            query_req=DirectQARequest(
+                messages=[
+                    ThreadMessage(message=question, sender=None, role=MessageType.USER)
+                ],
+                prompt_id=union_prompt_id,
+                persona_id=union_persona.id,
+                retrieval_options=RetrievalDetails(
+                    run_search=OptionalSearchSetting.ALWAYS,
+                    real_time=False,
+                    filters=BaseFilters(document_set=sorted(union_set_names) or None),
+                ),
+            ),
+            user=user,
+            max_document_tokens=None,
+            max_history_tokens=0,
+            db_session=db_session,
+            use_citations=True,
+            llm_override=union_override,
+        )
+    except Exception as e:
+        logger.warning("Auto-search union answer failed: %s", e)
+        return AutoSearchUnionResponse(error_msg="Could not generate the compare answer.")
+
+    return AutoSearchUnionResponse(
+        answer=union_response.answer,
+        citations=union_response.citations,
+        docs=union_response.docs,
+        error_msg=union_response.error_msg,
     )

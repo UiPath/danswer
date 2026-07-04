@@ -40,6 +40,14 @@ class Settings(BaseModel):
     # instruction router). Default False — OFF — so it stays dark until an admin
     # enables it in Admin → Settings; keyword + instruction routing are unaffected.
     auto_search_intent_enabled: bool = False
+    # Side-by-side compare on the Search tab: alongside the single top-1 answer,
+    # also answer over the UNION of the router's top-N assistants' document sets
+    # (answered by AUTO_SEARCH_UNION_LLM_*, default Sonnet). Only runs on LLM-router
+    # picks (keyword routes / @mentions stay single-scope). Default True — ON — for
+    # now (the comparison/testing phase); an admin flips it in Admin → Settings.
+    # NOTE: adds a second full search+answer pass per question, so it roughly
+    # doubles latency and cost while on.
+    auto_search_compare_enabled: bool = True
     # Fresh installs land on the chat page by default. NOTE: this only seeds
     # deployments with no stored settings yet — once settings are persisted, the
     # stored value wins, so flip it in Admin → Settings on existing deployments.

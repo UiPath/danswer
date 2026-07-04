@@ -32,6 +32,7 @@ from danswer.llm.answering.models import PromptConfig
 from danswer.llm.answering.models import QuotesConfig
 from danswer.llm.factory import get_llms_for_persona
 from danswer.llm.factory import get_main_llm_from_tuple
+from danswer.llm.override_models import LLMOverride
 from danswer.llm.utils import get_default_llm_token_encode
 from danswer.one_shot_answer.models import DirectQARequest
 from danswer.one_shot_answer.models import OneShotQAResponse
@@ -91,6 +92,9 @@ def stream_answer_objects(
     retrieval_metrics_callback: Callable[[RetrievalMetricsContainer], None]
     | None = None,
     rerank_metrics_callback: Callable[[RerankMetricsContainer], None] | None = None,
+    # Force a specific answer model (vendor/version), bypassing the persona default.
+    # Used by the Search-tab compare flow to answer the union scope with Sonnet.
+    llm_override: LLMOverride | None = None,
 ) -> AnswerObjectIterator:
     """Streams in order:
     1. [always] Retrieved documents, stops flow if nothing is found
@@ -157,7 +161,9 @@ def stream_answer_objects(
         commit=True,
     )
 
-    llm, fast_llm = get_llms_for_persona(persona=chat_session.persona)
+    llm, fast_llm = get_llms_for_persona(
+        persona=chat_session.persona, llm_override=llm_override
+    )
     prompt_config = PromptConfig.from_model(prompt)
     document_pruning_config = DocumentPruningConfig(
         max_chunks=int(
@@ -189,7 +195,11 @@ def stream_answer_objects(
         question=query_msg.message,
         answer_style_config=answer_config,
         prompt_config=PromptConfig.from_model(prompt),
-        llm=get_main_llm_from_tuple(get_llms_for_persona(persona=chat_session.persona)),
+        llm=get_main_llm_from_tuple(
+            get_llms_for_persona(
+                persona=chat_session.persona, llm_override=llm_override
+            )
+        ),
         single_message_history=history_str,
         tools=[search_tool],
         force_use_tool=ForceUseTool(
@@ -308,6 +318,7 @@ def get_search_answer(
     retrieval_metrics_callback: Callable[[RetrievalMetricsContainer], None]
     | None = None,
     rerank_metrics_callback: Callable[[RerankMetricsContainer], None] | None = None,
+    llm_override: LLMOverride | None = None,
 ) -> OneShotQAResponse:
     """Collects the streamed one shot answer responses into a single object"""
     max_attempts = 5
@@ -329,6 +340,7 @@ def get_search_answer(
             timeout=answer_generation_timeout,
             retrieval_metrics_callback=retrieval_metrics_callback,
             rerank_metrics_callback=rerank_metrics_callback,
+            llm_override=llm_override,
         )
 
         answer = ""

@@ -273,6 +273,25 @@ export function SettingsForm() {
         }}
       />
 
+      <Checkbox
+        label="Show side-by-side compare answers?"
+        sublabel={`If set, the auto-routed Search tab shows two answers side by side
+        for questions the AI router picks: the single top assistant's answer, and a
+        second answer over the combined document sets of the router's top matches
+        (answered by the compare model). Only affects AI-router picks; keyword and
+        @mention routes stay single-answer. On by default. Note: this runs a second
+        search + answer per question, so it roughly doubles latency and cost.`}
+        checked={settings.auto_search_compare_enabled ?? true}
+        onChange={(e) => {
+          updateSettingField([
+            {
+              fieldName: "auto_search_compare_enabled",
+              newValue: e.target.checked,
+            },
+          ]);
+        }}
+      />
+
       <Selector
         label="Auto-Search (assistant routing) rollout"
         subtext="Staged rollout of the auto-routed Search tab, which picks the right assistant for a question automatically. 'Admins only' lets admins clean assistant routing instructions and test before GA; 'Everyone' makes it generally available; 'Off' disables it. The backend enforces this independently of the UI."

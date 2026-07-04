@@ -275,6 +275,33 @@ class AutoSearchResponse(BaseModel):
     # explicit @mentions (nothing to recommend).
     other_recommended: list[SearchedAssistant] = []
     error_msg: str | None = None
+    # --- Side-by-side compare (Settings.auto_search_compare_enabled) -----------
+    # True when compare applies (LLM route + gate on): tells the UI to render the
+    # tabbed layout and lazy-fetch the union answer via /query/auto-search/union.
+    # False => single-answer layout (keyword/@mention routes, or gate off).
+    compare_enabled: bool = False
+    # The assistants whose document sets the union answer should span (the router's
+    # top-N picks). The UI passes these ids to the union endpoint — no re-routing,
+    # so the union scope is guaranteed consistent with this response. Computing this
+    # is cheap (no second answer generation), so the top-1 answer isn't held up.
+    union_assistants: list[SearchedAssistant] = []
+
+
+class AutoSearchUnionRequest(BaseModel):
+    """Lazy second-answer request for the Search tab's compare view: answer over the
+    UNION of the given assistants' document sets. Fired by the UI after the primary
+    answer arrives, so the two answers never block each other."""
+
+    message: str
+    # The assistants to union — the union_assistants ids from AutoSearchResponse.
+    persona_ids: list[int]
+
+
+class AutoSearchUnionResponse(BaseModel):
+    answer: str | None = None
+    citations: list[CitationInfo] | None = None
+    docs: QADocsResponse | None = None
+    error_msg: str | None = None
 
 
 class DanswerAnswer(BaseModel):

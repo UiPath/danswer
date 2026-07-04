@@ -110,6 +110,29 @@ AUTO_SEARCH_TOP_N = int(os.environ.get("AUTO_SEARCH_TOP_N") or 3)
 AUTO_SEARCH_INTENT_THRESHOLD = float(
     os.environ.get("AUTO_SEARCH_INTENT_THRESHOLD") or 0.8
 )
+# Side-by-side "compare" answer for the auto-routed Search tab: alongside the
+# single top-1 answer, also answer over the UNION of the router's top-N assistants'
+# document sets, so the user can compare a narrow (single-assistant) answer with a
+# broader (multi-assistant) one. Only runs on LLM-router picks (keyword routes and
+# @mentions stay single-scope). Gated by Settings.auto_search_compare_enabled.
+#
+# Which persona answers the union scope. MUST be fence-less (no document_sets of its
+# own) so the union document_set filter applies as-is — a persona with its own fence
+# would INTERSECT and shrink the scope. The all-source default persona (0) is the
+# natural choice.
+AUTO_SEARCH_UNION_PERSONA_ID = int(os.environ.get("AUTO_SEARCH_UNION_PERSONA_ID") or 0)
+# Model for the union answer. Default: the router LLM (Sonnet) — a stronger
+# synthesizer for the wider, multi-source context. Empty => union persona default.
+AUTO_SEARCH_UNION_LLM_VENDOR = (
+    os.environ.get("AUTO_SEARCH_UNION_LLM_VENDOR") or ASSISTANT_ROUTER_LLM_VENDOR
+)
+AUTO_SEARCH_UNION_LLM_MODEL = (
+    os.environ.get("AUTO_SEARCH_UNION_LLM_MODEL") or ASSISTANT_ROUTER_LLM_MODEL
+)
+# Optional override for the default (top-1) answer model. Empty => the routed
+# persona's own default model (prod: gpt-4o). Set to force a specific model.
+AUTO_SEARCH_DEFAULT_LLM_VENDOR = os.environ.get("AUTO_SEARCH_DEFAULT_LLM_VENDOR") or ""
+AUTO_SEARCH_DEFAULT_LLM_MODEL = os.environ.get("AUTO_SEARCH_DEFAULT_LLM_MODEL") or ""
 # Versioned-docs dedup at final doc selection. Documentation sites publish the
 # SAME page under one URL per product version (e.g. docs.uipath.com/.../2024.10/…
 # and /.../2023.10/… and /.../2.2510/…). Retrieval then floods the LLM context
