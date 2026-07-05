@@ -58,6 +58,7 @@ from danswer.db.persona import get_personas
 from danswer.db.users import add_slack_persona_for_user
 from danswer.db.users import add_user_slack_persona
 from danswer.db.users import fetch_user_slack_persona
+from danswer.db.users import get_user_by_email
 from danswer.llm.answering.prompts.citations_prompt import (
     compute_max_document_tokens_for_persona,
 )
@@ -327,7 +328,7 @@ def handle_message(
                 persona = get_persona_with_docset_and_prompts(
                     persona_id=slack_persona_id, db_session=db_session
                 )
-                persona_name = persona.name
+                persona_name = persona.display_name or persona.name
             else:
                 persona = None
     else:
@@ -337,9 +338,36 @@ def handle_message(
         command = message_info.command
         if command == "/personas":
             with Session(get_sqlalchemy_engine()) as db_session:
+                # ACL scope: only offer personas this Slack user can access.
+                # Resolve the sender to a Danswer user via their Slack email;
+                # known users get public + shared personas, unknown/external
+                # senders get public personas only. Mirrors the web app — no
+                # assistant a user couldn't otherwise see is selectable here.
+                # Fail-open: any hiccup resolving the user falls back to the
+                # public-persona list, so this never breaks the /personas command.
+                acl_user = None
+                try:
+                    slack_user_email = (
+                        client.users_info(user=sender_id)
+                        .data["user"]["profile"]  # type: ignore
+                        .get("email")
+                    )
+                    if slack_user_email:
+                        acl_user = get_user_by_email(
+                            email=slack_user_email, db_session=db_session
+                        )
+                except Exception:
+                    logger.warning(
+                        "Unable to resolve Slack sender for persona ACL; "
+                        "falling back to public personas"
+                    )
                 personas = get_personas(
-                    user_id=None, db_session=db_session, include_default=True
+                    user_id=acl_user.id if acl_user else None,
+                    db_session=db_session,
+                    include_default=True,
                 )
+                if acl_user is None:
+                    personas = [p for p in personas if p.is_public]
 
             if not personas:
                 respond_in_thread(
@@ -356,8 +384,15 @@ def handle_message(
                 and message_info.thread_messages[0].message.strip()
             ):
                 persona_name = message_info.thread_messages[0].message.strip()
+                # Match the friendly display name OR the internal name, both
+                # case-insensitive — so "/personas Automation Suite" and
+                # "/personas AutomationSuite" both resolve.
+                query_name = persona_name.lower()
                 matching_personas = [
-                    p for p in personas if p.name.lower() == persona_name.lower()
+                    p
+                    for p in personas
+                    if (p.display_name or p.name).lower() == query_name
+                    or p.name.lower() == query_name
                 ]
 
                 if matching_personas:
@@ -382,7 +417,7 @@ def handle_message(
                         respond_in_thread(
                             client=client,
                             channel=channel,
-                            text=f"Persona '{persona.name}' has been set!",
+                            text=f"Persona '{persona.display_name or persona.name}' has been set!",
                             thread_ts=message_ts_to_respond_to,
                         )
                         return
@@ -396,7 +431,9 @@ def handle_message(
                         )
                         return
 
-            sorted_personas = sorted(personas, key=lambda x: x.name.lower())
+            sorted_personas = sorted(
+                personas, key=lambda x: (x.display_name or x.name).lower()
+            )
 
             # Create select menu options for all personas
             select_options = []
@@ -405,7 +442,7 @@ def handle_message(
                     {
                         "text": {
                             "type": "plain_text",
-                            "text": f"{persona.name} • {persona.description}"[:75],
+                            "text": f"{persona.display_name or persona.name} • {persona.description}"[:75],
                             "emoji": True,
                         },
                         "value": str(persona.id),

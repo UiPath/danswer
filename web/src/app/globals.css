@@ -2,10 +2,40 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Dark mode palette. Only the dark overrides live here — light mode uses the
- * fallbacks baked into the token definitions (tailwind-themes/tailwind.config.js).
- * Scoped to any `.dark` ancestor (CSS vars cascade), so dark mode applies only
- * where the `.dark` class is set (currently: the chat page container). */
+/* Light mode palette — a deliberate counterpart to the dark theme below, not the
+ * washed Tailwind gray fallbacks. Depth comes from a cool light-gray CANVAS with
+ * WHITE raised surfaces (composer, cards), near-black headings for contrast, and
+ * slightly stronger borders. `color-scheme: light` is REQUIRED so browsers with
+ * "auto dark mode for web contents" don't force-invert our light theme.
+ * Must come BEFORE `.dark` (equal specificity → later wins) so `.dark` overrides. */
+:root {
+  color-scheme: light;
+  --background: #f1f3f7; /* cool light-gray canvas */
+  --background-weak: #ffffff; /* raised surfaces: composer, cards */
+  --background-emphasis: #f7f8fa;
+  --background-strong: #e9ecf2;
+  --background-subtle: #edeff4;
+  --background-search: #ffffff;
+  --background-custom-header: #ffffff;
+
+  --text-light: #98a0af;
+  --text-subtle: #5b6472;
+  --text-default: #1e2430; /* near-black body + headings (was gray-600) */
+  --text-emphasis: #141922;
+  --text-strong: #0c0f16;
+
+  --border: #e3e6ec;
+  --border-light: #eceef2;
+  --border-medium: #d5dae2;
+  --border-strong: #bfc5d0;
+
+  --hover-light: #f1f3f7;
+  --hover: #e9ecf2;
+  --hover-emphasis: #dee2ea;
+}
+
+/* Dark mode palette. Scoped to any `.dark` ancestor (CSS vars cascade), so dark
+ * mode applies only where the `.dark` class is set (default on <html>). */
 .dark {
   /* Render native form controls (checkboxes, date pickers, default input
      backgrounds) and scrollbars in dark — fixes bright white checkboxes/inputs. */
