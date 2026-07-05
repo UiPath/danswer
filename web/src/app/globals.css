@@ -9,7 +9,10 @@
  * "auto dark mode for web contents" don't force-invert our light theme.
  * Must come BEFORE `.dark` (equal specificity → later wins) so `.dark` overrides. */
 :root {
-  color-scheme: light;
+  /* `only light` (not just `light`) so Chrome's "Auto Dark Mode for Web Contents"
+     cannot force-invert our light theme — the `only` keyword forbids the browser
+     from applying its own scheme. `.dark` below overrides this to dark. */
+  color-scheme: only light;
   --background: #f1f3f7; /* cool light-gray canvas */
   --background-weak: #ffffff; /* raised surfaces: composer, cards */
   --background-emphasis: #f7f8fa;
