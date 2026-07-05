@@ -119,7 +119,18 @@ export async function fetchChatData(searchParams: {
 
   const authDisabled = authTypeMetadata?.authType === "disabled";
   if (!authDisabled && !user) {
-    return { redirect: "/auth/login" };
+    // Preserve the deep link (e.g. /chat?assistant=AutomationSuite) across the SSO
+    // round-trip so per-channel Slack links still preselect the assistant after
+    // login. The value is re-validated (open-redirect-safe) when it's consumed.
+    const qs = new URLSearchParams(
+      Object.entries(searchParams).filter(
+        ([, v]) => typeof v === "string"
+      ) as [string, string][]
+    ).toString();
+    const nextTarget = qs ? `/chat?${qs}` : "/chat";
+    return {
+      redirect: `/auth/login?next=${encodeURIComponent(nextTarget)}`,
+    };
   }
 
   if (user && !user.is_verified && authTypeMetadata?.requiresVerification) {
