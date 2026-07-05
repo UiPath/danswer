@@ -1674,3 +1674,33 @@ class AnalyticsPersonaDailyStats(Base):
         server_default=func.now(),
         onupdate=func.now(),
     )
+
+
+class ChatReferral(Base):
+    """A landing on the chat UI from an external referral — e.g. a per-channel
+    Slack 'Ask Darwin' workflow linking to /chat?assistant=...&utm_source=slack.
+    Logged fire-and-forget from the client on page load when a utm_source is
+    present, so inbound traffic can be measured by source / channel / assistant
+    with a plain SQL query and no log-aggregation pipeline.
+
+    All fields are free-form strings from the URL (length-capped at write time);
+    they are stored as data only and never interpolated into queries or rendered
+    as HTML."""
+
+    __tablename__ = "chat_referral"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    utm_source: Mapped[str] = mapped_column(String, nullable=False)
+    utm_medium: Mapped[str | None] = mapped_column(String, nullable=True)
+    utm_campaign: Mapped[str | None] = mapped_column(String, nullable=True)
+    # The channel the link lived in (e.g. "help-orchestrator").
+    utm_channel: Mapped[str | None] = mapped_column(String, nullable=True)
+    # The `assistant` URL param as provided (a name); the id is resolved elsewhere.
+    assistant_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Who landed (null for anonymous / auth-disabled).
+    user_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("user.id"), nullable=True
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )

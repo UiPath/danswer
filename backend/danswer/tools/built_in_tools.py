@@ -1,14 +1,15 @@
 from typing import Type
 from typing import TypedDict
 
+from sqlalchemy import delete
 from sqlalchemy import not_
 from sqlalchemy import or_
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from danswer.db.models import Persona
+from danswer.db.models import Persona__Tool
 from danswer.db.models import Tool as ToolDBModel
-from danswer.tools.images.image_generation_tool import ImageGenerationTool
 from danswer.tools.search.search_tool import SearchTool
 from danswer.tools.tool import Tool
 from danswer.utils.logger import setup_logger
@@ -22,19 +23,16 @@ class InCodeToolInfo(TypedDict):
     in_code_tool_id: str
 
 
+# ImageGenerationTool was removed: this gateway-based deployment has no OpenAI
+# provider key, so it could never run — and load_builtin_tools() below deletes any
+# in-code tool no longer listed here, so on startup the stale `tool` row is
+# cleaned up automatically. (The class still exists for the guarded branch in
+# process_message.py, which simply never fires once no persona references it.)
 BUILT_IN_TOOLS: list[InCodeToolInfo] = [
     {
         "cls": SearchTool,
         "description": "The Search Tool allows the Assistant to search through connected knowledge to help build an answer.",
         "in_code_tool_id": SearchTool.__name__,
-    },
-    {
-        "cls": ImageGenerationTool,
-        "description": (
-            "The Image Generation Tool allows the assistant to use DALL-E 3 to generate images. "
-            "The tool will be used when the user asks the assistant to generate an image."
-        ),
-        "in_code_tool_id": ImageGenerationTool.__name__,
     },
 ]
 
@@ -66,10 +64,16 @@ def load_builtin_tools(db_session: Session) -> None:
             db_session.add(new_tool)
             logger.info(f"Added new tool: {tool_name}")
 
-    # Remove tools that are no longer in BUILT_IN_TOOLS
+    # Remove tools that are no longer in BUILT_IN_TOOLS. Detach any persona links
+    # first so a still-referenced tool (e.g. a persona that used to have Image
+    # Generation) can't FK-violate and crash startup — the tool just quietly
+    # disappears from those personas.
     built_in_ids = {tool_info["in_code_tool_id"] for tool_info in BUILT_IN_TOOLS}
     for tool_id, tool in list(in_code_tool_id_to_tool.items()):
         if tool_id not in built_in_ids:
+            db_session.execute(
+                delete(Persona__Tool).where(Persona__Tool.tool_id == tool.id)
+            )
             db_session.delete(tool)
             logger.info(f"Removed tool no longer in built-in list: {tool.name}")
 

@@ -433,85 +433,113 @@ def stream_chat_message_objects(
         search_tool: SearchTool | None = None
         tool_dict: dict[int, list[Tool]] = {}  # tool_id to tool
         for db_tool_model in persona.tools:
-            # handle in-code tools specially
-            if db_tool_model.in_code_tool_id:
-                tool_cls = get_built_in_tool_by_id(db_tool_model.id, db_session)
-                if tool_cls.__name__ == SearchTool.__name__ and not latest_query_files:
-                    # Chat-page per-conversation toggles (default off, assistant
-                    # settings intentionally ignored in chat). Each is gated by
-                    # its global master switch; we pass explicit skip_* so
-                    # retrieval_preprocessing uses these instead of the persona.
-                    search_tool = SearchTool(
-                        db_session=db_session,
-                        user=user,
-                        persona=persona,
-                        retrieval_options=retrieval_options,
-                        prompt_config=prompt_config,
-                        llm=llm,
-                        fast_llm=fast_llm,
-                        pruning_config=document_pruning_config,
-                        selected_docs=selected_llm_docs,
-                        chunks_above=new_msg_req.chunks_above,
-                        chunks_below=new_msg_req.chunks_below,
-                        full_doc=new_msg_req.full_doc,
-                        skip_rerank=not (RERANK_ENABLED and new_msg_req.use_reranking),
-                        skip_llm_chunk_filter=not (
-                            LLM_RELEVANCE_FILTER_ENABLED
-                            and new_msg_req.use_relevance_filter
+            # Guardrail: build each configured tool defensively. If a tool's
+            # prerequisites aren't met (e.g. Image Generation without an OpenAI
+            # key) or its setup otherwise fails, SKIP just that tool and log WHY
+            # at WARNING with the tool + persona identity — one misconfigured tool
+            # must never 500 the whole chat message, and the log keeps it debuggable.
+            try:
+                # handle in-code tools specially
+                if db_tool_model.in_code_tool_id:
+                    tool_cls = get_built_in_tool_by_id(db_tool_model.id, db_session)
+                    if (
+                        tool_cls.__name__ == SearchTool.__name__
+                        and not latest_query_files
+                    ):
+                        # Chat-page per-conversation toggles (default off, assistant
+                        # settings intentionally ignored in chat). Each is gated by
+                        # its global master switch; we pass explicit skip_* so
+                        # retrieval_preprocessing uses these instead of the persona.
+                        search_tool = SearchTool(
+                            db_session=db_session,
+                            user=user,
+                            persona=persona,
+                            retrieval_options=retrieval_options,
+                            prompt_config=prompt_config,
+                            llm=llm,
+                            fast_llm=fast_llm,
+                            pruning_config=document_pruning_config,
+                            selected_docs=selected_llm_docs,
+                            chunks_above=new_msg_req.chunks_above,
+                            chunks_below=new_msg_req.chunks_below,
+                            full_doc=new_msg_req.full_doc,
+                            skip_rerank=not (
+                                RERANK_ENABLED and new_msg_req.use_reranking
+                            ),
+                            skip_llm_chunk_filter=not (
+                                LLM_RELEVANCE_FILTER_ENABLED
+                                and new_msg_req.use_relevance_filter
+                            ),
+                        )
+                        tool_dict[db_tool_model.id] = [search_tool]
+                    elif tool_cls.__name__ == ImageGenerationTool.__name__:
+                        img_generation_llm_config: LLMConfig | None = None
+                        if (
+                            llm
+                            and llm.config.api_key
+                            and llm.config.model_provider == "openai"
+                        ):
+                            img_generation_llm_config = llm.config
+                        else:
+                            llm_providers = fetch_existing_llm_providers(db_session)
+                            openai_provider = next(
+                                iter(
+                                    [
+                                        llm_provider
+                                        for llm_provider in llm_providers
+                                        if llm_provider.provider == "openai"
+                                    ]
+                                ),
+                                None,
+                            )
+                            if not openai_provider or not openai_provider.api_key:
+                                raise ValueError(
+                                    "Image generation tool requires an OpenAI "
+                                    "API key"
+                                )
+                            img_generation_llm_config = LLMConfig(
+                                model_provider=openai_provider.provider,
+                                model_name=openai_provider.default_model_name,
+                                temperature=GEN_AI_TEMPERATURE,
+                                api_key=openai_provider.api_key,
+                                api_base=openai_provider.api_base,
+                                api_version=openai_provider.api_version,
+                            )
+                        tool_dict[db_tool_model.id] = [
+                            ImageGenerationTool(
+                                api_key=cast(
+                                    str, img_generation_llm_config.api_key
+                                ),
+                                api_base=img_generation_llm_config.api_base,
+                                api_version=img_generation_llm_config.api_version,
+                                additional_headers=litellm_additional_headers,
+                            )
+                        ]
+
+                    continue
+
+                # handle all custom tools
+                if db_tool_model.openapi_schema:
+                    tool_dict[db_tool_model.id] = cast(
+                        list[Tool],
+                        build_custom_tools_from_openapi_schema(
+                            db_tool_model.openapi_schema
                         ),
                     )
-                    tool_dict[db_tool_model.id] = [search_tool]
-                elif tool_cls.__name__ == ImageGenerationTool.__name__:
-                    img_generation_llm_config: LLMConfig | None = None
-                    if (
-                        llm
-                        and llm.config.api_key
-                        and llm.config.model_provider == "openai"
-                    ):
-                        img_generation_llm_config = llm.config
-                    else:
-                        llm_providers = fetch_existing_llm_providers(db_session)
-                        openai_provider = next(
-                            iter(
-                                [
-                                    llm_provider
-                                    for llm_provider in llm_providers
-                                    if llm_provider.provider == "openai"
-                                ]
-                            ),
-                            None,
-                        )
-                        if not openai_provider or not openai_provider.api_key:
-                            raise ValueError(
-                                "Image generation tool requires an OpenAI API key"
-                            )
-                        img_generation_llm_config = LLMConfig(
-                            model_provider=openai_provider.provider,
-                            model_name=openai_provider.default_model_name,
-                            temperature=GEN_AI_TEMPERATURE,
-                            api_key=openai_provider.api_key,
-                            api_base=openai_provider.api_base,
-                            api_version=openai_provider.api_version,
-                        )
-                    tool_dict[db_tool_model.id] = [
-                        ImageGenerationTool(
-                            api_key=cast(str, img_generation_llm_config.api_key),
-                            api_base=img_generation_llm_config.api_base,
-                            api_version=img_generation_llm_config.api_version,
-                            additional_headers=litellm_additional_headers,
-                        )
-                    ]
-
-                continue
-
-            # handle all custom tools
-            if db_tool_model.openapi_schema:
-                tool_dict[db_tool_model.id] = cast(
-                    list[Tool],
-                    build_custom_tools_from_openapi_schema(
-                        db_tool_model.openapi_schema
-                    ),
+            except Exception as tool_setup_error:
+                tool_label = (
+                    db_tool_model.in_code_tool_id
+                    or db_tool_model.name
+                    or f"tool-id={db_tool_model.id}"
                 )
+                logger.warning(
+                    "Skipping tool '%s' for persona '%s': prerequisite/setup "
+                    "check failed: %s",
+                    tool_label,
+                    persona.name if persona else "(default)",
+                    tool_setup_error,
+                )
+                continue
 
         tools: list[Tool] = []
         for tool_list in tool_dict.values():

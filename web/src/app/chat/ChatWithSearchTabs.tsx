@@ -3,6 +3,7 @@
 import { useContext, useState } from "react";
 import { ChatPage } from "./ChatPage";
 import { AutoSearch, autoSearchVisible } from "../auto-search/AutoSearch";
+import { ReferralLogger } from "./ReferralLogger";
 import { SettingsContext } from "@/components/settings/SettingsProvider";
 
 // Tabbed shell over the chat page: a "Chat" tab (the existing UX, untouched) and
@@ -36,13 +37,20 @@ export function ChatWithSearchTabs({
     />
   );
 
-  // No Search tab for this user — render chat exactly as before.
+  // No Search tab for this user — render chat exactly as before (plus the
+  // invisible referral beacon, which is independent of the tabs).
   if (!searchEnabled) {
-    return chatPage;
+    return (
+      <>
+        <ReferralLogger />
+        {chatPage}
+      </>
+    );
   }
 
   return (
     <>
+      <ReferralLogger />
       {/* Tab pill, floating top-center above both views. */}
       <div className="fixed top-2 left-1/2 -translate-x-1/2 z-50 flex gap-1 rounded-full border border-border-medium bg-background p-1 shadow-lg">
         <TabButton active={tab === "chat"} onClick={() => setTab("chat")}>

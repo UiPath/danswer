@@ -213,10 +213,29 @@ export async function fetchChatData(searchParams: {
     console.log(`Failed to fetch tags - ${tagsResponse?.status}`);
   }
 
+  // Preselected assistant: numeric `assistantId` wins; otherwise resolve the
+  // human-readable `assistant=<name>` param (used by shareable links like the
+  // per-channel Slack "Ask Darwin" workflow) to an id. Resolution is an exact,
+  // case-insensitive match against `assistants` — the user's ACL-filtered, visible
+  // list — so an unknown or inaccessible name simply yields no preselection
+  // (falls back to the default). The backend also re-checks persona access on send.
   const defaultPersonaIdRaw = searchParams["assistantId"];
-  const defaultPersonaId = defaultPersonaIdRaw
+  let defaultPersonaId = defaultPersonaIdRaw
     ? parseInt(defaultPersonaIdRaw)
     : undefined;
+  if (defaultPersonaId === undefined || Number.isNaN(defaultPersonaId)) {
+    const assistantNameRaw = searchParams["assistant"];
+    if (assistantNameRaw) {
+      const target = assistantNameRaw.trim().toLowerCase();
+      const match = assistants.find(
+        (a) =>
+          a.name.trim().toLowerCase() === target ||
+          (a.display_name != null &&
+            a.display_name.trim().toLowerCase() === target)
+      );
+      defaultPersonaId = match?.id;
+    }
+  }
 
   const documentSidebarCookieInitialWidth = cookies().get(
     DOCUMENT_SIDEBAR_WIDTH_COOKIE_NAME

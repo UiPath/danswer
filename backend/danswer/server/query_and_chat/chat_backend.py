@@ -37,6 +37,7 @@ from danswer.db.chat import update_chat_session
 from danswer.db.engine import get_session
 from danswer.db.feedback import create_chat_message_feedback
 from danswer.db.feedback import create_doc_retrieval_feedback
+from danswer.db.models import ChatReferral
 from danswer.db.models import User
 from danswer.db.persona import get_persona_by_id
 from danswer.document_index.document_index_utils import get_both_index_names
@@ -853,3 +854,51 @@ def fetch_chat_file(
     except Exception as e:
         logger.error(f"Error fetching file {file_id}: {str(e)}")
         raise HTTPException(status_code=404, detail="File not found")
+
+
+# --- Referral logging ------------------------------------------------------
+# One row per landing on the chat UI from an external referral (e.g. a
+# per-channel Slack "Ask Darwin" workflow: /chat?assistant=...&utm_source=slack).
+# Fired fire-and-forget by the client on page load; lets us measure inbound
+# traffic by source/channel/assistant with plain SQL, no log pipeline.
+
+# Cap free-form URL fields so a crafted link can't bloat the row/table.
+_REFERRAL_FIELD_MAX = 200
+
+
+class ChatReferralRequest(BaseModel):
+    utm_source: str
+    utm_medium: str | None = None
+    utm_campaign: str | None = None
+    utm_channel: str | None = None
+    assistant: str | None = None
+
+
+@router.post("/referral")
+def log_chat_referral(
+    referral: ChatReferralRequest,
+    user: User | None = Depends(current_user),
+    db_session: Session = Depends(get_session),
+) -> None:
+    def _cap(value: str | None) -> str | None:
+        return value[:_REFERRAL_FIELD_MAX] if value else value
+
+    source = _cap(referral.utm_source)
+    if not source:
+        # utm_source is the whole point of the event; ignore empty pings.
+        return None
+
+    # Stored as data only (parameterized via the ORM); never interpolated or
+    # rendered as HTML. user_id is the authenticated landing user, if any.
+    db_session.add(
+        ChatReferral(
+            utm_source=source,
+            utm_medium=_cap(referral.utm_medium),
+            utm_campaign=_cap(referral.utm_campaign),
+            utm_channel=_cap(referral.utm_channel),
+            assistant_name=_cap(referral.assistant),
+            user_id=user.id if user else None,
+        )
+    )
+    db_session.commit()
+    return None
