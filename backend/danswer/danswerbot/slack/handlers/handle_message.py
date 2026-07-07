@@ -29,6 +29,7 @@ from danswer.configs.danswerbot_configs import DISABLE_DANSWER_BOT_FILTER_DETECT
 from danswer.configs.danswerbot_configs import ENABLE_DANSWERBOT_REFLEXION
 from danswer.danswerbot.slack.blocks import build_documents_blocks
 from danswer.danswerbot.slack.blocks import build_follow_up_block
+from danswer.danswerbot.slack.blocks import build_sme_validation_block
 from danswer.danswerbot.slack.blocks import build_qa_response_blocks
 from danswer.danswerbot.slack.blocks import build_sources_blocks
 from danswer.danswerbot.slack.blocks import get_feedback_reminder_blocks
@@ -946,6 +947,13 @@ def handle_message(
 
     if channel_conf and channel_conf.get("follow_up_tags") is not None:
         all_blocks.append(build_follow_up_block(message_id=answer.chat_message_id))
+
+    # Opt-in per channel: prompt SMEs to verify the answer (red button → green once
+    # a member of the channel's Slack user group verifies it).
+    if channel_conf and channel_conf.get("enable_sme_validation"):
+        all_blocks.append(
+            build_sme_validation_block(message_id=answer.chat_message_id)
+        )
 
     try:
         respond_in_thread(

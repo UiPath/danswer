@@ -608,6 +608,8 @@ export interface ChannelConfig {
   follow_up_tags?: string[];
   prioritized_sources?: string[];
   opsgenie_schedule?: string;
+  enable_sme_validation?: boolean;
+  sme_group_name?: string;
   jira_title_filter?: string[];
   curated_response_user_title_filter?: string[];
   jira_config?: {

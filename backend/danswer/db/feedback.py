@@ -1,5 +1,8 @@
 from uuid import UUID
 
+from datetime import datetime
+from datetime import timezone
+
 from sqlalchemy import asc
 from sqlalchemy import delete
 from sqlalchemy import desc
@@ -174,4 +177,22 @@ def create_chat_message_feedback(
     )
 
     db_session.add(message_feedback)
+    db_session.commit()
+
+
+def mark_message_sme_verified(
+    chat_message_id: int,
+    verified_by: str,
+    db_session: Session,
+) -> None:
+    """Record that an SME verified an answer (Slack "Verified by an SME" flow).
+    Stored on chat_feedback (extends the existing feedback table) so it's queryable
+    alongside likes/dislikes and follow-up requests."""
+    db_session.add(
+        ChatMessageFeedback(
+            chat_message_id=chat_message_id,
+            sme_verified_by=verified_by,
+            sme_verified_at=datetime.now(timezone.utc),
+        )
+    )
     db_session.commit()

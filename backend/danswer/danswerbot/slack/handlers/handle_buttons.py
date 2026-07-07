@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Any
 from typing import cast
 
@@ -12,6 +13,7 @@ from danswer.configs.constants import SearchFeedbackType
 from danswer.configs.danswerbot_configs import DANSWER_FOLLOWUP_EMOJI
 from danswer.connectors.slack.utils import make_slack_api_rate_limited
 from danswer.danswerbot.slack.blocks import build_follow_up_resolved_blocks
+from danswer.danswerbot.slack.blocks import build_sme_verified_blocks
 from danswer.danswerbot.slack.blocks import get_document_feedback_blocks
 from danswer.danswerbot.slack.config import get_slack_bot_config_for_channel
 from danswer.danswerbot.slack.constants import CURATED_RESPONSE_CONFIG_KEY
@@ -19,6 +21,7 @@ from danswer.danswerbot.slack.constants import DISLIKE_BLOCK_ACTION_ID
 from danswer.danswerbot.slack.constants import ENABLE_CURATED_RESPONSE_KEY
 from danswer.danswerbot.slack.constants import FeedbackVisibility
 from danswer.danswerbot.slack.constants import LIKE_BLOCK_ACTION_ID
+from danswer.danswerbot.slack.constants import SME_VALIDATE_BUTTON_ACTION_ID
 from danswer.danswerbot.slack.constants import RESPONSE_MESSAGE_KEY
 from danswer.danswerbot.slack.constants import USER_ID_KEY
 from danswer.danswerbot.slack.constants import USER_KEY
@@ -41,6 +44,7 @@ from danswer.danswerbot.slack.utils import update_emote_react
 from danswer.db.engine import get_sqlalchemy_engine
 from danswer.db.feedback import create_chat_message_feedback
 from danswer.db.feedback import create_doc_retrieval_feedback
+from danswer.db.feedback import mark_message_sme_verified
 from danswer.document_index.document_index_utils import get_both_index_names
 from danswer.document_index.factory import get_default_document_index
 from danswer.utils.logger import setup_logger
@@ -225,6 +229,182 @@ def handle_slack_feedback(
             thread_ts=thread_ts_to_post_confirmation,
             unfurl=False,
         )
+
+
+def _sme_ephemeral(
+    web_client: WebClient, channel: str, user: str, text: str
+) -> None:
+    try:
+        make_slack_api_rate_limited(web_client.chat_postEphemeral)(
+            channel=channel, user=user, text=text
+        )
+    except Exception:
+        logger_base.exception("Failed to post SME ephemeral message")
+
+
+def _is_sme_action_block(block: dict[str, Any]) -> bool:
+    if block.get("type") != "actions":
+        return False
+    return any(
+        el.get("action_id") == SME_VALIDATE_BUTTON_ACTION_ID
+        for el in block.get("elements", [])
+    )
+
+
+def handle_sme_validate_button(
+    req: SocketModeRequest,
+    client: SocketModeClient,
+) -> None:
+    """'Yet to be verified by an SME' button. Only members of the channel's
+    configured Slack user group may verify (checked live, so leavers are handled).
+    On success the red button is swapped for a green 'Verified by an SME' badge
+    naming the verifier. Non-members get a private rejection; re-clicks are no-ops."""
+    payload = req.payload
+    user_id = payload["user"]["id"]
+    container = payload.get("container", {})
+    channel_id = container.get("channel_id") or payload.get("channel", {}).get("id")
+    message_ts = container.get("message_ts")
+    blocks: list[dict[str, Any]] = payload.get("message", {}).get("blocks", [])
+    web = client.web_client
+
+    if not channel_id or not message_ts:
+        return
+
+    # Idempotent: if already verified (the green/primary SME button is present), stop.
+    already_verified = any(
+        el.get("action_id") == SME_VALIDATE_BUTTON_ACTION_ID
+        and el.get("style") == "primary"
+        for b in blocks
+        if b.get("type") == "actions"
+        for el in b.get("elements", [])
+    )
+    if already_verified:
+        _sme_ephemeral(web, channel_id, user_id, "This answer is already verified.")
+        return
+
+    # Resolve the channel's SME user group from its config.
+    with Session(get_sqlalchemy_engine()) as db_session:
+        channel_name, _ = get_channel_name_from_id(
+            client=web, channel_id=channel_id
+        )
+        cfg = get_slack_bot_config_for_channel(
+            channel_name=channel_name, db_session=db_session
+        )
+    channel_conf = cfg.channel_config if cfg else None
+    sme_group_name = channel_conf.get("sme_group_name") if channel_conf else None
+    if (
+        not channel_conf
+        or not channel_conf.get("enable_sme_validation")
+        or not sme_group_name
+    ):
+        _sme_ephemeral(
+            web,
+            channel_id,
+            user_id,
+            "SME verification isn't configured for this channel.",
+        )
+        return
+
+    # Resolve the configured group name/@handle -> id (live), so config stays
+    # human-friendly and renames of members are irrelevant.
+    group_ids, _failed = fetch_groupids_from_names([sme_group_name], web)
+    if not group_ids:
+        logger_base.error("SME group %r not found in workspace", sme_group_name)
+        _sme_ephemeral(
+            web,
+            channel_id,
+            user_id,
+            "The configured SME group couldn't be found — please check the channel setup.",
+        )
+        return
+    sme_group_id = group_ids[0]
+
+    # AUTHORIZE (trusted side): clicker must be a LIVE member of the SME user group.
+    try:
+        members = make_slack_api_rate_limited(web.usergroups_users_list)(
+            usergroup=sme_group_id
+        )["users"]
+    except Exception:
+        logger_base.exception("Failed to fetch SME user group %s", sme_group_id)
+        _sme_ephemeral(
+            web,
+            channel_id,
+            user_id,
+            "Couldn't check your SME membership just now — please try again.",
+        )
+        return
+    if user_id not in members:
+        _sme_ephemeral(
+            web,
+            channel_id,
+            user_id,
+            "Only members of the SME group can verify answers.",
+        )
+        return
+
+    # Recover the message_id encoded in the SME block's block_id (best effort).
+    message_id: int | None = None
+    for b in blocks:
+        if _is_sme_action_block(b) and b.get("block_id"):
+            try:
+                message_id, _, _ = decompose_action_id(b["block_id"])
+            except ValueError:
+                message_id = None
+            break
+
+    # Swap the red button for the green verified state; keep everything else.
+    when = datetime.now().strftime("%b %d, %Y")
+    verified_blocks = [
+        blk.to_dict()
+        for blk in build_sme_verified_blocks(
+            validator_name=f"<@{user_id}>", when=when, message_id=message_id
+        )
+    ]
+    new_blocks = [b for b in blocks if not _is_sme_action_block(b)] + verified_blocks
+
+    try:
+        make_slack_api_rate_limited(web.chat_update)(
+            channel=channel_id,
+            ts=message_ts,
+            blocks=new_blocks,
+            text="This answer has been verified by an SME.",
+        )
+    except Exception:
+        logger_base.exception("Failed to update message with SME verification")
+        _sme_ephemeral(
+            web, channel_id, user_id, "Couldn't mark this verified — please retry."
+        )
+        return
+
+    # Persist the verification (extends chat_feedback) for reporting. Best-effort:
+    # a storage hiccup must not undo the visible badge. Record the verifier's email
+    # when resolvable (more portable than a Slack id), else the Slack id.
+    if message_id is not None:
+        verifier = user_id
+        try:
+            info = web.users_info(user=user_id)
+            verifier = (
+                info.get("user", {}).get("profile", {}).get("email") or user_id
+            )
+        except Exception:
+            pass
+        try:
+            with Session(get_sqlalchemy_engine()) as db_session:
+                mark_message_sme_verified(
+                    chat_message_id=message_id,
+                    verified_by=verifier,
+                    db_session=db_session,
+                )
+        except Exception:
+            logger_base.exception("Failed to persist SME verification")
+
+    logger_base.info(
+        "SME verification: channel=%s ts=%s message_id=%s verified_by=%s",
+        channel_id,
+        message_ts,
+        message_id,
+        user_id,
+    )
 
 
 def handle_followup_button(

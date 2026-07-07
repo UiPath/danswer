@@ -21,10 +21,12 @@ from danswer.danswerbot.slack.constants import FOLLOWUP_BUTTON_ACTION_ID
 from danswer.danswerbot.slack.constants import FOLLOWUP_BUTTON_RESOLVED_ACTION_ID
 from danswer.danswerbot.slack.constants import IMMEDIATE_RESOLVED_BUTTON_ACTION_ID
 from danswer.danswerbot.slack.constants import LIKE_BLOCK_ACTION_ID
+from danswer.danswerbot.slack.constants import SME_VALIDATE_BUTTON_ACTION_ID
 from danswer.danswerbot.slack.constants import SLACK_CHANNEL_ID
 from danswer.danswerbot.slack.constants import VIEW_DOC_FEEDBACK_ID
 from danswer.danswerbot.slack.handlers.handle_buttons import handle_doc_feedback_button
 from danswer.danswerbot.slack.handlers.handle_buttons import handle_followup_button
+from danswer.danswerbot.slack.handlers.handle_buttons import handle_sme_validate_button
 from danswer.danswerbot.slack.handlers.handle_buttons import (
     handle_followup_resolved_button,
 )
@@ -412,6 +414,9 @@ def action_routing(req: SocketModeRequest, client: SocketModeClient) -> None:
     if actions := req.payload.get("actions"):
         action = cast(dict[str, Any], actions[0])
 
+        if action["action_id"] == SME_VALIDATE_BUTTON_ACTION_ID:
+            # SME "verify this answer" button (opt-in per channel)
+            return handle_sme_validate_button(req, client)
         if action["action_id"] in [DISLIKE_BLOCK_ACTION_ID, LIKE_BLOCK_ACTION_ID]:
             # AI Answer feedback
             return process_feedback(req, client)

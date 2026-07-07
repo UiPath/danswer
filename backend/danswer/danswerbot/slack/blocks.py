@@ -30,6 +30,7 @@ from danswer.danswerbot.slack.constants import FOLLOWUP_BUTTON_ACTION_ID
 from danswer.danswerbot.slack.constants import FOLLOWUP_BUTTON_RESOLVED_ACTION_ID
 from danswer.danswerbot.slack.constants import IMMEDIATE_RESOLVED_BUTTON_ACTION_ID
 from danswer.danswerbot.slack.constants import LIKE_BLOCK_ACTION_ID
+from danswer.danswerbot.slack.constants import SME_VALIDATE_BUTTON_ACTION_ID
 from danswer.danswerbot.slack.icons import source_to_github_img_link
 from danswer.danswerbot.slack.utils import build_feedback_id
 from danswer.danswerbot.slack.utils import remove_slack_text_interactions
@@ -465,6 +466,48 @@ def build_follow_up_block(message_id: int | None) -> ActionsBlock:
             ),
         ],
     )
+
+
+def build_sme_validation_block(message_id: int | None) -> ActionsBlock:
+    """Unverified state: a red button prompting an SME to verify the answer. Only
+    members of the channel's configured Slack user group can actually verify (the
+    handler enforces it); everyone sees the button. `message_id` rides in the
+    block_id so the handler can attribute the verification."""
+    return ActionsBlock(
+        block_id=build_feedback_id(message_id) if message_id is not None else None,
+        elements=[
+            ButtonElement(
+                action_id=SME_VALIDATE_BUTTON_ACTION_ID,
+                style="danger",
+                text="Yet to be verified by an SME",
+            )
+        ],
+    )
+
+
+def build_sme_verified_blocks(
+    validator_name: str,
+    when: str,
+    message_id: int | None,
+) -> list[Block]:
+    """Verified state: a green button + a line naming the SME and when. The button
+    keeps the same action_id so a re-click is handled idempotently (no-op)."""
+    button_block = ActionsBlock(
+        block_id=build_feedback_id(message_id) if message_id is not None else None,
+        elements=[
+            ButtonElement(
+                action_id=SME_VALIDATE_BUTTON_ACTION_ID,
+                style="primary",
+                text=":white_check_mark: Verified by an SME",
+            )
+        ],
+    )
+    context_block = ContextBlock(
+        elements=[
+            MarkdownTextObject(text=f"Verified by {validator_name} · {when}")
+        ]
+    )
+    return [button_block, context_block]
 
 
 def build_follow_up_resolved_blocks(

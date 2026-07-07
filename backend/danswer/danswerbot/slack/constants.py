@@ -8,6 +8,10 @@ FOLLOWUP_BUTTON_ACTION_ID = "followup-button"
 FOLLOWUP_BUTTON_RESOLVED_ACTION_ID = "followup-resolved-button"
 SLACK_CHANNEL_ID = "channel_id"
 VIEW_DOC_FEEDBACK_ID = "view-doc-feedback"
+# "Verify this answer (SMEs)" button — opt-in per channel. Only members of the
+# channel's configured Slack user group may verify; on success the answer gets a
+# green "Verified by an SME" badge so readers can trust it.
+SME_VALIDATE_BUTTON_ACTION_ID = "sme-validate-answer"
 
 
 class FeedbackVisibility(str, Enum):

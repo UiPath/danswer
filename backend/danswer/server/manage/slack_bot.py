@@ -95,6 +95,12 @@ def _form_channel_config(
         channel_config["prioritized_sources"] = prioritized_sources
     if opsgenie_schedule:
         channel_config["opsgenie_schedule"] = opsgenie_schedule
+    if slack_bot_config_creation_request.enable_sme_validation:
+        channel_config["enable_sme_validation"] = True
+        if slack_bot_config_creation_request.sme_group_name:
+            channel_config[
+                "sme_group_name"
+            ] = slack_bot_config_creation_request.sme_group_name
     if jira_config:
         channel_config["jira_config"] = jira_config
     if jira_title_filter:

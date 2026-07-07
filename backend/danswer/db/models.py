@@ -854,6 +854,12 @@ class ChatMessageFeedback(Base):
     required_followup: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     feedback_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     predefined_feedback: Mapped[str | None] = mapped_column(String, nullable=True)
+    # SME verification (Slack "Verified by an SME" flow): who verified this answer
+    # and when. Null unless an SME has verified it.
+    sme_verified_by: Mapped[str | None] = mapped_column(String, nullable=True)
+    sme_verified_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     chat_message: Mapped[ChatMessage] = relationship(
         "ChatMessage",
@@ -1143,6 +1149,12 @@ class ChannelConfig(TypedDict):
     prioritized_sources: NotRequired[list[str]]
     # OpsGenie schedule name for DRI on-call
     opsgenie_schedule: NotRequired[str]
+    # Opt-in: show a "Yet to be verified by an SME" button on bot answers in this
+    # channel. Only members of the Slack user group named `sme_group_name` (its
+    # display name or @handle — resolved to an id live) can verify, so leavers are
+    # handled automatically.
+    enable_sme_validation: NotRequired[bool]
+    sme_group_name: NotRequired[str]
     # JIRA title filter for creating tickets
     jira_title_filter: NotRequired[list[str]]
     # Title filter for sending personalised response if user asks for more help
