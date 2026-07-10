@@ -4,7 +4,7 @@ import { IBM_Plex_Sans } from "next/font/google";
 import { getCombinedSettings } from "@/components/settings/lib";
 import { CUSTOM_ANALYTICS_ENABLED } from "@/lib/constants";
 import { SettingsProvider } from "@/components/settings/SettingsProvider";
-import { Metadata } from "next";
+import { Metadata, Viewport } from "next";
 import { buildClientUrl } from "@/lib/utilsSS";
 
 // Body / UI: IBM Plex Sans — a refined, characterful humanist sans (not Inter).
@@ -25,11 +25,18 @@ export async function generateMetadata(): Promise<Metadata> {
   return {
     title: dynamicSettings.enterpriseSettings?.application_name ?? "Darwin",
     description: "Question answering for your documents",
+    // App Router auto-injects <link rel="manifest"> from app/manifest.ts.
     icons: {
       icon: logoLocation,
+      apple: "/icons/apple-touch-icon.png",
     },
   };
 }
+
+// PWA / mobile chrome: match the dark-default theme (globals.css --background).
+export const viewport: Viewport = {
+  themeColor: "#0f1117",
+};
 
 export const dynamic = "force-dynamic";
 
