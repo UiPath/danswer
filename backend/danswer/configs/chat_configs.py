@@ -111,6 +111,13 @@ SLACK_KNN_ROUTER_TOP_K = int(os.environ.get("SLACK_KNN_ROUTER_TOP_K") or 15)
 SLACK_KNN_ROUTER_LLM_CONF_THRESHOLD = float(
     os.environ.get("SLACK_KNN_ROUTER_LLM_CONF_THRESHOLD") or 0.6
 )
+# Minimum number of neighbor matches an assistant needs to appear as a "recommended
+# assistant" (and in the compare union scope). Filters out single, incidental
+# matches — the noise seen when a strong-but-unmapped channel is discarded and
+# 1-vote channels fill the slots. Set via configmap (env) to tune without a deploy.
+SLACK_KNN_ROUTER_MIN_RECOMMENDATION_VOTES = int(
+    os.environ.get("SLACK_KNN_ROUTER_MIN_RECOMMENDATION_VOTES") or 2
+)
 # Side-by-side "compare" answer for the auto-routed Search tab: alongside the
 # single top-1 answer, also answer over the UNION of the router's top-N assistants'
 # document sets, so the user can compare a narrow (single-assistant) answer with a

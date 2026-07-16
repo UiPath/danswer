@@ -84,14 +84,44 @@ def test_knn_route_ignores_personas_outside_catalog() -> None:
 
 
 def test_knn_route_low_conf_triggers_llm_tiebreak() -> None:
-    # near-even split -> confidence < 0.6 -> LLM picks
+    # near-even split -> confidence < 0.6 -> LLM picks. min_recommendation_votes=1
+    # so the single-vote personas still populate ranked_ids for this assertion.
     neighbors = [_n("help-orchestrator", 0.51), _n("help-integration-service", 0.49)]
     llm = _FakeLLM("IntegrationService")
-    res = knn_route("q", neighbors, CH_MAP, _CATALOG, llm)
+    res = knn_route("q", neighbors, CH_MAP, _CATALOG, llm, min_recommendation_votes=1)
     assert llm.called
     assert res.persona_id == 2  # LLM's pick overrides the vote winner
     assert res.ranked_ids[0] == 2  # override reflected as #1 recommendation
     assert res.ambiguous is True  # close call -> compare offered
+
+
+def test_knn_route_min_votes_filters_single_vote_recommendations() -> None:
+    # Orchestrator gets 2 neighbor votes, IntegrationService 1. With the default
+    # threshold (2), only Orchestrator is a recommendation; the incidental 1-vote
+    # match is dropped (the RTO-query noise fix).
+    neighbors = [
+        _n("help-orchestrator", 0.9),
+        _n("help-orchestrator", 0.85),
+        _n("help-integration-service", 0.8),
+    ]
+    res = knn_route("q", neighbors, CH_MAP, _CATALOG, _FakeLLM("x"))
+    assert res.persona_id == 1
+    assert res.ranked_ids == [1]  # IntegrationService (1 vote) excluded
+
+
+def test_knn_route_min_votes_is_configurable() -> None:
+    neighbors = [_n("help-orchestrator", 0.9), _n("help-integration-service", 0.8)]
+    # threshold 1 -> both qualify as recommendations
+    r1 = knn_route(
+        "q", neighbors, CH_MAP, _CATALOG, _FakeLLM("x"), min_recommendation_votes=1
+    )
+    assert set(r1.ranked_ids) == {1, 2}
+    # threshold 2 -> neither 1-vote persona qualifies; empty recs, but still answers
+    r2 = knn_route(
+        "q", neighbors, CH_MAP, _CATALOG, _FakeLLM("x"), min_recommendation_votes=2
+    )
+    assert r2.ranked_ids == []
+    assert r2.persona_id in (1, 2)
 
 
 def test_knn_route_tiebreak_falls_back_to_vote_on_bad_llm_output() -> None:

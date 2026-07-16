@@ -31,6 +31,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from danswer.configs.chat_configs import SLACK_KNN_ROUTER_LLM_CONF_THRESHOLD
+from danswer.configs.chat_configs import SLACK_KNN_ROUTER_MIN_RECOMMENDATION_VOTES
 from danswer.configs.chat_configs import SLACK_KNN_ROUTER_TOP_K
 from danswer.configs.constants import CHUNK_ID
 from danswer.configs.constants import CONTENT
@@ -199,26 +200,33 @@ def knn_route(
     llm: LLM,
     top_n: int = 3,
     conf_threshold: float = SLACK_KNN_ROUTER_LLM_CONF_THRESHOLD,
+    min_recommendation_votes: int = SLACK_KNN_ROUTER_MIN_RECOMMENDATION_VOTES,
 ) -> RouteResult:
     """Vote over the neighbors' personas (kept to the ACL catalog), gate on
-    confidence, and LLM-tiebreak the low-confidence cases. Fail-OPEN."""
+    confidence, and LLM-tiebreak the low-confidence cases. Fail-OPEN.
+
+    `ranked_ids` (the recommended assistants + compare union scope) only includes
+    assistants matched by >= `min_recommendation_votes` neighbors, filtering out
+    single incidental matches. The answering pick (`persona_id`) is chosen
+    independently of that threshold — something always answers."""
     catalog_ids = {entry.persona_id for entry in catalog}
     id_to_name = {entry.persona_id: entry.name for entry in catalog}
 
     votes: dict[int, float] = defaultdict(float)
+    counts: dict[int, int] = defaultdict(int)  # neighbor matches per persona
     examples: list[tuple[str, str]] = []  # (name, snippet) best-first, catalog-only
     for neighbor in neighbors:
         pid = channel_to_persona.get(neighbor.channel)
         if pid is None or pid not in catalog_ids:
             continue
         votes[pid] += neighbor.score
+        counts[pid] += 1
         examples.append((id_to_name[pid], neighbor.content))
 
     if not votes:
         return RouteResult(persona_id=None, confidence=0.0)
 
     ranked = sorted(votes.items(), key=lambda kv: kv[1], reverse=True)
-    ranked_ids = [pid for pid, _ in ranked[:top_n]]
     top_id, top_weight = ranked[0]
     total_weight = sum(votes.values())
     confidence = top_weight / total_weight if total_weight else 0.0
@@ -231,21 +239,28 @@ def knn_route(
         if picked is not None:
             final_id = picked
 
+    # Recommendations / union scope: only assistants with >= min votes (drop
+    # single incidental matches). Lead with the answering pick when it qualifies.
+    recommended = [
+        pid for pid, _ in ranked if counts[pid] >= min_recommendation_votes
+    ]
+    if final_id in recommended:
+        recommended.remove(final_id)
+        recommended.insert(0, final_id)
+    ranked_ids = recommended[:top_n]
+
     logger.info(
-        "slack-knn router: question=%r -> persona_id=%s confidence=%.2f ranked=%s",
+        "slack-knn router: question=%r -> persona_id=%s confidence=%.2f ranked=%s "
+        "(min_votes=%d)",
         question[:80],
         final_id,
         confidence,
         ranked_ids,
+        min_recommendation_votes,
     )
-    # Put the final pick first in ranked_ids (drives the "recommended" list) so a
-    # tiebreak override is reflected as the #1 recommendation too.
-    if final_id in ranked_ids:
-        ranked_ids.remove(final_id)
-    ranked_ids.insert(0, final_id)
     return RouteResult(
         persona_id=final_id,
         confidence=confidence,
-        ranked_ids=ranked_ids[:top_n],
+        ranked_ids=ranked_ids,
         ambiguous=ambiguous,
     )
