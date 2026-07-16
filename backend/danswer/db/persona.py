@@ -532,6 +532,19 @@ def update_persona_visibility(
     invalidate_personas_all()
 
 
+def update_persona_is_router_candidate(
+    persona_id: int,
+    is_router_candidate: bool,
+    db_session: Session,
+) -> None:
+    """Toggle whether an assistant participates in the auto-routed Search tab.
+    Invalidates the persona cache so the router catalog reflects it immediately."""
+    persona = get_persona_by_id(persona_id=persona_id, user=None, db_session=db_session)
+    persona.is_router_candidate = is_router_candidate
+    db_session.commit()
+    invalidate_personas_all()
+
+
 def check_user_can_edit_persona(user: User | None, persona: Persona) -> None:
     # if user is None, assume that no-auth is turned on
     if user is None:

@@ -17,6 +17,7 @@ from danswer.db.persona import mark_persona_as_deleted
 from danswer.db.persona import mark_persona_as_not_deleted
 from danswer.db.persona import update_all_personas_display_priority
 from danswer.db.persona import update_persona_shared_users
+from danswer.db.persona import update_persona_is_router_candidate
 from danswer.db.persona import update_persona_visibility
 from danswer.db.persona_cache import get_personas_for_user_cached
 from danswer.llm.answering.prompts.utils import build_dummy_prompt
@@ -49,6 +50,24 @@ def patch_persona_visibility(
     update_persona_visibility(
         persona_id=persona_id,
         is_visible=is_visible_request.is_visible,
+        db_session=db_session,
+    )
+
+
+class IsRouterCandidateRequest(BaseModel):
+    is_router_candidate: bool
+
+
+@admin_router.patch("/{persona_id}/router-candidate")
+def patch_persona_router_candidate(
+    persona_id: int,
+    request: IsRouterCandidateRequest,
+    _: User | None = Depends(current_admin_user),
+    db_session: Session = Depends(get_session),
+) -> None:
+    update_persona_is_router_candidate(
+        persona_id=persona_id,
+        is_router_candidate=request.is_router_candidate,
         db_session=db_session,
     )
 

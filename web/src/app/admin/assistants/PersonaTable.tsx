@@ -83,7 +83,14 @@ export function PersonasTable({ personas }: { personas: Persona[] }) {
       </Text>
 
       <DraggableTable
-        headers={["Name", "Description", "Type", "Is Visible", "Delete"]}
+        headers={[
+          "Name",
+          "Description",
+          "Type",
+          "Is Visible",
+          "Auto-Route",
+          "Delete",
+        ]}
         rows={finalPersonaValues.map((persona) => {
           return {
             id: persona.id.toString(),
@@ -157,6 +164,44 @@ export function PersonasTable({ personas }: { personas: Persona[] }) {
                 </div>
                 <div className="ml-1 my-auto">
                   <CustomCheckbox checked={persona.is_visible} />
+                </div>
+              </div>,
+              <div
+                key="auto_route"
+                onClick={async () => {
+                  const next = !(persona.is_router_candidate ?? true);
+                  const response = await fetch(
+                    `/api/admin/persona/${persona.id}/router-candidate`,
+                    {
+                      method: "PATCH",
+                      headers: {
+                        "Content-Type": "application/json",
+                      },
+                      body: JSON.stringify({ is_router_candidate: next }),
+                    }
+                  );
+                  if (response.ok) {
+                    router.refresh();
+                  } else {
+                    setPopup({
+                      type: "error",
+                      message: `Failed to update persona - ${await response.text()}`,
+                    });
+                  }
+                }}
+                className="px-1 py-0.5 hover:bg-hover-light rounded flex cursor-pointer select-none w-fit"
+              >
+                <div className="my-auto w-12">
+                  {persona.is_router_candidate ?? true ? (
+                    "On"
+                  ) : (
+                    <div className="text-error">Off</div>
+                  )}
+                </div>
+                <div className="ml-1 my-auto">
+                  <CustomCheckbox
+                    checked={persona.is_router_candidate ?? true}
+                  />
                 </div>
               </div>,
               <div key="edit" className="flex">
