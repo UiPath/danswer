@@ -44,15 +44,27 @@ def _entry(pid, name, keywords):
 
 
 _KW_CATALOG = [
-    _entry(1, "AutomationSuite", ["automation suite", "as environment", "aks deployment", "eks deployment"]),
+    _entry(
+        1,
+        "AutomationSuite",
+        ["automation suite", "as environment", "aks deployment", "eks deployment"],
+    ),
     _entry(2, "Orchestrator", ["orchestrator"]),
     _entry(3, "NoKeywords", []),
 ]
 
 
 def test_keyword_route_matches_case_insensitively() -> None:
-    assert keyword_route("AUTOMATION SUITE install on openshift", _KW_CATALOG).persona_id == 1
-    assert keyword_route("migration to Unified on their AS Environment", _KW_CATALOG).persona_id == 1
+    assert (
+        keyword_route("AUTOMATION SUITE install on openshift", _KW_CATALOG).persona_id
+        == 1
+    )
+    assert (
+        keyword_route(
+            "migration to Unified on their AS Environment", _KW_CATALOG
+        ).persona_id
+        == 1
+    )
     assert keyword_route("is AKS deployment supported", _KW_CATALOG).persona_id == 1
 
 
@@ -109,7 +121,10 @@ _QUOTED = [_entry(1, "AS", ['"as environment"'])]
 
 def test_keyword_route_quoted_requires_contiguous_phrase() -> None:
     # fires on the adjacent phrase...
-    assert keyword_route("migrating their AS Environment to unified", _QUOTED).persona_id == 1
+    assert (
+        keyword_route("migrating their AS Environment to unified", _QUOTED).persona_id
+        == 1
+    )
     # ...but NOT when "as" and "environment" are merely both present, scattered
     assert keyword_route("as a user, how do I set up the environment?", _QUOTED) is None
 
@@ -153,7 +168,10 @@ def test_keyword_route_priority_beats_across_the_board() -> None:
         _entry(1, "A", ["!coupa"]),
         _entry(2, "B", ["procure to pay solution"]),
     ]
-    assert keyword_route("coupa invoice in the procure to pay solution", cat).persona_id == 1
+    assert (
+        keyword_route("coupa invoice in the procure to pay solution", cat).persona_id
+        == 1
+    )
 
 
 def test_keyword_route_priority_exact_combo() -> None:

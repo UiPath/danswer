@@ -45,10 +45,19 @@ const HOLD_MS = 1800; // pause once a full example is typed, before the next
 // (case/space-insensitive); unmatched ones are dropped so we never show an
 // assistant the user doesn't have.
 const EXAMPLE_PROMPTS: { match: string; question: string }[] = [
-  { match: "integration", question: "why is my Salesforce connection failing?" },
+  {
+    match: "integration",
+    question: "why is my Salesforce connection failing?",
+  },
   { match: "ownership", question: "who is the TAM or CSM of the ABC account?" },
-  { match: "action center", question: "how do I reassign a task to someone else?" },
-  { match: "orchestrator", question: "how do I schedule a process to run hourly?" },
+  {
+    match: "action center",
+    question: "how do I reassign a task to someone else?",
+  },
+  {
+    match: "orchestrator",
+    question: "how do I schedule a process to run hourly?",
+  },
   { match: "automation suite", question: "how do I back up my cluster?" },
 ];
 
@@ -130,10 +139,11 @@ export function AutoSearch({ userRole }: { userRole: string | null }) {
   const [result, setResult] = useState<AutoSearchResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Compare view: which tab is showing, and the lazily-fetched union answer.
-  const [activeTab, setActiveTab] = useState<"top" | "union" | "sources">("top");
-  const [unionResult, setUnionResult] = useState<AutoSearchUnionResponse | null>(
-    null
+  const [activeTab, setActiveTab] = useState<"top" | "union" | "sources">(
+    "top"
   );
+  const [unionResult, setUnionResult] =
+    useState<AutoSearchUnionResponse | null>(null);
   const [unionLoading, setUnionLoading] = useState(false);
   const [unionError, setUnionError] = useState<string | null>(null);
   // Third (source-scoped: HighSpot + docs) compare answer, also lazy-fetched.
@@ -164,12 +174,16 @@ export function AutoSearch({ userRole }: { userRole: string | null }) {
     const target = e.match.toLowerCase().replace(/[^a-z]/g, "");
     const persona = assistants.find(
       (a) =>
-        a.name.toLowerCase().replace(/[^a-z]/g, "").includes(target) ||
-        assistantDisplayName(a).toLowerCase().replace(/[^a-z]/g, "").includes(target)
+        a.name
+          .toLowerCase()
+          .replace(/[^a-z]/g, "")
+          .includes(target) ||
+        assistantDisplayName(a)
+          .toLowerCase()
+          .replace(/[^a-z]/g, "")
+          .includes(target)
     );
-    return persona
-      ? `@${assistantDisplayName(persona)} ${e.question}`
-      : null;
+    return persona ? `@${assistantDisplayName(persona)} ${e.question}` : null;
   }).filter((x): x is string => x !== null);
 
   // Auto-grow the textarea like ChatInputBar.
@@ -253,7 +267,9 @@ export function AutoSearch({ userRole }: { userRole: string | null }) {
   // Active @mention typeahead state (derived).
   const mentionQuery = getMentionQuery(question);
   const mentionMatches =
-    mentionQuery !== null ? filterAssistantsByMention(assistants, mentionQuery) : [];
+    mentionQuery !== null
+      ? filterAssistantsByMention(assistants, mentionQuery)
+      : [];
 
   function handleQuestionChange(text: string) {
     setQuestion(text);
@@ -277,7 +293,6 @@ export function AutoSearch({ userRole }: { userRole: string | null }) {
     textAreaRef.current?.focus();
   }
 
-
   async function runSearch(override?: string, explicitPersonaId?: number) {
     const rawText = override ?? question;
     // Explicit @mention pick (only honored when its annotation is still present
@@ -292,7 +307,10 @@ export function AutoSearch({ userRole }: { userRole: string | null }) {
       hasMentionLabel(rawText, assistantDisplayName(forcedPersona))
     ) {
       personaId = forcedPersona.id;
-      toSearch = stripMentionLabel(rawText, assistantDisplayName(forcedPersona));
+      toSearch = stripMentionLabel(
+        rawText,
+        assistantDisplayName(forcedPersona)
+      );
     }
     const trimmed = toSearch.trim();
     if (!trimmed || isLoading) return;
@@ -382,10 +400,7 @@ export function AutoSearch({ userRole }: { userRole: string | null }) {
     }
   }
 
-  async function submitFeedback(
-    vote: "like" | "dislike",
-    text: string | null
-  ) {
+  async function submitFeedback(vote: "like" | "dislike", text: string | null) {
     if (result?.chat_message_id == null) return;
     setFeedbackGiven(vote);
     setShowFeedbackBox(false);
@@ -407,7 +422,9 @@ export function AutoSearch({ userRole }: { userRole: string | null }) {
   const answeredBy = result?.answered_by;
   const answeredByLabel =
     answeredBy &&
-    (answeredBy.display_name?.trim() ? answeredBy.display_name : answeredBy.name);
+    (answeredBy.display_name?.trim()
+      ? answeredBy.display_name
+      : answeredBy.name);
   const otherRecommended = result?.other_recommended ?? [];
   const topDocs = result?.docs?.top_documents ?? [];
   // Compare state. compareOn just means "show tabs" — the union answer may still
@@ -439,7 +456,9 @@ export function AutoSearch({ userRole }: { userRole: string | null }) {
         <ul className="flex flex-col gap-1.5">
           {docs.slice(0, 8).map((doc, i) => (
             <li key={i} className="flex items-baseline gap-2 text-sm">
-              <span className="text-subtle tabular-nums w-4 shrink-0">{i + 1}</span>
+              <span className="text-subtle tabular-nums w-4 shrink-0">
+                {i + 1}
+              </span>
               {doc.link ? (
                 <a
                   href={doc.link}
@@ -541,7 +560,9 @@ export function AutoSearch({ userRole }: { userRole: string | null }) {
               }
               if (e.key === "Enter" || e.key === "Tab") {
                 e.preventDefault();
-                selectMention(mentionMatches[mentionIndex] ?? mentionMatches[0]);
+                selectMention(
+                  mentionMatches[mentionIndex] ?? mentionMatches[0]
+                );
                 return;
               }
               if (e.key === "Escape") {
@@ -642,7 +663,9 @@ export function AutoSearch({ userRole }: { userRole: string | null }) {
         {isLoading && (
           <div className="mt-10 flex items-center gap-3 text-subtle">
             <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-subtle border-t-transparent" />
-            <span className="text-sm">{LOADING_PHRASES[loadingPhraseIdx]}…</span>
+            <span className="text-sm">
+              {LOADING_PHRASES[loadingPhraseIdx]}…
+            </span>
           </div>
         )}
 
@@ -775,7 +798,9 @@ export function AutoSearch({ userRole }: { userRole: string | null }) {
                   <div>
                     <div className="mb-3 text-xs text-subtle">
                       From{" "}
-                      <span className="text-default">HighSpot &amp; the docs sites</span>
+                      <span className="text-default">
+                        HighSpot &amp; the docs sites
+                      </span>
                     </div>
                     {sourceLoading ? (
                       <div className="flex items-center gap-3 py-8 text-sm text-subtle">

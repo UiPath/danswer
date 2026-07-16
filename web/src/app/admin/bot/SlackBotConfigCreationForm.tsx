@@ -31,10 +31,7 @@ import {
 import { useRouter } from "next/navigation";
 import { Persona } from "../assistants/interfaces";
 import { useState } from "react";
-import {
-  LLM_MODELS_BY_VENDOR,
-  LLM_VENDORS,
-} from "@/lib/llm/models";
+import { LLM_MODELS_BY_VENDOR, LLM_VENDORS } from "@/lib/llm/models";
 import { BookmarkIcon, RobotIcon } from "@/components/icons/icons";
 import { SourceIcon } from "@/components/SourceIcon";
 import { getSourceMetadata } from "@/lib/sources";

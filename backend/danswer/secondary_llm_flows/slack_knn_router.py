@@ -46,8 +46,8 @@ from danswer.llm.interfaces import LLM
 from danswer.llm.utils import message_to_string
 from danswer.search.enums import EmbedTextType
 from danswer.search.search_nlp_models import EmbeddingModel
-from danswer.secondary_llm_flows.assistant_router import RouteResult
 from danswer.secondary_llm_flows.assistant_router import RouterCatalogEntry
+from danswer.secondary_llm_flows.assistant_router import RouteResult
 from danswer.utils.logger import setup_logger
 from shared_configs.configs import MODEL_SERVER_HOST
 from shared_configs.configs import MODEL_SERVER_PORT
@@ -241,9 +241,7 @@ def knn_route(
 
     # Recommendations / union scope: only assistants with >= min votes (drop
     # single incidental matches). Lead with the answering pick when it qualifies.
-    recommended = [
-        pid for pid, _ in ranked if counts[pid] >= min_recommendation_votes
-    ]
+    recommended = [pid for pid, _ in ranked if counts[pid] >= min_recommendation_votes]
     if final_id in recommended:
         recommended.remove(final_id)
         recommended.insert(0, final_id)

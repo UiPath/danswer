@@ -503,9 +503,7 @@ def build_sme_verified_blocks(
         ],
     )
     context_block = ContextBlock(
-        elements=[
-            MarkdownTextObject(text=f"Verified by {validator_name} · {when}")
-        ]
+        elements=[MarkdownTextObject(text=f"Verified by {validator_name} · {when}")]
     )
     return [button_block, context_block]
 

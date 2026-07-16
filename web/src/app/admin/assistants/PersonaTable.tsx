@@ -192,7 +192,7 @@ export function PersonasTable({ personas }: { personas: Persona[] }) {
                 className="px-1 py-0.5 hover:bg-hover-light rounded flex cursor-pointer select-none w-fit"
               >
                 <div className="my-auto w-12">
-                  {persona.is_router_candidate ?? true ? (
+                  {(persona.is_router_candidate ?? true) ? (
                     "On"
                   ) : (
                     <div className="text-error">Off</div>

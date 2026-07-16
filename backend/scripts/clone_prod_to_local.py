@@ -51,7 +51,6 @@ IMPORTANT CONSTRAINTS / CAVEATS
 import argparse
 import gzip
 import json
-import os
 import sys
 import urllib.parse
 from collections.abc import Iterator
@@ -141,7 +140,11 @@ def _latest_doc_ids(client: httpx.Client, index: str, source: str, n: int) -> li
     def walk(node: object) -> None:
         if isinstance(node, dict):
             # group leaf: {"value": "<document_id>", "fields": {...}}
-            if "value" in node and isinstance(node["value"], str) and "children" not in node:
+            if (
+                "value" in node
+                and isinstance(node["value"], str)
+                and "children" not in node
+            ):
                 doc_ids.append(node["value"])
             for v in node.values():
                 walk(v)
@@ -191,7 +194,9 @@ def export(args: argparse.Namespace) -> None:
     (out_dir / "vespa").mkdir(parents=True, exist_ok=True)
     index = _index_name()
     sources = args.sources or DEFAULT_SOURCES
-    print(f"[export] index_name={index}  sources={sources}  per_source={args.per_source}")
+    print(
+        f"[export] index_name={index}  sources={sources}  per_source={args.per_source}"
+    )
 
     meta = {"index_name": index, "per_source": args.per_source, "sources": sources}
     (out_dir / "meta.json").write_text(json.dumps(meta, indent=2))
@@ -220,7 +225,9 @@ def export(args: argparse.Namespace) -> None:
         db_dump: dict[str, list[dict]] = {}
         with Session(get_sqlalchemy_engine()) as db:
             for tbl in DB_TABLES:
-                rows = [dict(r._mapping) for r in db.execute(text(f"SELECT * FROM {tbl}"))]
+                rows = [
+                    dict(r._mapping) for r in db.execute(text(f"SELECT * FROM {tbl}"))
+                ]
                 db_dump[tbl] = rows
                 print(f"[export]   db.{tbl}: {len(rows)} rows")
         (out_dir / "db.json").write_text(json.dumps(db_dump, indent=2, default=str))
@@ -293,7 +300,9 @@ def _import_db(out_dir: Path) -> None:
                 stmt = pg_insert(table).values(**row)
                 update_cols = {c: stmt.excluded[c] for c in row if c not in pk}
                 if update_cols:
-                    stmt = stmt.on_conflict_do_update(index_elements=pk, set_=update_cols)
+                    stmt = stmt.on_conflict_do_update(
+                        index_elements=pk, set_=update_cols
+                    )
                 else:
                     stmt = stmt.on_conflict_do_nothing(index_elements=pk)
                 conn.execute(stmt)

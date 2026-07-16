@@ -29,8 +29,8 @@ from danswer.configs.danswerbot_configs import DISABLE_DANSWER_BOT_FILTER_DETECT
 from danswer.configs.danswerbot_configs import ENABLE_DANSWERBOT_REFLEXION
 from danswer.danswerbot.slack.blocks import build_documents_blocks
 from danswer.danswerbot.slack.blocks import build_follow_up_block
-from danswer.danswerbot.slack.blocks import build_sme_validation_block
 from danswer.danswerbot.slack.blocks import build_qa_response_blocks
+from danswer.danswerbot.slack.blocks import build_sme_validation_block
 from danswer.danswerbot.slack.blocks import build_sources_blocks
 from danswer.danswerbot.slack.blocks import get_feedback_reminder_blocks
 from danswer.danswerbot.slack.blocks import get_restate_blocks
@@ -51,11 +51,11 @@ from danswer.db.models import Persona
 from danswer.db.models import SlackBotConfig
 from danswer.db.models import SlackBotResponseType
 from danswer.db.persona import fetch_persona_by_id
+from danswer.db.persona import get_persona_with_docset_and_prompts
+from danswer.db.persona import get_personas
 from danswer.db.slack_response_blocklist import (
     get_slack_response_blocklisted_emails,
 )
-from danswer.db.persona import get_persona_with_docset_and_prompts
-from danswer.db.persona import get_personas
 from danswer.db.users import add_slack_persona_for_user
 from danswer.db.users import add_user_slack_persona
 from danswer.db.users import fetch_user_slack_persona
@@ -241,9 +241,7 @@ def handle_message(
     if sender_id:
         try:
             with Session(get_sqlalchemy_engine()) as db_session:
-                blocklisted_emails = get_slack_response_blocklisted_emails(
-                    db_session
-                )
+                blocklisted_emails = get_slack_response_blocklisted_emails(db_session)
         except Exception:
             # Fail open: if the blocklist can't be read (e.g. the table doesn't
             # exist yet mid-migration, or a transient DB error), respond as
@@ -443,7 +441,9 @@ def handle_message(
                     {
                         "text": {
                             "type": "plain_text",
-                            "text": f"{persona.display_name or persona.name} • {persona.description}"[:75],
+                            "text": f"{persona.display_name or persona.name} • {persona.description}"[
+                                :75
+                            ],
                             "emoji": True,
                         },
                         "value": str(persona.id),
@@ -951,9 +951,7 @@ def handle_message(
     # Opt-in per channel: prompt SMEs to verify the answer (red button → green once
     # a member of the channel's Slack user group verifies it).
     if channel_conf and channel_conf.get("enable_sme_validation"):
-        all_blocks.append(
-            build_sme_validation_block(message_id=answer.chat_message_id)
-        )
+        all_blocks.append(build_sme_validation_block(message_id=answer.chat_message_id))
 
     try:
         respond_in_thread(

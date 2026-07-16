@@ -88,9 +88,7 @@ function TabButton({
     <button
       onClick={onClick}
       className={`rounded-full px-4 py-1 text-sm transition-colors ${
-        active
-          ? "bg-accent text-white"
-          : "text-subtle hover:bg-hover"
+        active ? "bg-accent text-white" : "text-subtle hover:bg-hover"
       }`}
     >
       {children}

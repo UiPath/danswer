@@ -346,8 +346,8 @@ export function AssistantsGallery({
   columns?: number;
 }) {
   const router = useRouter();
-  const enableAssistantCreation = useContext(SettingsContext)?.settings
-    ?.enable_assistant_creation;
+  const enableAssistantCreation =
+    useContext(SettingsContext)?.settings?.enable_assistant_creation;
 
   // User-chosen column count. `null` until the localStorage read in
   // the effect below; SSR + first paint use the prop value so we

@@ -171,8 +171,7 @@ function RowContent({
   dragHandleProps,
 }: RowProps & {
   dragHandleProps:
-    | (React.HTMLAttributes<HTMLButtonElement> & { ref?: any })
-    | null;
+    (React.HTMLAttributes<HTMLButtonElement> & { ref?: any }) | null;
 }) {
   const isOwnedByUser = checkUserOwnsAssistant(user, assistant);
   const canEdit = isOwnedByUser;
@@ -540,8 +539,8 @@ interface AssistantsListProps {
 
 export function AssistantsList({ user, assistants }: AssistantsListProps) {
   const router = useRouter();
-  const enableAssistantCreation = useContext(SettingsContext)?.settings
-    ?.enable_assistant_creation;
+  const enableAssistantCreation =
+    useContext(SettingsContext)?.settings?.enable_assistant_creation;
   const { popup, setPopup } = usePopup();
 
   // Opt-out model: `chosenOrder` controls ORDER only (and default = position

@@ -62,5 +62,8 @@ export function stripMentionLabel(text: string, label: string): string {
 
 /** Whether the message still carries the "@<label>" annotation (caret-agnostic). */
 export function hasMentionLabel(text: string, label: string): boolean {
-  return text.replace(/^\s+/, "").toLowerCase().startsWith(`@${label}`.toLowerCase());
+  return text
+    .replace(/^\s+/, "")
+    .toLowerCase()
+    .startsWith(`@${label}`.toLowerCase());
 }

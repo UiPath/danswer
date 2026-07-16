@@ -1,7 +1,6 @@
-from uuid import UUID
-
 from datetime import datetime
 from datetime import timezone
+from uuid import UUID
 
 from sqlalchemy import asc
 from sqlalchemy import delete

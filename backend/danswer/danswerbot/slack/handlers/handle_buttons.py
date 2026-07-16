@@ -21,8 +21,8 @@ from danswer.danswerbot.slack.constants import DISLIKE_BLOCK_ACTION_ID
 from danswer.danswerbot.slack.constants import ENABLE_CURATED_RESPONSE_KEY
 from danswer.danswerbot.slack.constants import FeedbackVisibility
 from danswer.danswerbot.slack.constants import LIKE_BLOCK_ACTION_ID
-from danswer.danswerbot.slack.constants import SME_VALIDATE_BUTTON_ACTION_ID
 from danswer.danswerbot.slack.constants import RESPONSE_MESSAGE_KEY
+from danswer.danswerbot.slack.constants import SME_VALIDATE_BUTTON_ACTION_ID
 from danswer.danswerbot.slack.constants import USER_ID_KEY
 from danswer.danswerbot.slack.constants import USER_KEY
 from danswer.danswerbot.slack.constants import USER_PROFILE_KEY
@@ -231,9 +231,7 @@ def handle_slack_feedback(
         )
 
 
-def _sme_ephemeral(
-    web_client: WebClient, channel: str, user: str, text: str
-) -> None:
+def _sme_ephemeral(web_client: WebClient, channel: str, user: str, text: str) -> None:
     try:
         make_slack_api_rate_limited(web_client.chat_postEphemeral)(
             channel=channel, user=user, text=text
@@ -284,9 +282,7 @@ def handle_sme_validate_button(
 
     # Resolve the channel's SME user group from its config.
     with Session(get_sqlalchemy_engine()) as db_session:
-        channel_name, _ = get_channel_name_from_id(
-            client=web, channel_id=channel_id
-        )
+        channel_name, _ = get_channel_name_from_id(client=web, channel_id=channel_id)
         cfg = get_slack_bot_config_for_channel(
             channel_name=channel_name, db_session=db_session
         )
@@ -404,9 +400,7 @@ def handle_sme_validate_button(
         verifier = user_id
         try:
             info = web.users_info(user=user_id)
-            verifier = (
-                info.get("user", {}).get("profile", {}).get("email") or user_id
-            )
+            verifier = info.get("user", {}).get("profile", {}).get("email") or user_id
         except Exception:
             pass
         try:

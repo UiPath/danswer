@@ -270,7 +270,8 @@ export function ChatInputBar({
                     key={filteredPersonas.length}
                     target="_blank"
                     className={`${
-                      assistantIconIndex == filteredPersonas.length && "bg-hover"
+                      assistantIconIndex == filteredPersonas.length &&
+                      "bg-hover"
                     } px-3 flex gap-x-1 py-2 w-full  items-center  hover:bg-hover-light cursor-pointer"`}
                     href="/assistants/new"
                   >

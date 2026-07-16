@@ -56,7 +56,10 @@ describe("annotation round-trip (skip-routing correctness)", () => {
 
   it("stripMentionLabel recovers the clean question (multi-word label)", () => {
     expect(
-      stripMentionLabel("@AMER Benefits what is the 401k policy", "AMER Benefits")
+      stripMentionLabel(
+        "@AMER Benefits what is the 401k policy",
+        "AMER Benefits"
+      )
     ).toBe("what is the 401k policy");
     // No annotation -> unchanged.
     expect(stripMentionLabel("plain question", "AMER Benefits")).toBe(
@@ -65,7 +68,9 @@ describe("annotation round-trip (skip-routing correctness)", () => {
   });
 
   it("hasMentionLabel detects the annotation, caret-agnostic", () => {
-    expect(hasMentionLabel("@AMER Benefits how do I", "AMER Benefits")).toBe(true);
+    expect(hasMentionLabel("@AMER Benefits how do I", "AMER Benefits")).toBe(
+      true
+    );
     expect(hasMentionLabel("  @AMER Benefits x", "AMER Benefits")).toBe(true); // leading ws
     expect(hasMentionLabel("how do I", "AMER Benefits")).toBe(false);
     // Annotation removed by the user -> false (selection should be dropped).

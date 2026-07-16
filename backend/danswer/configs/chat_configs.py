@@ -150,7 +150,9 @@ AUTO_SEARCH_SOURCE_TAB_ENABLED = (
 ).lower() == "true"
 AUTO_SEARCH_SOURCE_TAB_SOURCES = [
     s.strip().lower()
-    for s in (os.environ.get("AUTO_SEARCH_SOURCE_TAB_SOURCES") or "highspot,web").split(",")
+    for s in (os.environ.get("AUTO_SEARCH_SOURCE_TAB_SOURCES") or "highspot,web").split(
+        ","
+    )
     if s.strip()
 ]
 # Versioned-docs dedup at final doc selection. Documentation sites publish the

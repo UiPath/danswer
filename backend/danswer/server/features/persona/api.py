@@ -16,8 +16,8 @@ from danswer.db.persona import get_personas
 from danswer.db.persona import mark_persona_as_deleted
 from danswer.db.persona import mark_persona_as_not_deleted
 from danswer.db.persona import update_all_personas_display_priority
-from danswer.db.persona import update_persona_shared_users
 from danswer.db.persona import update_persona_is_router_candidate
+from danswer.db.persona import update_persona_shared_users
 from danswer.db.persona import update_persona_visibility
 from danswer.db.persona_cache import get_personas_for_user_cached
 from danswer.llm.answering.prompts.utils import build_dummy_prompt

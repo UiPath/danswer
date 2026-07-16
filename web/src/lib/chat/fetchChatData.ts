@@ -123,9 +123,10 @@ export async function fetchChatData(searchParams: {
     // round-trip so per-channel Slack links still preselect the assistant after
     // login. The value is re-validated (open-redirect-safe) when it's consumed.
     const qs = new URLSearchParams(
-      Object.entries(searchParams).filter(
-        ([, v]) => typeof v === "string"
-      ) as [string, string][]
+      Object.entries(searchParams).filter(([, v]) => typeof v === "string") as [
+        string,
+        string,
+      ][]
     ).toString();
     const nextTarget = qs ? `/chat?${qs}` : "/chat";
     return {
@@ -194,7 +195,9 @@ export async function fetchChatData(searchParams: {
         });
       }
     } catch (e) {
-      console.log(`Failed to fetch current chat session ${currentChatId} - ${e}`);
+      console.log(
+        `Failed to fetch current chat session ${currentChatId} - ${e}`
+      );
     }
   }
 

@@ -507,9 +507,7 @@ def stream_chat_message_objects(
                             )
                         tool_dict[db_tool_model.id] = [
                             ImageGenerationTool(
-                                api_key=cast(
-                                    str, img_generation_llm_config.api_key
-                                ),
+                                api_key=cast(str, img_generation_llm_config.api_key),
                                 api_base=img_generation_llm_config.api_base,
                                 api_version=img_generation_llm_config.api_version,
                                 additional_headers=litellm_additional_headers,

@@ -616,11 +616,11 @@ export function AssistantEditor({
                 >
                   <>
                     <p className="text-sm text-subtle mb-3">
-                      Controls how the auto-routed Search tab decides when to send
-                      a question to this Assistant. Not shown to users. Evaluated
-                      in order: keywords first, then a fallback that matches the
-                      question to similar past questions from this Assistant&apos;s
-                      Slack help channels.
+                      Controls how the auto-routed Search tab decides when to
+                      send a question to this Assistant. Not shown to users.
+                      Evaluated in order: keywords first, then a fallback that
+                      matches the question to similar past questions from this
+                      Assistant&apos;s Slack help channels.
                     </p>
 
                     <BooleanFormField
@@ -684,7 +684,9 @@ export function AssistantEditor({
                                     render={(arrayHelpers: ArrayHelpers) => {
                                       const selectedDocumentSets =
                                         documentSets.filter((ds) =>
-                                          values.document_set_ids.includes(ds.id)
+                                          values.document_set_ids.includes(
+                                            ds.id
+                                          )
                                         );
                                       const availableDocumentSets =
                                         documentSets.filter(
@@ -713,7 +715,9 @@ export function AssistantEditor({
                                                           documentSet.id
                                                         );
                                                       if (ind !== -1) {
-                                                        arrayHelpers.remove(ind);
+                                                        arrayHelpers.remove(
+                                                          ind
+                                                        );
                                                       }
                                                     }}
                                                   />

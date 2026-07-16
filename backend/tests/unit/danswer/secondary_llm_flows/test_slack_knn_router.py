@@ -57,8 +57,11 @@ def test_channel_of_parses_json_string_and_dict() -> None:
 
 def test_knn_route_confident_vote_no_llm() -> None:
     llm = _FakeLLM("Orchestrator")
-    neighbors = [_n("help-orchestrator", 0.9), _n("help-orchestrator", 0.8),
-                 _n("help-integration-service", 0.2)]
+    neighbors = [
+        _n("help-orchestrator", 0.9),
+        _n("help-orchestrator", 0.8),
+        _n("help-integration-service", 0.2),
+    ]
     res = knn_route("q", neighbors, CH_MAP, _CATALOG, llm)
     assert res.persona_id == 1
     assert res.confidence > 0.6

@@ -35,7 +35,9 @@ const CONTROL_CHARS = /[\x00-\x1f\x7f]/;
  * to after login, or `null` if the input is missing or unsafe. Callers must treat
  * `null` as "fall back to the default landing page".
  */
-export function getSafeNextPath(next: string | null | undefined): string | null {
+export function getSafeNextPath(
+  next: string | null | undefined
+): string | null {
   if (!next || typeof next !== "string") return null;
   if (next.length > MAX_NEXT_LENGTH) return null;
   if (CONTROL_CHARS.test(next)) return null;

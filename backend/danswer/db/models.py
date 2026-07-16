@@ -1712,9 +1712,7 @@ class ChatReferral(Base):
     # The `assistant` URL param as provided (a name); the id is resolved elsewhere.
     assistant_name: Mapped[str | None] = mapped_column(String, nullable=True)
     # Who landed (null for anonymous / auth-disabled).
-    user_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("user.id"), nullable=True
-    )
+    user_id: Mapped[UUID | None] = mapped_column(ForeignKey("user.id"), nullable=True)
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

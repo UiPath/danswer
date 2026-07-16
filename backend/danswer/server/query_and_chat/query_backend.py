@@ -6,74 +6,74 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from danswer.auth.api_key import validate_api_key
+from danswer.auth.schemas import UserRole
 from danswer.auth.users import current_admin_user
 from danswer.auth.users import current_user
+from danswer.configs.chat_configs import ASSISTANT_ROUTER_LLM_MODEL
+from danswer.configs.chat_configs import ASSISTANT_ROUTER_LLM_VENDOR
+from danswer.configs.chat_configs import AUTO_SEARCH_DEFAULT_LLM_MODEL
+from danswer.configs.chat_configs import AUTO_SEARCH_DEFAULT_LLM_VENDOR
+from danswer.configs.chat_configs import AUTO_SEARCH_SOURCE_TAB_ENABLED
+from danswer.configs.chat_configs import AUTO_SEARCH_SOURCE_TAB_SOURCES
+from danswer.configs.chat_configs import AUTO_SEARCH_TOP_N
+from danswer.configs.chat_configs import AUTO_SEARCH_UNION_LLM_MODEL
+from danswer.configs.chat_configs import AUTO_SEARCH_UNION_LLM_VENDOR
+from danswer.configs.chat_configs import AUTO_SEARCH_UNION_PERSONA_ID
 from danswer.configs.constants import DocumentSource
+from danswer.configs.constants import MessageType
+from danswer.db.constants import SLACK_BOT_PERSONA_PREFIX
 from danswer.db.embedding_model import get_current_db_embedding_model
 from danswer.db.engine import get_session
 from danswer.db.models import Persona
 from danswer.db.models import User
+from danswer.db.persona import get_persona_by_id
+from danswer.db.persona_cache import get_personas_for_user_cached
 from danswer.db.tag import get_tags_by_value_prefix_for_source_types
 from danswer.document_index.factory import get_default_document_index
 from danswer.document_index.vespa.index import VespaIndex
-from danswer.auth.schemas import UserRole
-from danswer.configs.chat_configs import ASSISTANT_ROUTER_LLM_MODEL
-from danswer.configs.chat_configs import ASSISTANT_ROUTER_LLM_VENDOR
-from danswer.configs.chat_configs import AUTO_SEARCH_TOP_N
-from danswer.configs.chat_configs import AUTO_SEARCH_UNION_PERSONA_ID
-from danswer.configs.chat_configs import AUTO_SEARCH_UNION_LLM_VENDOR
-from danswer.configs.chat_configs import AUTO_SEARCH_UNION_LLM_MODEL
-from danswer.configs.chat_configs import AUTO_SEARCH_SOURCE_TAB_ENABLED
-from danswer.configs.chat_configs import AUTO_SEARCH_SOURCE_TAB_SOURCES
-from danswer.configs.chat_configs import AUTO_SEARCH_DEFAULT_LLM_VENDOR
-from danswer.configs.chat_configs import AUTO_SEARCH_DEFAULT_LLM_MODEL
-from danswer.llm.override_models import LLMOverride
-from danswer.search.models import BaseFilters
-from danswer.configs.constants import MessageType
-from danswer.db.constants import SLACK_BOT_PERSONA_PREFIX
-from danswer.db.persona import get_persona_by_id
-from danswer.db.persona_cache import get_personas_for_user_cached
 from danswer.llm.factory import get_default_llms
 from danswer.llm.factory import get_llm
 from danswer.llm.interfaces import LLM
+from danswer.llm.override_models import LLMOverride
 from danswer.one_shot_answer.answer_question import get_search_answer
 from danswer.one_shot_answer.answer_question import stream_search_answer
 from danswer.one_shot_answer.models import DirectQARequest
 from danswer.one_shot_answer.models import ThreadMessage
+from danswer.search.models import BaseFilters
+from danswer.search.models import IndexFilters
 from danswer.search.models import OptionalSearchSetting
 from danswer.search.models import RetrievalDetails
+from danswer.search.models import SearchDoc
+from danswer.search.preprocessing.access_filters import build_access_filters_for_user
+from danswer.search.preprocessing.danswer_helper import recommend_search_flow
+from danswer.search.utils import chunks_or_sections_to_search_docs
 from danswer.secondary_llm_flows.assistant_router import build_router_catalog
 from danswer.secondary_llm_flows.assistant_router import keyword_route
+from danswer.secondary_llm_flows.query_validation import get_query_answerability
+from danswer.secondary_llm_flows.query_validation import stream_query_answerability
 from danswer.secondary_llm_flows.slack_knn_router import build_channel_persona_map
 from danswer.secondary_llm_flows.slack_knn_router import knn_route
 from danswer.secondary_llm_flows.slack_knn_router import retrieve_slack_neighbors
+from danswer.server.middleware.request_rate_limit import (
+    check_message_request_rate_limit,
+)
+from danswer.server.query_and_chat.models import AdminSearchRequest
+from danswer.server.query_and_chat.models import AdminSearchResponse
 from danswer.server.query_and_chat.models import AnsweredByAssistant
 from danswer.server.query_and_chat.models import AutoSearchRequest
 from danswer.server.query_and_chat.models import AutoSearchResponse
 from danswer.server.query_and_chat.models import AutoSearchSourcesRequest
 from danswer.server.query_and_chat.models import AutoSearchUnionRequest
 from danswer.server.query_and_chat.models import AutoSearchUnionResponse
-from danswer.server.query_and_chat.models import SearchedAssistant
-from danswer.server.settings.models import AutoSearchRollout
-from danswer.server.settings.store import load_settings
-from danswer.search.models import IndexFilters
-from danswer.search.models import SearchDoc
-from danswer.search.preprocessing.access_filters import build_access_filters_for_user
-from danswer.search.preprocessing.danswer_helper import recommend_search_flow
-from danswer.search.utils import chunks_or_sections_to_search_docs
-from danswer.secondary_llm_flows.query_validation import get_query_answerability
-from danswer.secondary_llm_flows.query_validation import stream_query_answerability
-from danswer.server.middleware.request_rate_limit import (
-    check_message_request_rate_limit,
-)
-from danswer.server.query_and_chat.models import AdminSearchRequest
-from danswer.server.query_and_chat.models import AdminSearchResponse
 from danswer.server.query_and_chat.models import HelperResponse
 from danswer.server.query_and_chat.models import QueryValidationResponse
+from danswer.server.query_and_chat.models import SearchedAssistant
 from danswer.server.query_and_chat.models import SimpleQueryRequest
 from danswer.server.query_and_chat.models import SourceTag
 from danswer.server.query_and_chat.models import TagResponse
 from danswer.server.query_and_chat.token_limit import check_token_rate_limits
+from danswer.server.settings.models import AutoSearchRollout
+from danswer.server.settings.store import load_settings
 from danswer.utils.logger import setup_logger
 
 logger = setup_logger()
@@ -345,9 +345,7 @@ def auto_search(
                 ranked_ids = route.ranked_ids
                 route_ambiguous = route.ambiguous
             except Exception as e:
-                logger.warning(
-                    "Auto-search routing unavailable, using fallback: %s", e
-                )
+                logger.warning("Auto-search routing unavailable, using fallback: %s", e)
 
     def _resolve(pid: int) -> Persona | None:
         """ACL-checked persona fetch; None if inaccessible/missing."""
@@ -470,11 +468,17 @@ def _compare_answer(
     model (default Sonnet). Fail-safe -> error_msg."""
     try:
         union_persona = get_persona_by_id(
-            AUTO_SEARCH_UNION_PERSONA_ID, user=user, db_session=db_session, is_for_edit=False
+            AUTO_SEARCH_UNION_PERSONA_ID,
+            user=user,
+            db_session=db_session,
+            is_for_edit=False,
         )
     except Exception:
         union_persona = get_persona_by_id(
-            DEFAULT_SEARCH_PERSONA_ID, user=user, db_session=db_session, is_for_edit=False
+            DEFAULT_SEARCH_PERSONA_ID,
+            user=user,
+            db_session=db_session,
+            is_for_edit=False,
         )
     prompt_id = union_persona.prompts[0].id if union_persona.prompts else 0
     override = (
@@ -508,7 +512,9 @@ def _compare_answer(
         )
     except Exception as e:
         logger.warning("Auto-search compare answer failed: %s", e)
-        return AutoSearchUnionResponse(error_msg="Could not generate the compare answer.")
+        return AutoSearchUnionResponse(
+            error_msg="Could not generate the compare answer."
+        )
     return AutoSearchUnionResponse(
         answer=response.answer,
         citations=response.citations,
@@ -530,7 +536,8 @@ def auto_search_union(
     of the given assistants' document sets, using the compare model (default Sonnet).
     Lazy-fetched by the UI after the primary answer arrives, so neither answer blocks
     the other. The caller passes the persona ids from AutoSearchResponse.union_assistants
-    (no re-routing here — the union scope stays consistent with the primary response)."""
+    (no re-routing here — the union scope stays consistent with the primary response).
+    """
     settings = load_settings()
     if not _auto_search_allowed(settings.auto_search_rollout, user):
         raise HTTPException(
@@ -584,7 +591,9 @@ def auto_search_sources(
             status_code=403, detail="Auto-search is not enabled for your account."
         )
     if not (settings.auto_search_compare_enabled and AUTO_SEARCH_SOURCE_TAB_ENABLED):
-        raise HTTPException(status_code=403, detail="The source compare tab is disabled.")
+        raise HTTPException(
+            status_code=403, detail="The source compare tab is disabled."
+        )
 
     try:
         source_types = [DocumentSource(s) for s in AUTO_SEARCH_SOURCE_TAB_SOURCES]
