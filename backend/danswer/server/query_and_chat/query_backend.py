@@ -265,6 +265,8 @@ def _get_router_catalog(user: User | None, db_session: Session) -> list:
         if snapshot.is_visible
         and not snapshot.default_persona
         and not snapshot.name.startswith(SLACK_BOT_PERSONA_PREFIX)
+        # Admin opt-out: exclude assistants flagged out of auto-routing.
+        and snapshot.is_router_candidate
     ]
     return build_router_catalog(routable)
 

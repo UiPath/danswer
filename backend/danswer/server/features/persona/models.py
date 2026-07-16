@@ -23,6 +23,9 @@ class CreatePersonaRequest(BaseModel):
     # Comma-separated keywords that deterministically route to this assistant
     # (the auto-routed Search tab; never shown to users).
     routing_keywords: str | None = None
+    # Whether this assistant participates in the auto-routed Search tab
+    # (keyword route + kNN fallback). Default true.
+    is_router_candidate: bool = True
     num_chunks: float
     llm_relevance_filter: bool
     is_public: bool
@@ -53,6 +56,7 @@ class PersonaSnapshot(BaseModel):
     display_priority: int | None
     description: str
     routing_keywords: str | None
+    is_router_candidate: bool = True
     num_chunks: float | None
     llm_relevance_filter: bool
     llm_filter_extraction: bool
@@ -92,6 +96,7 @@ class PersonaSnapshot(BaseModel):
             display_priority=persona.display_priority,
             description=persona.description,
             routing_keywords=persona.routing_keywords,
+            is_router_candidate=persona.is_router_candidate,
             num_chunks=persona.num_chunks,
             llm_relevance_filter=persona.llm_relevance_filter,
             llm_filter_extraction=persona.llm_filter_extraction,

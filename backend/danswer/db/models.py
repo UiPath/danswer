@@ -1028,6 +1028,13 @@ class Persona(Base):
     # deployment"). Blank => no keyword override; the LLM router decides. See
     # secondary_llm_flows/assistant_router.keyword_route.
     routing_keywords: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Whether this assistant is a candidate for the auto-routed Search tab. When
+    # false it's excluded from BOTH the keyword route and the kNN fallback (still
+    # manually selectable / @mentionable). Default true => every assistant
+    # participates in routing.
+    is_router_candidate: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default="true"
+    )
     # DEPRECATED / inert. Was the semantic intent-phrase pre-route; the kNN-over-
     # Slack router replaced that logic, so nothing reads or writes this anymore.
     # Column retained (no migration) to avoid dropping data; safe to drop later.

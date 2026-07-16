@@ -313,6 +313,7 @@ export function AssistantEditor({
     display_name: existingPersona?.display_name ?? "",
     description: existingPersona?.description ?? "",
     routing_keywords: existingPersona?.routing_keywords ?? "",
+    is_router_candidate: existingPersona?.is_router_candidate ?? true,
     system_prompt: existingPrompt?.system_prompt ?? "",
     task_prompt: existingPrompt?.task_prompt ?? "",
     is_public: existingPersona?.is_public ?? defaultPublic,
@@ -621,6 +622,12 @@ export function AssistantEditor({
                       question to similar past questions from this Assistant&apos;s
                       Slack help channels.
                     </p>
+
+                    <BooleanFormField
+                      name="is_router_candidate"
+                      label="Include in auto-routing"
+                      subtext="When on, the auto-routed Search tab may pick this Assistant. Turn off to exclude it from automatic routing decisions (keyword + similarity) while keeping it manually selectable."
+                    />
 
                     <RoutingKeywordsField />
                   </>
