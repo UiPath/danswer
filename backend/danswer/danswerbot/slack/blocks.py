@@ -479,7 +479,7 @@ def build_sme_validation_block(message_id: int | None) -> ActionsBlock:
             ButtonElement(
                 action_id=SME_VALIDATE_BUTTON_ACTION_ID,
                 style="danger",
-                text="Yet to be verified by an SME",
+                text="Awaiting SME Review",
             )
         ],
     )

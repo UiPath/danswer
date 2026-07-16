@@ -1149,10 +1149,10 @@ class ChannelConfig(TypedDict):
     prioritized_sources: NotRequired[list[str]]
     # OpsGenie schedule name for DRI on-call
     opsgenie_schedule: NotRequired[str]
-    # Opt-in: show a "Yet to be verified by an SME" button on bot answers in this
-    # channel. Only members of the Slack user group named `sme_group_name` (its
-    # display name or @handle — resolved to an id live) can verify, so leavers are
-    # handled automatically.
+    # Opt-in: show an "Awaiting SME Review" button on bot answers in this
+    # channel. `sme_group_name` is a comma-separated list of Slack user groups
+    # (display name or @handle — resolved to ids live); a member of ANY listed
+    # group can verify, so leavers are handled automatically.
     enable_sme_validation: NotRequired[bool]
     sme_group_name: NotRequired[str]
     # JIRA title filter for creating tickets

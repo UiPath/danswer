@@ -255,7 +255,7 @@ def handle_sme_validate_button(
     req: SocketModeRequest,
     client: SocketModeClient,
 ) -> None:
-    """'Yet to be verified by an SME' button. Only members of the channel's
+    """'Awaiting SME Review' button. Only members of the channel's
     configured Slack user group may verify (checked live, so leavers are handled).
     On success the red button is swapped for a green 'Verified by an SME' badge
     naming the verifier. Non-members get a private rejection; re-clicks are no-ops."""
@@ -305,11 +305,24 @@ def handle_sme_validate_button(
         )
         return
 
-    # Resolve the configured group name/@handle -> id (live), so config stays
+    # `sme_group_name` is a comma-separated list of group names/@handles; a clicker
+    # who belongs to ANY of them may verify.
+    sme_group_names = [n.strip() for n in sme_group_name.split(",") if n.strip()]
+    if not sme_group_names:
+        _sme_ephemeral(
+            web,
+            channel_id,
+            user_id,
+            "SME verification isn't configured for this channel.",
+        )
+        return
+
+    # Resolve the configured group names/@handles -> ids (live), so config stays
     # human-friendly and renames of members are irrelevant.
-    group_ids, _failed = fetch_groupids_from_names([sme_group_name], web)
+    group_ids, failed_names = fetch_groupids_from_names(sme_group_names, web)
+    if failed_names:
+        logger_base.error("SME group(s) not found in workspace: %r", failed_names)
     if not group_ids:
-        logger_base.error("SME group %r not found in workspace", sme_group_name)
         _sme_ephemeral(
             web,
             channel_id,
@@ -317,15 +330,23 @@ def handle_sme_validate_button(
             "The configured SME group couldn't be found — please check the channel setup.",
         )
         return
-    sme_group_id = group_ids[0]
 
-    # AUTHORIZE (trusted side): clicker must be a LIVE member of the SME user group.
-    try:
-        members = make_slack_api_rate_limited(web.usergroups_users_list)(
-            usergroup=sme_group_id
-        )["users"]
-    except Exception:
-        logger_base.exception("Failed to fetch SME user group %s", sme_group_id)
+    # AUTHORIZE (trusted side): clicker must be a LIVE member of at least one SME
+    # user group. Fetch members per group and union them; a per-group fetch error
+    # is skipped (other groups can still authorize).
+    members: set[str] = set()
+    fetch_errors = 0
+    for gid in group_ids:
+        try:
+            members.update(
+                make_slack_api_rate_limited(web.usergroups_users_list)(usergroup=gid)[
+                    "users"
+                ]
+            )
+        except Exception:
+            fetch_errors += 1
+            logger_base.exception("Failed to fetch SME user group %s", gid)
+    if not members and fetch_errors:
         _sme_ephemeral(
             web,
             channel_id,

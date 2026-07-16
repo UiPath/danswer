@@ -356,13 +356,13 @@ export const SlackBotCreationForm = ({
                 <BooleanFormField
                   name="enable_sme_validation"
                   label="Enable SME verification"
-                  subtext="Adds a 'Yet to be verified by an SME' button to answers in this channel. Members of the SME Slack group below can click it to mark an answer as verified (turns green), so readers know it's trustworthy."
+                  subtext="Adds an 'Awaiting SME Review' button to answers in this channel. Members of the SME Slack group below can click it to mark an answer as verified (turns green), so readers know it's trustworthy."
                 />
                 {values.enable_sme_validation && (
                   <TextFormField
                     name="sme_group_name"
-                    label="SME Slack user group"
-                    subtext="The Slack user group whose members may verify answers — its display name or @handle (e.g. 'Automation Suite SMEs' or 'as-smes'). Membership is checked live, so people who leave the group lose the ability automatically."
+                    label="SME Slack user group(s)"
+                    subtext="The Slack user group(s) whose members may verify answers — display name or @handle. Separate multiple groups with commas (e.g. 'Automation Suite SMEs, as-smes'); a member of any listed group can verify. Membership is checked live, so people who leave lose the ability automatically."
                   />
                 )}
 
