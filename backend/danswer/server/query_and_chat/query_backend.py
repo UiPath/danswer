@@ -20,10 +20,11 @@ from danswer.auth.schemas import UserRole
 from danswer.configs.chat_configs import ASSISTANT_ROUTER_LLM_MODEL
 from danswer.configs.chat_configs import ASSISTANT_ROUTER_LLM_VENDOR
 from danswer.configs.chat_configs import AUTO_SEARCH_TOP_N
-from danswer.configs.chat_configs import AUTO_SEARCH_INTENT_THRESHOLD
 from danswer.configs.chat_configs import AUTO_SEARCH_UNION_PERSONA_ID
 from danswer.configs.chat_configs import AUTO_SEARCH_UNION_LLM_VENDOR
 from danswer.configs.chat_configs import AUTO_SEARCH_UNION_LLM_MODEL
+from danswer.configs.chat_configs import AUTO_SEARCH_SOURCE_TAB_ENABLED
+from danswer.configs.chat_configs import AUTO_SEARCH_SOURCE_TAB_SOURCES
 from danswer.configs.chat_configs import AUTO_SEARCH_DEFAULT_LLM_VENDOR
 from danswer.configs.chat_configs import AUTO_SEARCH_DEFAULT_LLM_MODEL
 from danswer.llm.override_models import LLMOverride
@@ -42,12 +43,14 @@ from danswer.one_shot_answer.models import ThreadMessage
 from danswer.search.models import OptionalSearchSetting
 from danswer.search.models import RetrievalDetails
 from danswer.secondary_llm_flows.assistant_router import build_router_catalog
-from danswer.secondary_llm_flows.assistant_router import intent_route
 from danswer.secondary_llm_flows.assistant_router import keyword_route
-from danswer.secondary_llm_flows.assistant_router import route_question
+from danswer.secondary_llm_flows.slack_knn_router import build_channel_persona_map
+from danswer.secondary_llm_flows.slack_knn_router import knn_route
+from danswer.secondary_llm_flows.slack_knn_router import retrieve_slack_neighbors
 from danswer.server.query_and_chat.models import AnsweredByAssistant
 from danswer.server.query_and_chat.models import AutoSearchRequest
 from danswer.server.query_and_chat.models import AutoSearchResponse
+from danswer.server.query_and_chat.models import AutoSearchSourcesRequest
 from danswer.server.query_and_chat.models import AutoSearchUnionRequest
 from danswer.server.query_and_chat.models import AutoSearchUnionResponse
 from danswer.server.query_and_chat.models import SearchedAssistant
@@ -297,6 +300,9 @@ def auto_search(
     # scope); the rest become "recommended assistants" the user can chat with next.
     # Empty for keyword routes and @mentions (nothing to recommend).
     ranked_ids: list[int] = []
+    # True only when the kNN router had to break a close call — the trigger for the
+    # side-by-side compare (single pick vs. union of the top-N).
+    route_ambiguous = False
     if auto_search_request.persona_id is not None:
         # User explicitly @mentioned an assistant — skip the LLM router and
         # invoke it directly. Still ACL-re-checked below via get_persona_by_id.
@@ -309,40 +315,33 @@ def auto_search(
         catalog = _get_router_catalog(user, db_session)
         target_persona_id = DEFAULT_SEARCH_PERSONA_ID
         # 1) Deterministic keyword override (no LLM call) — additive: only fires
-        #    when a configured keyword matches; otherwise falls through to the LLM.
+        #    when a configured keyword matches; otherwise falls through.
         kw = keyword_route(question, catalog)
-        # Semantic intent pre-route is OFF unless an admin enables it (default off).
-        intent = (
-            intent_route(
-                question,
-                catalog,
-                _get_router_llm(),
-                min_confidence=AUTO_SEARCH_INTENT_THRESHOLD,
-            )
-            if kw is None and settings.auto_search_intent_enabled
-            else None
-        )
         if kw is not None and kw.persona_id is not None:
             target_persona_id = kw.persona_id
             routed_confidence = kw.confidence
-        elif intent is not None and intent.persona_id is not None:
-            # 2) Semantic intent pre-route: an LLM matches the question against all
-            #    assistants' intent phrases (high-confidence gate). Single scope
-            #    like the keyword route; no recommendations. On no confident match
-            #    it returns None and we fall through to the instruction router.
-            target_persona_id = intent.persona_id
-            routed_confidence = intent.confidence
         else:
-            # 3) LLM router — returns a best-first top-N ranking in one call. The #1
-            #    answers (single scope); ranks 2..N become the recommendations.
+            # 2) kNN-over-Slack fallback (replaces the LLM routing-instructions
+            #    logic): nearest-neighbor over past slack help-channel questions,
+            #    labeled channel -> persona, weighted vote + an LLM tiebreak on the
+            #    low-confidence cases. Self-maintaining; no routing_instructions.
+            #    The vote ranking populates ranks 2..N (the recommendations).
             try:
-                route = route_question(
-                    question, catalog, _get_router_llm(), top_n=AUTO_SEARCH_TOP_N
+                neighbors = retrieve_slack_neighbors(question, db_session)
+                channel_map = build_channel_persona_map(db_session)
+                route = knn_route(
+                    question,
+                    neighbors,
+                    channel_map,
+                    catalog,
+                    _get_router_llm(),
+                    top_n=AUTO_SEARCH_TOP_N,
                 )
                 if route.persona_id is not None:
                     target_persona_id = route.persona_id
                 routed_confidence = route.confidence
                 ranked_ids = route.ranked_ids
+                route_ambiguous = route.ambiguous
             except Exception as e:
                 logger.warning(
                     "Auto-search routing unavailable, using fallback: %s", e
@@ -419,11 +418,13 @@ def auto_search(
     # and list the assistants it should span (the router's top-N). The union answer
     # itself is produced by /query/auto-search/union, lazy-fetched by the UI AFTER
     # this response — so the top-1 answer is never held up by a second generation.
-    # Only offered on LLM-router picks (ranked_ids populated); keyword routes /
-    # @mentions stay single-answer.
+    # Only offered when the kNN router had to break a close call (route_ambiguous):
+    # the pick is uncertain, so we show its single-scope answer next to the broader
+    # top-N union. Confident keyword / high-confidence kNN routes / @mentions stay
+    # single-answer.
     compare_enabled = False
     union_assistants: list[SearchedAssistant] = []
-    if settings.auto_search_compare_enabled and ranked_ids:
+    if settings.auto_search_compare_enabled and route_ambiguous and ranked_ids:
         for pid in ranked_ids[:AUTO_SEARCH_TOP_N]:
             alt = _resolve(pid)
             if alt is not None:
@@ -450,6 +451,67 @@ def auto_search(
         ),
         compare_enabled=compare_enabled,
         union_assistants=union_assistants,
+        # Third tab (HighSpot + docs sites) rides along with the compare view.
+        source_tab_enabled=compare_enabled and AUTO_SEARCH_SOURCE_TAB_ENABLED,
+    )
+
+
+def _compare_answer(
+    question: str,
+    filters: BaseFilters,
+    user: User | None,
+    db_session: Session,
+) -> AutoSearchUnionResponse:
+    """Answer `question` with the fence-less union persona under `filters` (which IS
+    the scope, since the persona has no document sets of its own). Shared by the
+    union (document_set) and sources (source_type) compare tabs; uses the compare
+    model (default Sonnet). Fail-safe -> error_msg."""
+    try:
+        union_persona = get_persona_by_id(
+            AUTO_SEARCH_UNION_PERSONA_ID, user=user, db_session=db_session, is_for_edit=False
+        )
+    except Exception:
+        union_persona = get_persona_by_id(
+            DEFAULT_SEARCH_PERSONA_ID, user=user, db_session=db_session, is_for_edit=False
+        )
+    prompt_id = union_persona.prompts[0].id if union_persona.prompts else 0
+    override = (
+        LLMOverride(
+            model_provider=AUTO_SEARCH_UNION_LLM_VENDOR,
+            model_version=AUTO_SEARCH_UNION_LLM_MODEL,
+        )
+        if AUTO_SEARCH_UNION_LLM_VENDOR and AUTO_SEARCH_UNION_LLM_MODEL
+        else None
+    )
+    try:
+        response = get_search_answer(
+            query_req=DirectQARequest(
+                messages=[
+                    ThreadMessage(message=question, sender=None, role=MessageType.USER)
+                ],
+                prompt_id=prompt_id,
+                persona_id=union_persona.id,
+                retrieval_options=RetrievalDetails(
+                    run_search=OptionalSearchSetting.ALWAYS,
+                    real_time=False,
+                    filters=filters,
+                ),
+            ),
+            user=user,
+            max_document_tokens=None,
+            max_history_tokens=0,
+            db_session=db_session,
+            use_citations=True,
+            llm_override=override,
+        )
+    except Exception as e:
+        logger.warning("Auto-search compare answer failed: %s", e)
+        return AutoSearchUnionResponse(error_msg="Could not generate the compare answer.")
+    return AutoSearchUnionResponse(
+        answer=response.answer,
+        citations=response.citations,
+        docs=response.docs,
+        error_msg=response.error_msg,
     )
 
 
@@ -493,51 +555,44 @@ def auto_search_union(
     if resolved == 0:
         return AutoSearchUnionResponse(error_msg="No accessible assistants to compare.")
 
-    try:
-        union_persona = get_persona_by_id(
-            AUTO_SEARCH_UNION_PERSONA_ID, user=user, db_session=db_session, is_for_edit=False
-        )
-    except Exception:
-        union_persona = get_persona_by_id(
-            DEFAULT_SEARCH_PERSONA_ID, user=user, db_session=db_session, is_for_edit=False
-        )
-    union_prompt_id = union_persona.prompts[0].id if union_persona.prompts else 0
-    union_override = (
-        LLMOverride(
-            model_provider=AUTO_SEARCH_UNION_LLM_VENDOR,
-            model_version=AUTO_SEARCH_UNION_LLM_MODEL,
-        )
-        if AUTO_SEARCH_UNION_LLM_VENDOR and AUTO_SEARCH_UNION_LLM_MODEL
-        else None
+    return _compare_answer(
+        question,
+        BaseFilters(document_set=sorted(union_set_names) or None),
+        user,
+        db_session,
     )
-    try:
-        union_response = get_search_answer(
-            query_req=DirectQARequest(
-                messages=[
-                    ThreadMessage(message=question, sender=None, role=MessageType.USER)
-                ],
-                prompt_id=union_prompt_id,
-                persona_id=union_persona.id,
-                retrieval_options=RetrievalDetails(
-                    run_search=OptionalSearchSetting.ALWAYS,
-                    real_time=False,
-                    filters=BaseFilters(document_set=sorted(union_set_names) or None),
-                ),
-            ),
-            user=user,
-            max_document_tokens=None,
-            max_history_tokens=0,
-            db_session=db_session,
-            use_citations=True,
-            llm_override=union_override,
-        )
-    except Exception as e:
-        logger.warning("Auto-search union answer failed: %s", e)
-        return AutoSearchUnionResponse(error_msg="Could not generate the compare answer.")
 
-    return AutoSearchUnionResponse(
-        answer=union_response.answer,
-        citations=union_response.citations,
-        docs=union_response.docs,
-        error_msg=union_response.error_msg,
+
+@basic_router.post("/auto-search/sources")
+def auto_search_sources(
+    sources_request: AutoSearchSourcesRequest,
+    request: Request,
+    user: User = Depends(current_user),
+    db_session: Session = Depends(get_session),
+    _rate_limit: None = Depends(check_message_request_rate_limit),
+    _: None = Depends(check_token_rate_limits),
+) -> AutoSearchUnionResponse:
+    """Third (compare) answer for the Search tab: answer scoped to a FIXED set of
+    SOURCE TYPES (default HighSpot + the docs.uipath.com web crawls), configured via
+    AUTO_SEARCH_SOURCE_TAB_SOURCES. Lazy-fetched by the UI alongside the union tab;
+    uses the compare model. Sources are server-side (not client-controlled)."""
+    settings = load_settings()
+    if not _auto_search_allowed(settings.auto_search_rollout, user):
+        raise HTTPException(
+            status_code=403, detail="Auto-search is not enabled for your account."
+        )
+    if not (settings.auto_search_compare_enabled and AUTO_SEARCH_SOURCE_TAB_ENABLED):
+        raise HTTPException(status_code=403, detail="The source compare tab is disabled.")
+
+    try:
+        source_types = [DocumentSource(s) for s in AUTO_SEARCH_SOURCE_TAB_SOURCES]
+    except ValueError as e:
+        logger.error("Invalid AUTO_SEARCH_SOURCE_TAB_SOURCES: %s", e)
+        return AutoSearchUnionResponse(error_msg="Source compare tab is misconfigured.")
+
+    return _compare_answer(
+        sources_request.message,
+        BaseFilters(source_type=source_types or None),
+        user,
+        db_session,
     )

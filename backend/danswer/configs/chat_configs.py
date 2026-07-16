@@ -102,13 +102,14 @@ ASSISTANT_ROUTER_LLM_MODEL = os.environ.get("ASSISTANT_ROUTER_LLM_MODEL") or ""
 # surfaced as "recommended assistants" the user can chat with next if #1 wasn't
 # right. Default 3 => 1 answerer + up to 2 recommendations.
 AUTO_SEARCH_TOP_N = int(os.environ.get("AUTO_SEARCH_TOP_N") or 3)
-# Semantic intent pre-route (between the keyword pre-route and the LLM instruction
-# router). An LLM matches the question against all assistants' routing_intents
-# phrases in one call; it routes only when the LLM's reported confidence is >= this
-# value. High by default, because a fire is a deterministic route that skips the
-# instruction router — raise it to fire less (more falls through to the router).
-AUTO_SEARCH_INTENT_THRESHOLD = float(
-    os.environ.get("AUTO_SEARCH_INTENT_THRESHOLD") or 0.8
+# kNN-over-Slack router (the fallback after keyword_route; replaces the LLM
+# routing-instructions logic). Number of slack thread-start neighbors to vote over.
+SLACK_KNN_ROUTER_TOP_K = int(os.environ.get("SLACK_KNN_ROUTER_TOP_K") or 15)
+# Below this vote confidence (winner_weight / total_weight) the router asks the fast
+# LLM to break the tie among the retrieved neighbors' assistants. Tuned from the
+# prototype where correct routes averaged ~0.70 and wrong ones ~0.43.
+SLACK_KNN_ROUTER_LLM_CONF_THRESHOLD = float(
+    os.environ.get("SLACK_KNN_ROUTER_LLM_CONF_THRESHOLD") or 0.6
 )
 # Side-by-side "compare" answer for the auto-routed Search tab: alongside the
 # single top-1 answer, also answer over the UNION of the router's top-N assistants'
@@ -133,6 +134,18 @@ AUTO_SEARCH_UNION_LLM_MODEL = (
 # persona's own default model (prod: gpt-4o). Set to force a specific model.
 AUTO_SEARCH_DEFAULT_LLM_VENDOR = os.environ.get("AUTO_SEARCH_DEFAULT_LLM_VENDOR") or ""
 AUTO_SEARCH_DEFAULT_LLM_MODEL = os.environ.get("AUTO_SEARCH_DEFAULT_LLM_MODEL") or ""
+# Third compare tab: answer scoped to a fixed, small set of SOURCE TYPES (not
+# document sets) — by default HighSpot (sales enablement) + the docs.uipath.com web
+# crawls ("all the docs sites"). Rides along with the compare view (only shown when
+# compare_enabled). Comma-separated DocumentSource values.
+AUTO_SEARCH_SOURCE_TAB_ENABLED = (
+    os.environ.get("AUTO_SEARCH_SOURCE_TAB_ENABLED") or "true"
+).lower() == "true"
+AUTO_SEARCH_SOURCE_TAB_SOURCES = [
+    s.strip().lower()
+    for s in (os.environ.get("AUTO_SEARCH_SOURCE_TAB_SOURCES") or "highspot,web").split(",")
+    if s.strip()
+]
 # Versioned-docs dedup at final doc selection. Documentation sites publish the
 # SAME page under one URL per product version (e.g. docs.uipath.com/.../2024.10/…
 # and /.../2023.10/… and /.../2.2510/…). Retrieval then floods the LLM context

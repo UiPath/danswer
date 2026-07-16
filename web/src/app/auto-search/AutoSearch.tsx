@@ -83,8 +83,12 @@ interface AutoSearchResponse {
   // lazy-fetched from /query/auto-search/union so it never blocks this answer.
   compare_enabled: boolean;
   union_assistants: SearchedAssistant[];
+  // Third tab (rides along with compare): an answer scoped to HighSpot + the docs
+  // sites, lazy-fetched from /query/auto-search/sources.
+  source_tab_enabled: boolean;
 }
-// The lazily-fetched second answer (union of the top assistants' document sets).
+// The lazily-fetched second/third answer (union of doc sets, or the source-scoped
+// answer). Same shape for both.
 interface AutoSearchUnionResponse {
   answer: string | null;
   docs: { top_documents: AutoSearchDoc[] } | null;
@@ -126,12 +130,17 @@ export function AutoSearch({ userRole }: { userRole: string | null }) {
   const [result, setResult] = useState<AutoSearchResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Compare view: which tab is showing, and the lazily-fetched union answer.
-  const [activeTab, setActiveTab] = useState<"top" | "union">("top");
+  const [activeTab, setActiveTab] = useState<"top" | "union" | "sources">("top");
   const [unionResult, setUnionResult] = useState<AutoSearchUnionResponse | null>(
     null
   );
   const [unionLoading, setUnionLoading] = useState(false);
   const [unionError, setUnionError] = useState<string | null>(null);
+  // Third (source-scoped: HighSpot + docs) compare answer, also lazy-fetched.
+  const [sourceResult, setSourceResult] =
+    useState<AutoSearchUnionResponse | null>(null);
+  const [sourceLoading, setSourceLoading] = useState(false);
+  const [sourceError, setSourceError] = useState<string | null>(null);
   // chat_message_id -> the feedback already submitted for it (one per answer).
   const [feedbackGiven, setFeedbackGiven] = useState<"like" | "dislike" | null>(
     null
@@ -297,6 +306,9 @@ export function AutoSearch({ userRole }: { userRole: string | null }) {
     setUnionResult(null);
     setUnionError(null);
     setUnionLoading(false);
+    setSourceResult(null);
+    setSourceError(null);
+    setSourceLoading(false);
     try {
       const response = await fetch("/api/query/auto-search", {
         method: "POST",
@@ -319,6 +331,10 @@ export function AutoSearch({ userRole }: { userRole: string | null }) {
           trimmed,
           data.union_assistants.map((a) => a.persona_id)
         );
+      }
+      // Third tab (HighSpot + docs sites) — also lazy, in parallel with the union.
+      if (data.compare_enabled && data.source_tab_enabled) {
+        void fetchSourceAnswer(trimmed);
       }
     } catch {
       setError("Something went wrong running the search.");
@@ -345,6 +361,27 @@ export function AutoSearch({ userRole }: { userRole: string | null }) {
       setUnionError("Something went wrong generating the compare answer.");
     } finally {
       setUnionLoading(false);
+    }
+  }
+
+  async function fetchSourceAnswer(message: string) {
+    setSourceLoading(true);
+    setSourceError(null);
+    try {
+      const response = await fetch("/api/query/auto-search/sources", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message }),
+      });
+      if (!response.ok) {
+        setSourceError(`Compare answer failed (${response.status}).`);
+        return;
+      }
+      setSourceResult((await response.json()) as AutoSearchUnionResponse);
+    } catch {
+      setSourceError("Something went wrong generating the compare answer.");
+    } finally {
+      setSourceLoading(false);
     }
   }
 
@@ -383,6 +420,11 @@ export function AutoSearch({ userRole }: { userRole: string | null }) {
   const unionAnswer = unionResult?.answer ?? null;
   const unionDocs = unionResult?.docs?.top_documents ?? [];
   const unionDisplayError = unionError || unionResult?.error_msg || null;
+  // Third tab: HighSpot + docs sites (source-scoped).
+  const sourceTabOn = !!result?.source_tab_enabled;
+  const sourceAnswer = sourceResult?.answer ?? null;
+  const sourceDocs = sourceResult?.docs?.top_documents ?? [];
+  const sourceDisplayError = sourceError || sourceResult?.error_msg || null;
   const assistantLabel = (a: SearchedAssistant) =>
     a.display_name?.trim() ? a.display_name : a.name;
   // "A", "A and B", "A, B and C"
@@ -650,6 +692,23 @@ export function AutoSearch({ userRole }: { userRole: string | null }) {
                       <span className="h-3 w-3 animate-spin rounded-full border-2 border-border-medium border-t-accent" />
                     )}
                   </button>
+                  {sourceTabOn && (
+                    <button
+                      role="tab"
+                      aria-selected={activeTab === "sources"}
+                      onClick={() => setActiveTab("sources")}
+                      className={`-mb-px flex items-center gap-2 border-b-2 pb-2.5 text-sm font-medium transition-colors ${
+                        activeTab === "sources"
+                          ? "border-accent text-default"
+                          : "border-transparent text-subtle hover:text-default"
+                      }`}
+                    >
+                      HighSpot &amp; Docs
+                      {sourceLoading && (
+                        <span className="h-3 w-3 animate-spin rounded-full border-2 border-border-medium border-t-accent" />
+                      )}
+                    </button>
+                  )}
                 </div>
 
                 {activeTab === "top" ? (
@@ -667,7 +726,7 @@ export function AutoSearch({ userRole }: { userRole: string | null }) {
                     {answerBody(result.answer)}
                     {sourcesBlock(topDocs)}
                   </div>
-                ) : (
+                ) : activeTab === "union" ? (
                   <div>
                     {unionAssistants.length > 0 && (
                       <div className="mb-3 text-xs text-subtle">
@@ -697,6 +756,32 @@ export function AutoSearch({ userRole }: { userRole: string | null }) {
                     ) : (
                       <div className="py-4 text-sm text-subtle">
                         No combined answer available.
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div>
+                    <div className="mb-3 text-xs text-subtle">
+                      From{" "}
+                      <span className="text-default">HighSpot &amp; the docs sites</span>
+                    </div>
+                    {sourceLoading ? (
+                      <div className="flex items-center gap-3 py-8 text-sm text-subtle">
+                        <span className="h-4 w-4 animate-spin rounded-full border-2 border-border-medium border-t-accent" />
+                        Generating an answer from HighSpot &amp; the docs sites…
+                      </div>
+                    ) : sourceDisplayError ? (
+                      <div className="py-4 text-sm text-error">
+                        {sourceDisplayError}
+                      </div>
+                    ) : sourceAnswer ? (
+                      <>
+                        {answerBody(sourceAnswer)}
+                        {sourcesBlock(sourceDocs)}
+                      </>
+                    ) : (
+                      <div className="py-4 text-sm text-subtle">
+                        No answer available from these sources.
                       </div>
                     )}
                   </div>

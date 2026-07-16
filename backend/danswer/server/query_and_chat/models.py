@@ -285,6 +285,18 @@ class AutoSearchResponse(BaseModel):
     # so the union scope is guaranteed consistent with this response. Computing this
     # is cheap (no second answer generation), so the top-1 answer isn't held up.
     union_assistants: list[SearchedAssistant] = []
+    # True when the third compare tab applies: a fixed source-scoped answer
+    # (HighSpot + the docs sites). Rides along with compare_enabled; the UI
+    # lazy-fetches it via /query/auto-search/sources.
+    source_tab_enabled: bool = False
+
+
+class AutoSearchSourcesRequest(BaseModel):
+    """Lazy third-answer request for the compare view: answer scoped to a fixed set
+    of source types (HighSpot + docs sites), configured server-side. Only `message`
+    is needed — the sources are not client-controlled."""
+
+    message: str
 
 
 class AutoSearchUnionRequest(BaseModel):
