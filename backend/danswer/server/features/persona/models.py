@@ -20,12 +20,9 @@ class CreatePersonaRequest(BaseModel):
     # Optional user-friendly label shown in chat; defaults to `name` if omitted.
     display_name: str | None = None
     description: str
-    # Router-only metadata for the auto-routed Search tab; never shown to users.
-    routing_instructions: str | None = None
-    # Comma-separated keywords that deterministically route to this assistant.
+    # Comma-separated keywords that deterministically route to this assistant
+    # (the auto-routed Search tab; never shown to users).
     routing_keywords: str | None = None
-    # Newline-separated intent phrases for the semantic pre-route.
-    routing_intents: str | None = None
     num_chunks: float
     llm_relevance_filter: bool
     is_public: bool
@@ -55,9 +52,7 @@ class PersonaSnapshot(BaseModel):
     is_public: bool
     display_priority: int | None
     description: str
-    routing_instructions: str | None
     routing_keywords: str | None
-    routing_intents: str | None
     num_chunks: float | None
     llm_relevance_filter: bool
     llm_filter_extraction: bool
@@ -96,9 +91,7 @@ class PersonaSnapshot(BaseModel):
             is_public=persona.is_public,
             display_priority=persona.display_priority,
             description=persona.description,
-            routing_instructions=persona.routing_instructions,
             routing_keywords=persona.routing_keywords,
-            routing_intents=persona.routing_intents,
             num_chunks=persona.num_chunks,
             llm_relevance_filter=persona.llm_relevance_filter,
             llm_filter_extraction=persona.llm_filter_extraction,

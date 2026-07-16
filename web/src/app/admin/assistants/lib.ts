@@ -4,9 +4,7 @@ interface PersonaCreationRequest {
   name: string;
   display_name: string | null;
   description: string;
-  routing_instructions: string | null;
   routing_keywords: string | null;
-  routing_intents: string | null;
   system_prompt: string;
   task_prompt: string;
   document_set_ids: number[];
@@ -29,9 +27,7 @@ interface PersonaUpdateRequest {
   name: string;
   display_name: string | null;
   description: string;
-  routing_instructions: string | null;
   routing_keywords: string | null;
-  routing_intents: string | null;
   system_prompt: string;
   task_prompt: string;
   document_set_ids: number[];
@@ -114,9 +110,7 @@ function buildPersonaAPIBody(
     name,
     display_name,
     description,
-    routing_instructions,
     routing_keywords,
-    routing_intents,
     document_set_ids,
     num_chunks,
     llm_relevance_filter,
@@ -131,9 +125,7 @@ function buildPersonaAPIBody(
     name,
     display_name,
     description,
-    routing_instructions,
     routing_keywords,
-    routing_intents,
     num_chunks,
     llm_relevance_filter,
     rerank_enabled,

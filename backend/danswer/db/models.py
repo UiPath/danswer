@@ -1018,11 +1018,9 @@ class Persona(Base):
     # Backfilled to `name`; chat falls back to `name` if blank.
     display_name: Mapped[str | None] = mapped_column(String, nullable=True)
     description: Mapped[str] = mapped_column(String)
-    # Router-only guidance for the auto-routed Search tab: free-text "route here
-    # for / example questions / do NOT route here (-> other assistant)". Read
-    # ONLY by the assistant router (secondary_llm_flows/assistant_router); NEVER
-    # rendered in the user-facing UI (that's what `description` is for). Router
-    # falls back to `description` when this is blank.
+    # DEPRECATED / inert. Was free-text LLM-router guidance; the kNN-over-Slack
+    # router replaced that logic, so nothing reads or writes this anymore. Column
+    # retained (no migration) to avoid dropping data; safe to drop later.
     routing_instructions: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Comma-separated phrases that DETERMINISTICALLY route a question to this
     # assistant (case-insensitive substring match) BEFORE the LLM router runs —
@@ -1030,12 +1028,9 @@ class Persona(Base):
     # deployment"). Blank => no keyword override; the LLM router decides. See
     # secondary_llm_flows/assistant_router.keyword_route.
     routing_keywords: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # Newline-separated intent phrases for the SEMANTIC pre-route: each line is one
-    # natural-language exemplar (e.g. "a task is stuck in the completed tab"). The
-    # auto-router embeds these and routes a question here when its nearest exemplar
-    # clears the similarity gate — BETWEEN the keyword pre-route and the LLM router.
-    # Blank => no semantic override. Stored in Postgres only (never in Vespa); the
-    # embeddings are cached per-assistant. See assistant_router.intent_route.
+    # DEPRECATED / inert. Was the semantic intent-phrase pre-route; the kNN-over-
+    # Slack router replaced that logic, so nothing reads or writes this anymore.
+    # Column retained (no migration) to avoid dropping data; safe to drop later.
     routing_intents: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Currently stored but unused, all flows use hybrid
     search_type: Mapped[SearchType] = mapped_column(
