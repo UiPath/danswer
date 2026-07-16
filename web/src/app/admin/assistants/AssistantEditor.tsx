@@ -58,74 +58,6 @@ function SubLabel({ children }: { children: string | JSX.Element }) {
   return <div className="text-sm text-subtle mb-2">{children}</div>;
 }
 
-// Editor for `routing_intents`. Presents each intent phrase as its own discrete
-// input row (with add / remove) so the admin never deals with newline delimiters,
-// but stores the value as a newline-joined string to match the backend column.
-function RoutingIntentsField() {
-  const [field, , helpers] = useField<string>("routing_intents");
-  // Local state is the source of truth for the rows so empty boxes persist —
-  // deriving rows from the joined string alone would drop an all-empty row (it
-  // joins to "" and splits back to []). Formik/DB gets the newline-joined string;
-  // the backend trims blank lines on save.
-  const [rows, setRowsState] = useState<string[]>(
-    field.value ? field.value.split("\n") : []
-  );
-  const setRows = (r: string[]) => {
-    setRowsState(r);
-    helpers.setValue(r.join("\n"));
-  };
-
-  return (
-    <div className="mb-4">
-      <Label>Routing intents (optional, not shown to users)</Label>
-      <SubLabel>
-        {
-          "Natural-language example phrases describing when a question belongs to this Assistant — one per box. The auto-routed Search tab semantically matches the question against these BEFORE falling back to the AI router. Write how a user would phrase the situation (e.g. “a task is stuck in the completed tab”), not bare keywords. Leave empty to skip semantic routing for this Assistant."
-        }
-      </SubLabel>
-      <div className="mt-2 flex flex-col gap-2">
-        {rows.length === 0 && (
-          <p className="text-sm text-subtle italic">
-            No intent phrases yet — add one below.
-          </p>
-        )}
-        {rows.map((row, i) => (
-          <div key={i} className="flex items-center gap-2">
-            <span className="w-5 shrink-0 text-sm text-subtle tabular-nums">
-              {i + 1}.
-            </span>
-            <input
-              type="text"
-              value={row}
-              onChange={(e) =>
-                setRows(rows.map((r, j) => (j === i ? e.target.value : r)))
-              }
-              placeholder="e.g. a task is stuck in the completed tab"
-              className="flex-1 rounded-md border border-border px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-accent"
-            />
-            <button
-              type="button"
-              onClick={() => setRows(rows.filter((_, j) => j !== i))}
-              aria-label="Remove intent phrase"
-              title="Remove intent phrase"
-              className="shrink-0 rounded-md p-2 text-subtle transition-colors hover:bg-hover hover:text-error"
-            >
-              <FiX size={16} />
-            </button>
-          </div>
-        ))}
-        <button
-          type="button"
-          onClick={() => setRows([...rows, ""])}
-          className="mt-1 inline-flex items-center gap-1.5 self-start text-sm text-link hover:underline"
-        >
-          <FiPlus size={15} /> Add intent phrase
-        </button>
-      </div>
-    </div>
-  );
-}
-
 // Row editor for `routing_keywords`. Purely a visual layer over the single
 // comma-separated Text column: an "Exact phrase" row round-trips as a "quoted"
 // keyword, an "All words" row as an unquoted (fuzzy) keyword.
@@ -686,22 +618,13 @@ export function AssistantEditor({
                   <>
                     <p className="text-sm text-subtle mb-3">
                       Controls how the auto-routed Search tab decides when to send
-                      a question to this Assistant. None of these are shown to
-                      users. Evaluated in order: keywords → intents → AI router.
+                      a question to this Assistant. Not shown to users. Evaluated
+                      in order: keywords first, then a fallback that matches the
+                      question to similar past questions from this Assistant&apos;s
+                      Slack help channels.
                     </p>
 
                     <RoutingKeywordsField />
-
-                    <RoutingIntentsField />
-
-                    <TextFormField
-                      name="routing_instructions"
-                      label="Routing instructions (optional, not shown to users)"
-                      isTextArea={true}
-                      subtext={
-                        'Used ONLY by the auto-routed Search tab to decide when to pick this Assistant — never shown to users. Describe what to route here, e.g. "Route here for: Orchestrator questions — scheduling, queues, triggers. Example questions: \'how do I set up a trigger\'. Do NOT route here for: Automation Suite infra (→ AutomationSuite)." Leave blank to fall back to the description.'
-                      }
-                    />
                   </>
                 </HidableSection>
 
