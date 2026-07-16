@@ -237,6 +237,77 @@ export function SettingsForm() {
             ]);
         }}
       />
+
+      <Checkbox
+        label="Allow users to create assistants?"
+        sublabel={`If set, the "Create" buttons on the My Assistants and Assistant
+        Gallery pages, and the "Create a new assistant" row in the chat @-mention
+        menu, are shown. If unset, assistant creation is hidden from end users
+        (assistants are managed centrally). This hides the UI only.`}
+        checked={settings.enable_assistant_creation ?? false}
+        onChange={(e) => {
+          updateSettingField([
+            {
+              fieldName: "enable_assistant_creation",
+              newValue: e.target.checked,
+            },
+          ]);
+        }}
+      />
+
+      <Checkbox
+        label="Enable semantic intent routing?"
+        sublabel={`If set, the auto-routed Search tab adds a semantic step (an LLM
+        matches the question against each assistant's routing "intent phrases")
+        between keyword routing and the AI router. Off by default — keyword and AI
+        routing are unaffected. Enable only after populating assistants' intent
+        phrases.`}
+        checked={settings.auto_search_intent_enabled ?? false}
+        onChange={(e) => {
+          updateSettingField([
+            {
+              fieldName: "auto_search_intent_enabled",
+              newValue: e.target.checked,
+            },
+          ]);
+        }}
+      />
+
+      <Checkbox
+        label="Show side-by-side compare answers?"
+        sublabel={`If set, the auto-routed Search tab shows two answers side by side
+        for questions the AI router picks: the single top assistant's answer, and a
+        second answer over the combined document sets of the router's top matches
+        (answered by the compare model). Only affects AI-router picks; keyword and
+        @mention routes stay single-answer. On by default. Note: this runs a second
+        search + answer per question, so it roughly doubles latency and cost.`}
+        checked={settings.auto_search_compare_enabled ?? true}
+        onChange={(e) => {
+          updateSettingField([
+            {
+              fieldName: "auto_search_compare_enabled",
+              newValue: e.target.checked,
+            },
+          ]);
+        }}
+      />
+
+      <Selector
+        label="Auto-Search (assistant routing) rollout"
+        subtext="Staged rollout of the auto-routed Search tab, which picks the right assistant for a question automatically. 'Admins only' lets admins clean assistant routing instructions and test before GA; 'Everyone' makes it generally available; 'Off' disables it. The backend enforces this independently of the UI."
+        options={[
+          { value: "off", name: "Off (disabled)" },
+          { value: "admin_only", name: "Admins only" },
+          { value: "everyone", name: "Everyone" },
+        ]}
+        selected={settings.auto_search_rollout ?? "admin_only"}
+        onSelect={(value) => {
+          value &&
+            updateSettingField([
+              { fieldName: "auto_search_rollout", newValue: value },
+            ]);
+        }}
+      />
       {isEnterpriseEnabled && (
         <>
           <Title className="mb-4">Chat Settings</Title>

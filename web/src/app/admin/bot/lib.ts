@@ -18,6 +18,8 @@ interface SlackBotConfigCreationRequest {
   follow_up_tags?: string[];
   prioritized_sources?: string[];
   opsgenie_schedule?: string;
+  enable_sme_validation?: boolean;
+  sme_group_name?: string;
   jira_config?: {
     enable_jira_integration: boolean;
     project_key: string;
@@ -62,6 +64,8 @@ const buildRequestBodyFromCreationRequest = (
     follow_up_tags: creationRequest.follow_up_tags?.filter((tag) => tag !== ""),
     prioritized_sources: creationRequest.prioritized_sources,
     opsgenie_schedule: creationRequest.opsgenie_schedule,
+    enable_sme_validation: creationRequest.enable_sme_validation,
+    sme_group_name: creationRequest.sme_group_name,
     jira_config: creationRequest.jira_config,
     curated_response_config: creationRequest.curated_response_config,
     jira_title_filter: creationRequest.jira_title_filter,

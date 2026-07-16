@@ -3,7 +3,7 @@ import { unstable_noStore as noStore } from "next/cache";
 import { InstantSSRAutoRefresh } from "@/components/SSRAutoRefresh";
 import { WelcomeModal } from "@/components/initialSetup/welcome/WelcomeModalWrapper";
 import { ApiKeyModal } from "@/components/llm/ApiKeyModal";
-import { ChatPage } from "./ChatPage";
+import { ChatWithSearchTabs } from "./ChatWithSearchTabs";
 import { NoCompleteSourcesModal } from "@/components/initialSetup/search/NoCompleteSourceModal";
 import { ChatProvider } from "@/components/context/ChatContext";
 import { fetchChatData } from "@/lib/chat/fetchChatData";
@@ -63,9 +63,10 @@ export default async function Page({
           openedFolders,
         }}
       >
-        <ChatPage
+        <ChatWithSearchTabs
           defaultSelectedPersonaId={defaultPersonaId}
           documentSidebarInitialWidth={finalDocumentSidebarInitialWidth}
+          userRole={user?.role ?? null}
         />
       </ChatProvider>
     </>

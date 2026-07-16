@@ -9,6 +9,7 @@ import {
   FieldArray,
   Form,
   Formik,
+  useField,
 } from "formik";
 
 import * as Yup from "yup";
@@ -55,6 +56,144 @@ function Label({ children }: { children: string | JSX.Element }) {
 
 function SubLabel({ children }: { children: string | JSX.Element }) {
   return <div className="text-sm text-subtle mb-2">{children}</div>;
+}
+
+// Row editor for `routing_keywords`. Purely a visual layer over the single
+// comma-separated Text column: an "Exact phrase" row round-trips as a "quoted"
+// keyword, an "All words" row as an unquoted (fuzzy) keyword.
+interface KeywordRow {
+  text: string;
+  exact: boolean;
+  priority: boolean;
+}
+
+function parseKeywords(value: string): KeywordRow[] {
+  if (!value.trim()) {
+    return [];
+  }
+  return value.split(",").map((raw) => {
+    let t = raw.trim();
+    let priority = false;
+    if (t.startsWith("!")) {
+      priority = true;
+      t = t.slice(1).trim();
+    }
+    let exact = false;
+    if (t.length >= 2 && t.startsWith('"') && t.endsWith('"')) {
+      exact = true;
+      t = t.slice(1, -1).trim();
+    }
+    return { text: t, exact, priority };
+  });
+}
+
+function serializeKeywords(rows: KeywordRow[]): string {
+  return rows
+    .filter((r) => r.text.trim())
+    .map((r) => {
+      let s = r.exact ? `"${r.text.trim()}"` : r.text.trim();
+      if (r.priority) {
+        s = `!${s}`;
+      }
+      return s;
+    })
+    .join(", ");
+}
+
+function RoutingKeywordsField() {
+  const [field, , helpers] = useField<string>("routing_keywords");
+  const [rows, setRowsState] = useState<KeywordRow[]>(() =>
+    parseKeywords(field.value || "")
+  );
+  const setRows = (r: KeywordRow[]) => {
+    setRowsState(r);
+    helpers.setValue(serializeKeywords(r));
+  };
+
+  return (
+    <div className="mb-4">
+      <Label>Routing keywords (optional, not shown to users)</Label>
+      <SubLabel>
+        {
+          "Keywords that DEFINITELY route a question here (checked case-insensitively BEFORE the AI router). “All words” fires when every word of the keyword appears in the question, in any order (e.g. “task sla” matches “the SLA on this task”). “Exact phrase” requires the words adjacent — use it for an abbreviation that is also a common word, e.g. “as environment” (AS = Automation Suite). Tick “Always wins” to make this keyword beat any other assistant’s match when both fire (use only for unambiguous product terms)."
+        }
+      </SubLabel>
+      <div className="mt-2 flex flex-col gap-2">
+        {rows.length === 0 && (
+          <p className="text-sm text-subtle italic">
+            No keywords yet — add one below.
+          </p>
+        )}
+        {rows.map((row, i) => (
+          <div key={i} className="flex items-center gap-2">
+            <input
+              type="text"
+              value={row.text}
+              onChange={(e) =>
+                setRows(
+                  rows.map((r, j) =>
+                    j === i ? { ...r, text: e.target.value } : r
+                  )
+                )
+              }
+              placeholder="e.g. task sla"
+              className="flex-1 rounded-md border border-border px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-accent"
+            />
+            <select
+              value={row.exact ? "exact" : "all"}
+              onChange={(e) =>
+                setRows(
+                  rows.map((r, j) =>
+                    j === i ? { ...r, exact: e.target.value === "exact" } : r
+                  )
+                )
+              }
+              className="shrink-0 rounded-md border border-border px-2 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-accent"
+            >
+              <option value="all">All words</option>
+              <option value="exact">Exact phrase</option>
+            </select>
+            <label
+              className="flex shrink-0 items-center gap-1 text-sm text-subtle"
+              title="Always wins: if this keyword matches, it beats any other assistant's match"
+            >
+              <input
+                type="checkbox"
+                checked={row.priority}
+                onChange={(e) =>
+                  setRows(
+                    rows.map((r, j) =>
+                      j === i ? { ...r, priority: e.target.checked } : r
+                    )
+                  )
+                }
+                className="h-3.5 w-3.5"
+              />
+              Always wins
+            </label>
+            <button
+              type="button"
+              onClick={() => setRows(rows.filter((_, j) => j !== i))}
+              aria-label="Remove keyword"
+              title="Remove keyword"
+              className="shrink-0 rounded-md p-2 text-subtle transition-colors hover:bg-hover hover:text-error"
+            >
+              <FiX size={16} />
+            </button>
+          </div>
+        ))}
+        <button
+          type="button"
+          onClick={() =>
+            setRows([...rows, { text: "", exact: false, priority: false }])
+          }
+          className="mt-1 inline-flex items-center gap-1.5 self-start text-sm text-link hover:underline"
+        >
+          <FiPlus size={15} /> Add keyword
+        </button>
+      </div>
+    </div>
+  );
 }
 
 export function AssistantEditor({
@@ -173,6 +312,8 @@ export function AssistantEditor({
     name: existingPersona?.name ?? "",
     display_name: existingPersona?.display_name ?? "",
     description: existingPersona?.description ?? "",
+    routing_keywords: existingPersona?.routing_keywords ?? "",
+    is_router_candidate: existingPersona?.is_router_candidate ?? true,
     system_prompt: existingPrompt?.system_prompt ?? "",
     task_prompt: existingPrompt?.task_prompt ?? "",
     is_public: existingPersona?.is_public ?? defaultPublic,
@@ -469,6 +610,31 @@ export function AssistantEditor({
 
                 <Divider />
 
+                <HidableSection
+                  sectionTitle="[Recommended] Search Configuration"
+                  defaultHidden={true}
+                >
+                  <>
+                    <p className="text-sm text-subtle mb-3">
+                      Controls how the auto-routed Search tab decides when to
+                      send a question to this Assistant. Not shown to users.
+                      Evaluated in order: keywords first, then a fallback that
+                      matches the question to similar past questions from this
+                      Assistant&apos;s Slack help channels.
+                    </p>
+
+                    <BooleanFormField
+                      name="is_router_candidate"
+                      label="Include in auto-routing"
+                      subtext="When on, the auto-routed Search tab may pick this Assistant. Turn off to exclude it from automatic routing decisions (keyword + similarity) while keeping it manually selectable."
+                    />
+
+                    <RoutingKeywordsField />
+                  </>
+                </HidableSection>
+
+                <Divider />
+
                 <HidableSection sectionTitle="Tools">
                   <>
                     {ccPairs.length > 0 && searchTool && (
@@ -518,7 +684,9 @@ export function AssistantEditor({
                                     render={(arrayHelpers: ArrayHelpers) => {
                                       const selectedDocumentSets =
                                         documentSets.filter((ds) =>
-                                          values.document_set_ids.includes(ds.id)
+                                          values.document_set_ids.includes(
+                                            ds.id
+                                          )
                                         );
                                       const availableDocumentSets =
                                         documentSets.filter(
@@ -547,7 +715,9 @@ export function AssistantEditor({
                                                           documentSet.id
                                                         );
                                                       if (ind !== -1) {
-                                                        arrayHelpers.remove(ind);
+                                                        arrayHelpers.remove(
+                                                          ind
+                                                        );
                                                       }
                                                     }}
                                                   />

@@ -87,6 +87,74 @@ MAX_PROMPT_DOCS_PER_SOURCE = int(os.environ.get("MAX_PROMPT_DOCS_PER_SOURCE") or
 AUTHORITATIVE_CITATION_RETENTION_ENABLED = (
     os.environ.get("AUTHORITATIVE_CITATION_RETENTION_ENABLED", "").lower() == "true"
 )
+# Optional model override for the assistant ROUTER (the one-shot Search tab's
+# automatic assistant picker). When BOTH are set, routing uses this gateway
+# vendor/model instead of the default fast model — e.g. point it at Claude
+# (ASSISTANT_ROUTER_LLM_VENDOR=awsbedrock + the gateway's Claude model id) for
+# sharper assistant selection. Empty => use the default fast LLM. Note: a heavier
+# model improves selection precision but adds latency/cost to the (already extra)
+# router call; routing is a classification task that the fast model handles well,
+# so treat this as an A/B lever rather than a default.
+ASSISTANT_ROUTER_LLM_VENDOR = os.environ.get("ASSISTANT_ROUTER_LLM_VENDOR") or ""
+ASSISTANT_ROUTER_LLM_MODEL = os.environ.get("ASSISTANT_ROUTER_LLM_MODEL") or ""
+# How many assistants the auto-routed Search tab's router ranks per question. The
+# #1 answers the question (single scope = its own document sets); ranks 2..N are
+# surfaced as "recommended assistants" the user can chat with next if #1 wasn't
+# right. Default 3 => 1 answerer + up to 2 recommendations.
+AUTO_SEARCH_TOP_N = int(os.environ.get("AUTO_SEARCH_TOP_N") or 3)
+# kNN-over-Slack router (the fallback after keyword_route; replaces the LLM
+# routing-instructions logic). Number of slack thread-start neighbors to vote over.
+SLACK_KNN_ROUTER_TOP_K = int(os.environ.get("SLACK_KNN_ROUTER_TOP_K") or 15)
+# Below this vote confidence (winner_weight / total_weight) the router asks the fast
+# LLM to break the tie among the retrieved neighbors' assistants. Tuned from the
+# prototype where correct routes averaged ~0.70 and wrong ones ~0.43.
+SLACK_KNN_ROUTER_LLM_CONF_THRESHOLD = float(
+    os.environ.get("SLACK_KNN_ROUTER_LLM_CONF_THRESHOLD") or 0.6
+)
+# Minimum number of neighbor matches an assistant needs to appear as a "recommended
+# assistant" (and in the compare union scope). Filters out single, incidental
+# matches — the noise seen when a strong-but-unmapped channel is discarded and
+# 1-vote channels fill the slots. Set via configmap (env) to tune without a deploy.
+SLACK_KNN_ROUTER_MIN_RECOMMENDATION_VOTES = int(
+    os.environ.get("SLACK_KNN_ROUTER_MIN_RECOMMENDATION_VOTES") or 2
+)
+# Side-by-side "compare" answer for the auto-routed Search tab: alongside the
+# single top-1 answer, also answer over the UNION of the router's top-N assistants'
+# document sets, so the user can compare a narrow (single-assistant) answer with a
+# broader (multi-assistant) one. Only runs on LLM-router picks (keyword routes and
+# @mentions stay single-scope). Gated by Settings.auto_search_compare_enabled.
+#
+# Which persona answers the union scope. MUST be fence-less (no document_sets of its
+# own) so the union document_set filter applies as-is — a persona with its own fence
+# would INTERSECT and shrink the scope. The all-source default persona (0) is the
+# natural choice.
+AUTO_SEARCH_UNION_PERSONA_ID = int(os.environ.get("AUTO_SEARCH_UNION_PERSONA_ID") or 0)
+# Model for the union answer. Default: the router LLM (Sonnet) — a stronger
+# synthesizer for the wider, multi-source context. Empty => union persona default.
+AUTO_SEARCH_UNION_LLM_VENDOR = (
+    os.environ.get("AUTO_SEARCH_UNION_LLM_VENDOR") or ASSISTANT_ROUTER_LLM_VENDOR
+)
+AUTO_SEARCH_UNION_LLM_MODEL = (
+    os.environ.get("AUTO_SEARCH_UNION_LLM_MODEL") or ASSISTANT_ROUTER_LLM_MODEL
+)
+# Optional override for the default (top-1) answer model. Empty => the routed
+# persona's own default model (prod: gpt-4o). Set to force a specific model.
+AUTO_SEARCH_DEFAULT_LLM_VENDOR = os.environ.get("AUTO_SEARCH_DEFAULT_LLM_VENDOR") or ""
+AUTO_SEARCH_DEFAULT_LLM_MODEL = os.environ.get("AUTO_SEARCH_DEFAULT_LLM_MODEL") or ""
+# Third compare tab: answer scoped to a fixed, small set of SOURCE TYPES (not
+# document sets) — by default HighSpot (sales enablement) + the docs.uipath.com web
+# crawls ("all the docs sites"). Rides along with the compare view (only shown when
+# compare_enabled). Comma-separated DocumentSource values.
+AUTO_SEARCH_SOURCE_TAB_ENABLED = (
+    os.environ.get("AUTO_SEARCH_SOURCE_TAB_ENABLED") or "true"
+).lower() == "true"
+AUTO_SEARCH_SOURCE_TAB_SOURCES = [
+    s.strip().lower()
+    for s in (os.environ.get("AUTO_SEARCH_SOURCE_TAB_SOURCES") or "highspot,web").split(
+        ","
+    )
+    if s.strip()
+]
 # Versioned-docs dedup at final doc selection. Documentation sites publish the
 # SAME page under one URL per product version (e.g. docs.uipath.com/.../2024.10/…
 # and /.../2023.10/… and /.../2.2510/…). Retrieval then floods the LLM context

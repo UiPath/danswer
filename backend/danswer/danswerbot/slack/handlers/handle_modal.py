@@ -9,9 +9,11 @@ from danswer.danswerbot.slack.handlers.handle_thread_summary import (
 )
 from danswer.db.engine import get_sqlalchemy_engine
 from danswer.db.persona import fetch_persona_by_id
+from danswer.db.persona import get_personas
 from danswer.db.users import add_slack_persona_for_user
 from danswer.db.users import add_user_slack_persona
 from danswer.db.users import fetch_user_slack_persona
+from danswer.db.users import get_user_by_email
 from danswer.utils.logger import setup_logger
 
 logger = setup_logger()
@@ -41,6 +43,47 @@ def handle_modal_submission(client: WebClient, body: dict[str, Any]) -> None:
                         "errors": {"persona_selection": "Persona not found."},
                     }
 
+                # ACL: the modal payload is user-controlled, so re-check that the
+                # selected persona is one this Slack user can access before saving.
+                # Resolve the Slack user -> Danswer user; known users get public +
+                # shared personas, unknown senders get public only.
+                # Fail-open: any hiccup resolving the user falls back to the
+                # public-persona set (never blocks a legitimate global pick).
+                acl_user = None
+                try:
+                    acl_email = (
+                        client.users_info(user=user_id)
+                        .data["user"]["profile"]  # type: ignore
+                        .get("email")
+                    )
+                    if acl_email:
+                        acl_user = get_user_by_email(
+                            email=acl_email, db_session=db_session
+                        )
+                except Exception:
+                    logger.warning(
+                        "Unable to resolve Slack user for persona ACL; "
+                        "falling back to public personas"
+                    )
+                accessible = get_personas(
+                    user_id=acl_user.id if acl_user else None,
+                    db_session=db_session,
+                    include_default=True,
+                )
+                if acl_user is None:
+                    accessible = [p for p in accessible if p.is_public]
+                if persona.id not in {p.id for p in accessible}:
+                    logger.warning(
+                        f"Slack user {user_id} tried to select inaccessible "
+                        f"persona {persona.id}"
+                    )
+                    return {
+                        "response_action": "errors",
+                        "errors": {
+                            "persona_selection": "You don't have access to that assistant."
+                        },
+                    }
+
                 user_slack_persona = fetch_user_slack_persona(
                     db_session=db_session, sender_id=user_id
                 )
@@ -50,7 +93,8 @@ def handle_modal_submission(client: WebClient, body: dict[str, Any]) -> None:
                         persona=persona,
                         user_slack_persona=user_slack_persona,
                     )
-                    response_text = f"Persona '{persona.name}' has been set!"
+                    persona_label = persona.display_name or persona.name
+                    response_text = f"Persona '{persona_label}' has been set!"
                     client.chat_postMessage(channel=channel_id, text=response_text)
                     return {"response_action": "clear"}
 
@@ -58,9 +102,10 @@ def handle_modal_submission(client: WebClient, body: dict[str, Any]) -> None:
                     add_user_slack_persona(
                         db_session=db_session, sender_id=user_id, persona=persona
                     )
+                    persona_label = persona.display_name or persona.name
                     client.chat_postMessage(
                         channel=channel_id,
-                        text=f"'{persona.name}' has been successfully set as the current persona.",
+                        text=f"'{persona_label}' has been successfully set as the current persona.",
                     )
                     return {"response_action": "clear"}
 

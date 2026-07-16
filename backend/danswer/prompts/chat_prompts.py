@@ -128,12 +128,15 @@ Follow Up Input:
 
 
 HISTORY_QUERY_REPHRASE = f"""
-Given the following conversation and a follow up input, rephrase the follow up into a SHORT, \
-standalone query (which captures any relevant context from previous messages) for a vectorstore.
-IMPORTANT: EDIT THE QUERY TO BE AS CONCISE AS POSSIBLE. Respond with a short, compressed phrase \
-with mainly keywords instead of a complete sentence.
+Given the following conversation and a follow up input, rephrase the follow up into a \
+STANDALONE, natural-language question (which captures any relevant context from previous \
+messages) for a search engine.
+Keep it a complete, natural-language question: resolve references (pronouns like "their", \
+"it", "that account") using the conversation. Do NOT compress the query into bare keywords \
+and do NOT drop meaningful words from the user's question — the full phrasing retrieves the \
+correct record (compressing "who is the TAM for X" down to "TAM X" reranks the right record \
+out of the result window).
 If there is a clear change in topic, disregard the previous messages.
-Strip out any information that is not relevant for the retrieval task.
 If the follow up message is an error or code snippet, repeat the same input back EXACTLY.
 
 {GENERAL_SEP_PAT}
@@ -142,7 +145,7 @@ Chat History:
 {GENERAL_SEP_PAT}
 
 Follow Up Input: {{question}}
-Standalone question (Respond with only the short combined query):
+Standalone question (Respond with only the standalone question):
 """.strip()
 
 

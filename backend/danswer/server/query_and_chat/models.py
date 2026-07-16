@@ -4,6 +4,8 @@ from typing import Any
 from pydantic import BaseModel
 from pydantic import root_validator
 
+from danswer.chat.models import CitationInfo
+from danswer.chat.models import QADocsResponse
 from danswer.chat.models import RetrievalDocs
 from danswer.configs.constants import DocumentSource
 from danswer.configs.constants import MessageType
@@ -229,6 +231,89 @@ class AdminSearchRequest(BaseModel):
 
 class AdminSearchResponse(BaseModel):
     documents: list[SearchDoc]
+
+
+class AutoSearchRequest(BaseModel):
+    """A single point-in-time question for the auto-routed Search tab."""
+
+    message: str
+    # When the user explicitly picks an assistant via "@mention", its id is sent
+    # here — the router (LLM selection) step is skipped and this assistant is
+    # invoked directly (still ACL-re-checked on the trusted side). None => auto-route.
+    persona_id: int | None = None
+
+
+class AnsweredByAssistant(BaseModel):
+    persona_id: int
+    name: str
+    display_name: str | None
+    # True if the router picked this assistant; False if it fell back to the
+    # all-source default persona (low confidence / no clear match).
+    routed: bool
+    confidence: float
+
+
+class SearchedAssistant(BaseModel):
+    """A next-best assistant the router ranked below the one that answered — shown
+    as 'Recommended assistants' the user can chat with next if #1 wasn't right."""
+
+    persona_id: int
+    name: str
+    display_name: str | None
+
+
+class AutoSearchResponse(BaseModel):
+    answer: str | None = None
+    citations: list[CitationInfo] | None = None
+    docs: QADocsResponse | None = None
+    # The persisted AI message id — used to attach 👍/👎 + text feedback via the
+    # existing /chat/create-chat-message-feedback endpoint.
+    chat_message_id: int | None = None
+    answered_by: AnsweredByAssistant
+    # Next-best assistants (router ranks 2..N) offered as a chat-further affordance
+    # from the SAME router call — no extra LLM call. Empty for keyword routes and
+    # explicit @mentions (nothing to recommend).
+    other_recommended: list[SearchedAssistant] = []
+    error_msg: str | None = None
+    # --- Side-by-side compare (Settings.auto_search_compare_enabled) -----------
+    # True when compare applies (LLM route + gate on): tells the UI to render the
+    # tabbed layout and lazy-fetch the union answer via /query/auto-search/union.
+    # False => single-answer layout (keyword/@mention routes, or gate off).
+    compare_enabled: bool = False
+    # The assistants whose document sets the union answer should span (the router's
+    # top-N picks). The UI passes these ids to the union endpoint — no re-routing,
+    # so the union scope is guaranteed consistent with this response. Computing this
+    # is cheap (no second answer generation), so the top-1 answer isn't held up.
+    union_assistants: list[SearchedAssistant] = []
+    # True when the third compare tab applies: a fixed source-scoped answer
+    # (HighSpot + the docs sites). Rides along with compare_enabled; the UI
+    # lazy-fetches it via /query/auto-search/sources.
+    source_tab_enabled: bool = False
+
+
+class AutoSearchSourcesRequest(BaseModel):
+    """Lazy third-answer request for the compare view: answer scoped to a fixed set
+    of source types (HighSpot + docs sites), configured server-side. Only `message`
+    is needed — the sources are not client-controlled."""
+
+    message: str
+
+
+class AutoSearchUnionRequest(BaseModel):
+    """Lazy second-answer request for the Search tab's compare view: answer over the
+    UNION of the given assistants' document sets. Fired by the UI after the primary
+    answer arrives, so the two answers never block each other."""
+
+    message: str
+    # The assistants to union — the union_assistants ids from AutoSearchResponse.
+    persona_ids: list[int]
+
+
+class AutoSearchUnionResponse(BaseModel):
+    answer: str | None = None
+    citations: list[CitationInfo] | None = None
+    docs: QADocsResponse | None = None
+    error_msg: str | None = None
 
 
 class DanswerAnswer(BaseModel):

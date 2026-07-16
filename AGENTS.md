@@ -669,6 +669,18 @@ any connector type by introspecting `credential_json` keys.
 Backend just uses the existing `PATCH /api/manage/admin/connector/{id}`
 with `disabled: bool` flipped — no special bulk endpoint needed.
 
+### Populate a local env from prod (Vespa + assistants/doc-sets)
+
+To test search / assistants / the auto-router locally against realistic
+data, `backend/scripts/clone_prod_to_local.py` copies the **latest N
+docs per source** from prod Vespa (with embeddings / ACLs / doc-set
+membership) plus the personas, prompts, and document sets from the prod
+DB into your local Vespa + Postgres. Two phases — `export` runs inside a
+prod pod, `import` runs locally — connected by a `kubectl cp`'d bundle.
+Requires the **same embedding model** locally (the script enforces it and
+aborts on mismatch). Full steps + caveats:
+[`docs/clone-prod-to-local.md`](./docs/clone-prod-to-local.md).
+
 ---
 
 ## Conventions

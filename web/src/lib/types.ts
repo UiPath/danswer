@@ -76,10 +76,7 @@ export type ValidSources =
 
 export type ValidInputTypes = "load_state" | "poll" | "event";
 export type ValidStatuses =
-  | "success"
-  | "failed"
-  | "in_progress"
-  | "not_started";
+  "success" | "failed" | "in_progress" | "not_started";
 export type TaskStatus = "PENDING" | "STARTED" | "SUCCESS" | "FAILURE";
 export type Feedback = "like" | "dislike";
 
@@ -595,8 +592,7 @@ export interface Tag {
 // SLACK BOT CONFIGS
 
 export type AnswerFilterOption =
-  | "well_answered_postfilter"
-  | "questionmark_prefilter";
+  "well_answered_postfilter" | "questionmark_prefilter";
 
 export interface ChannelConfig {
   channel_names: string[];
@@ -608,6 +604,8 @@ export interface ChannelConfig {
   follow_up_tags?: string[];
   prioritized_sources?: string[];
   opsgenie_schedule?: string;
+  enable_sme_validation?: boolean;
+  sme_group_name?: string;
   jira_title_filter?: string[];
   curated_response_user_title_filter?: string[];
   jira_config?: {

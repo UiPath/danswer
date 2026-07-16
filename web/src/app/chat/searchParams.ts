@@ -4,6 +4,11 @@ import { ReadonlyURLSearchParams } from "next/navigation";
 export const SEARCH_PARAM_NAMES = {
   CHAT_ID: "chatId",
   PERSONA_ID: "assistantId",
+  // Human-readable assistant name (e.g. ?assistant=Orchestrator). Resolved to an
+  // id server-side against the user's ACL-filtered assistants, so shareable links
+  // (e.g. per-channel Slack "Ask Darwin" workflows) can preselect an assistant
+  // without knowing its numeric id. `assistantId` (numeric) takes precedence.
+  PERSONA_NAME: "assistant",
   // overrides
   TEMPERATURE: "temperature",
   MODEL_VERSION: "model-version",

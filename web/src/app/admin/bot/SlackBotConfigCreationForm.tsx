@@ -31,10 +31,7 @@ import {
 import { useRouter } from "next/navigation";
 import { Persona } from "../assistants/interfaces";
 import { useState } from "react";
-import {
-  LLM_MODELS_BY_VENDOR,
-  LLM_VENDORS,
-} from "@/lib/llm/models";
+import { LLM_MODELS_BY_VENDOR, LLM_VENDORS } from "@/lib/llm/models";
 import { BookmarkIcon, RobotIcon } from "@/components/icons/icons";
 import { SourceIcon } from "@/components/SourceIcon";
 import { getSourceMetadata } from "@/lib/sources";
@@ -101,6 +98,11 @@ export const SlackBotCreationForm = ({
               existingSlackBotConfig?.channel_config?.follow_up_tags,
             opsgenie_schedule:
               existingSlackBotConfig?.channel_config?.opsgenie_schedule || "",
+            enable_sme_validation:
+              existingSlackBotConfig?.channel_config?.enable_sme_validation ||
+              false,
+            sme_group_name:
+              existingSlackBotConfig?.channel_config?.sme_group_name || "",
             document_sets:
               existingSlackBotConfig && existingSlackBotConfig.persona
                 ? existingSlackBotConfig.persona.document_sets.map(
@@ -267,6 +269,8 @@ export const SlackBotCreationForm = ({
               ),
               usePersona: usingPersonas,
               opsgenie_schedule: values.opsgenie_schedule || undefined,
+              enable_sme_validation: values.enable_sme_validation ?? false,
+              sme_group_name: values.sme_group_name || undefined,
               jira_config: {
                 enable_jira_integration:
                   values.jira_config.enable_jira_integration ?? false,
@@ -345,6 +349,19 @@ export const SlackBotCreationForm = ({
                   label="OpsGenie Schedule"
                   subtext="The name of the OpsGenie schedule to use for getting the DRI on call when someone requests more help"
                 />
+
+                <BooleanFormField
+                  name="enable_sme_validation"
+                  label="Enable SME verification"
+                  subtext="Adds an 'Awaiting SME Review' button to answers in this channel. Members of the SME Slack group below can click it to mark an answer as verified (turns green), so readers know it's trustworthy."
+                />
+                {values.enable_sme_validation && (
+                  <TextFormField
+                    name="sme_group_name"
+                    label="SME Slack user group(s)"
+                    subtext="The Slack user group(s) whose members may verify answers — display name or @handle. Separate multiple groups with commas (e.g. 'Automation Suite SMEs, as-smes'); a member of any listed group can verify. Membership is checked live, so people who leave lose the ability automatically."
+                  />
+                )}
 
                 <SelectorFormField
                   name="response_type"

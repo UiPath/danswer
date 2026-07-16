@@ -119,7 +119,19 @@ export async function fetchChatData(searchParams: {
 
   const authDisabled = authTypeMetadata?.authType === "disabled";
   if (!authDisabled && !user) {
-    return { redirect: "/auth/login" };
+    // Preserve the deep link (e.g. /chat?assistant=AutomationSuite) across the SSO
+    // round-trip so per-channel Slack links still preselect the assistant after
+    // login. The value is re-validated (open-redirect-safe) when it's consumed.
+    const qs = new URLSearchParams(
+      Object.entries(searchParams).filter(([, v]) => typeof v === "string") as [
+        string,
+        string,
+      ][]
+    ).toString();
+    const nextTarget = qs ? `/chat?${qs}` : "/chat";
+    return {
+      redirect: `/auth/login?next=${encodeURIComponent(nextTarget)}`,
+    };
   }
 
   if (user && !user.is_verified && authTypeMetadata?.requiresVerification) {
@@ -183,7 +195,9 @@ export async function fetchChatData(searchParams: {
         });
       }
     } catch (e) {
-      console.log(`Failed to fetch current chat session ${currentChatId} - ${e}`);
+      console.log(
+        `Failed to fetch current chat session ${currentChatId} - ${e}`
+      );
     }
   }
 
@@ -213,10 +227,29 @@ export async function fetchChatData(searchParams: {
     console.log(`Failed to fetch tags - ${tagsResponse?.status}`);
   }
 
+  // Preselected assistant: numeric `assistantId` wins; otherwise resolve the
+  // human-readable `assistant=<name>` param (used by shareable links like the
+  // per-channel Slack "Ask Darwin" workflow) to an id. Resolution is an exact,
+  // case-insensitive match against `assistants` — the user's ACL-filtered, visible
+  // list — so an unknown or inaccessible name simply yields no preselection
+  // (falls back to the default). The backend also re-checks persona access on send.
   const defaultPersonaIdRaw = searchParams["assistantId"];
-  const defaultPersonaId = defaultPersonaIdRaw
+  let defaultPersonaId = defaultPersonaIdRaw
     ? parseInt(defaultPersonaIdRaw)
     : undefined;
+  if (defaultPersonaId === undefined || Number.isNaN(defaultPersonaId)) {
+    const assistantNameRaw = searchParams["assistant"];
+    if (assistantNameRaw) {
+      const target = assistantNameRaw.trim().toLowerCase();
+      const match = assistants.find(
+        (a) =>
+          a.name.trim().toLowerCase() === target ||
+          (a.display_name != null &&
+            a.display_name.trim().toLowerCase() === target)
+      );
+      defaultPersonaId = match?.id;
+    }
+  }
 
   const documentSidebarCookieInitialWidth = cookies().get(
     DOCUMENT_SIDEBAR_WIDTH_COOKIE_NAME

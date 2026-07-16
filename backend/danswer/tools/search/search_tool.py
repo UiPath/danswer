@@ -160,8 +160,20 @@ class SearchTool(Tool):
         ):
             return None
 
+        # skip_first_rephrase: when there's no conversation history (a first /
+        # single-turn question), search the user's full question verbatim instead
+        # of letting the rephraser compress it to bare keywords. The
+        # HISTORY_QUERY_REPHRASE prompt deliberately strips queries to "mainly
+        # keywords"; for entity lookups that surface many near-duplicate records
+        # (e.g. "who is the TAM for pepsi" -> "TAM Pepsi", where only one of ~50
+        # "Pepsi" account records holds the field) the compressed query reranks
+        # the wrong record into the context window and the answer comes back
+        # "not available". The full natural-language question retrieves the right
+        # record. Follow-ups (history present) are still rephrased, since they
+        # need prior-turn context folded in. This matches the Slack / one-shot
+        # flow, which already leaves the first query untouched.
         rephrased_query = history_based_query_rephrase(
-            query=query, history=history, llm=llm
+            query=query, history=history, llm=llm, skip_first_rephrase=True
         )
         return {"query": rephrased_query}
 

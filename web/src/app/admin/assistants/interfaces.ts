@@ -28,6 +28,10 @@ export interface Persona {
   is_public: boolean;
   display_priority: number | null;
   description: string;
+  // Comma-separated keywords that deterministically route to this assistant.
+  routing_keywords?: string | null;
+  // Whether this assistant participates in auto-routing (Search tab).
+  is_router_candidate?: boolean;
   document_sets: DocumentSet[];
   prompts: Prompt[];
   tools: ToolSnapshot[];

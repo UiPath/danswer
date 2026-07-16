@@ -73,6 +73,8 @@ def create_update_persona(
             name=create_persona_request.name,
             display_name=create_persona_request.display_name,
             description=create_persona_request.description,
+            routing_keywords=create_persona_request.routing_keywords,
+            is_router_candidate=create_persona_request.is_router_candidate,
             num_chunks=create_persona_request.num_chunks,
             llm_relevance_filter=create_persona_request.llm_relevance_filter,
             llm_filter_extraction=create_persona_request.llm_filter_extraction,
@@ -377,6 +379,8 @@ def upsert_persona(
     db_session: Session,
     rerank_enabled: bool = False,
     display_name: str | None = None,
+    routing_keywords: str | None = None,
+    is_router_candidate: bool = True,
     prompt_ids: list[int] | None = None,
     document_set_ids: list[int] | None = None,
     tool_ids: list[int] | None = None,
@@ -425,6 +429,8 @@ def upsert_persona(
         persona.name = name
         persona.display_name = display_name or name
         persona.description = description
+        persona.routing_keywords = routing_keywords
+        persona.is_router_candidate = is_router_candidate
         persona.num_chunks = num_chunks
         persona.llm_relevance_filter = llm_relevance_filter
         persona.llm_filter_extraction = llm_filter_extraction
@@ -458,6 +464,8 @@ def upsert_persona(
             name=name,
             display_name=display_name or name,
             description=description,
+            routing_keywords=routing_keywords,
+            is_router_candidate=is_router_candidate,
             num_chunks=num_chunks,
             llm_relevance_filter=llm_relevance_filter,
             llm_filter_extraction=llm_filter_extraction,
@@ -520,6 +528,19 @@ def update_persona_visibility(
 ) -> None:
     persona = get_persona_by_id(persona_id=persona_id, user=None, db_session=db_session)
     persona.is_visible = is_visible
+    db_session.commit()
+    invalidate_personas_all()
+
+
+def update_persona_is_router_candidate(
+    persona_id: int,
+    is_router_candidate: bool,
+    db_session: Session,
+) -> None:
+    """Toggle whether an assistant participates in the auto-routed Search tab.
+    Invalidates the persona cache so the router catalog reflects it immediately."""
+    persona = get_persona_by_id(persona_id=persona_id, user=None, db_session=db_session)
+    persona.is_router_candidate = is_router_candidate
     db_session.commit()
     invalidate_personas_all()
 

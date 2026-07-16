@@ -854,6 +854,12 @@ class ChatMessageFeedback(Base):
     required_followup: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     feedback_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     predefined_feedback: Mapped[str | None] = mapped_column(String, nullable=True)
+    # SME verification (Slack "Verified by an SME" flow): who verified this answer
+    # and when. Null unless an SME has verified it.
+    sme_verified_by: Mapped[str | None] = mapped_column(String, nullable=True)
+    sme_verified_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     chat_message: Mapped[ChatMessage] = relationship(
         "ChatMessage",
@@ -1012,6 +1018,27 @@ class Persona(Base):
     # Backfilled to `name`; chat falls back to `name` if blank.
     display_name: Mapped[str | None] = mapped_column(String, nullable=True)
     description: Mapped[str] = mapped_column(String)
+    # DEPRECATED / inert. Was free-text LLM-router guidance; the kNN-over-Slack
+    # router replaced that logic, so nothing reads or writes this anymore. Column
+    # retained (no migration) to avoid dropping data; safe to drop later.
+    routing_instructions: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Comma-separated phrases that DETERMINISTICALLY route a question to this
+    # assistant (case-insensitive substring match) BEFORE the LLM router runs —
+    # a hard override for unambiguous terms (e.g. "automation suite, aks
+    # deployment"). Blank => no keyword override; the LLM router decides. See
+    # secondary_llm_flows/assistant_router.keyword_route.
+    routing_keywords: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Whether this assistant is a candidate for the auto-routed Search tab. When
+    # false it's excluded from BOTH the keyword route and the kNN fallback (still
+    # manually selectable / @mentionable). Default true => every assistant
+    # participates in routing.
+    is_router_candidate: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default="true"
+    )
+    # DEPRECATED / inert. Was the semantic intent-phrase pre-route; the kNN-over-
+    # Slack router replaced that logic, so nothing reads or writes this anymore.
+    # Column retained (no migration) to avoid dropping data; safe to drop later.
+    routing_intents: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Currently stored but unused, all flows use hybrid
     search_type: Mapped[SearchType] = mapped_column(
         Enum(SearchType, native_enum=False), default=SearchType.HYBRID
@@ -1124,6 +1151,12 @@ class ChannelConfig(TypedDict):
     prioritized_sources: NotRequired[list[str]]
     # OpsGenie schedule name for DRI on-call
     opsgenie_schedule: NotRequired[str]
+    # Opt-in: show an "Awaiting SME Review" button on bot answers in this
+    # channel. `sme_group_name` is a comma-separated list of Slack user groups
+    # (display name or @handle — resolved to ids live); a member of ANY listed
+    # group can verify, so leavers are handled automatically.
+    enable_sme_validation: NotRequired[bool]
+    sme_group_name: NotRequired[str]
     # JIRA title filter for creating tickets
     jira_title_filter: NotRequired[list[str]]
     # Title filter for sending personalised response if user asks for more help
@@ -1654,4 +1687,32 @@ class AnalyticsPersonaDailyStats(Base):
         nullable=False,
         server_default=func.now(),
         onupdate=func.now(),
+    )
+
+
+class ChatReferral(Base):
+    """A landing on the chat UI from an external referral — e.g. a per-channel
+    Slack 'Ask Darwin' workflow linking to /chat?assistant=...&utm_source=slack.
+    Logged fire-and-forget from the client on page load when a utm_source is
+    present, so inbound traffic can be measured by source / channel / assistant
+    with a plain SQL query and no log-aggregation pipeline.
+
+    All fields are free-form strings from the URL (length-capped at write time);
+    they are stored as data only and never interpolated into queries or rendered
+    as HTML."""
+
+    __tablename__ = "chat_referral"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    utm_source: Mapped[str] = mapped_column(String, nullable=False)
+    utm_medium: Mapped[str | None] = mapped_column(String, nullable=True)
+    utm_campaign: Mapped[str | None] = mapped_column(String, nullable=True)
+    # The channel the link lived in (e.g. "help-orchestrator").
+    utm_channel: Mapped[str | None] = mapped_column(String, nullable=True)
+    # The `assistant` URL param as provided (a name); the id is resolved elsewhere.
+    assistant_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Who landed (null for anonymous / auth-disabled).
+    user_id: Mapped[UUID | None] = mapped_column(ForeignKey("user.id"), nullable=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
     )

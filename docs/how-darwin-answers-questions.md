@@ -19,6 +19,7 @@ enough specifics that engineers trust it.
 ## 1. The moving parts
 
 ```mermaid
+%%{init: {'theme':'base','themeVariables':{'textColor':'#1e293b','lineColor':'#64748b','edgeLabelBackground':'#ffffff','clusterBorder':'#cbd5e1'}}}%%
 flowchart LR
     SL["💬 Slack"]:::surface
     WEB["🖥️ Web chat"]:::surface
@@ -75,6 +76,7 @@ The same pipeline serves **both** Slack and web chat — they differ only in ent
 point and presentation, not in how retrieval/ranking work.
 
 ```mermaid
+%%{init: {'theme':'base','themeVariables':{'textColor':'#1e293b','lineColor':'#64748b','actorBkg':'#eef2ff','actorTextColor':'#1e293b','actorBorder':'#6366f1','actorLineColor':'#94a3b8','signalColor':'#334155','signalTextColor':'#1e293b','noteBkgColor':'#fef9c3','noteTextColor':'#713f12','noteBorderColor':'#eab308','labelBoxBkgColor':'#e0e7ff','labelBoxBorderColor':'#6366f1','labelTextColor':'#1e293b','sequenceNumberColor':'#ffffff','activationBkgColor':'#e0e7ff','activationBorderColor':'#6366f1'}}}%%
 sequenceDiagram
     autonumber
     actor U as 👤 User
@@ -136,6 +138,7 @@ precision last:
 ```
 
 ```mermaid
+%%{init: {'theme':'base','themeVariables':{'textColor':'#1e293b','lineColor':'#64748b','edgeLabelBackground':'#ffffff','clusterBorder':'#cbd5e1'}}}%%
 flowchart TB
     CORP["📚 Entire knowledge base<br/>(100k+ chunks)"]:::broad
     CORP --> S1["① Hybrid retrieval · Vespa<br/>vector + keyword, recency-weighted"]:::retrieve
@@ -173,6 +176,7 @@ Every candidate's score blends two signals, then is nudged by freshness and huma
 feedback:
 
 ```mermaid
+%%{init: {'theme':'base','themeVariables':{'textColor':'#1e293b','lineColor':'#64748b','edgeLabelBackground':'#ffffff','clusterBorder':'#cbd5e1'}}}%%
 flowchart LR
     SEM["🧭 Semantic similarity<br/>meaning match (vectors)"]:::sem
     KW["🔤 Keyword match<br/>exact terms (BM25)"]:::kw
@@ -238,6 +242,7 @@ behavior).
 | **Guardrails** | built in | — | ACL filtering · rate limiting · retry/backoff |
 
 ```mermaid
+%%{init: {'theme':'base','themeVariables':{'textColor':'#1e293b','lineColor':'#64748b','edgeLabelBackground':'#ffffff','clusterBorder':'#cbd5e1'}}}%%
 flowchart LR
     QQ(["❓ Same question"]):::q
     QQ --> A1["🅰️ Assistant A<br/>rerank OFF · broad scope"]:::dim
@@ -264,6 +269,7 @@ A weekend RAG demo is: embed docs → nearest-neighbor → stuff prompt. Darwin 
 the parts that decide whether answers are **trustworthy at scale**:
 
 ```mermaid
+%%{init: {'theme':'base','themeVariables':{'textColor':'#1e293b','lineColor':'#64748b','edgeLabelBackground':'#ffffff','clusterBorder':'#cbd5e1'}}}%%
 flowchart TB
     subgraph TOY["🧪 Toy RAG"]
       direction TB

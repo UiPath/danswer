@@ -117,6 +117,10 @@ class SlackBotConfigCreationRequest(BaseModel):
     # List of source types to prioritize in search results
     prioritized_sources: list[str] | None = None
     opsgenie_schedule: str | None = None
+    # SME verification: opt-in "Verify this answer" button gated to a Slack user
+    # group (by display name or @handle).
+    enable_sme_validation: bool = False
+    sme_group_name: str | None = None
     jira_config: dict[str, Any] | None = None
     curated_response_config: dict[str, Any] | None = None
     jira_title_filter: list[str] | None = None
