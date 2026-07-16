@@ -141,6 +141,9 @@ export function AutoSearch({ userRole }: { userRole: string | null }) {
     useState<AutoSearchUnionResponse | null>(null);
   const [sourceLoading, setSourceLoading] = useState(false);
   const [sourceError, setSourceError] = useState<string | null>(null);
+  // The query that produced the current result — used by the compare tabs to
+  // generate their answer on demand (on click), not eagerly.
+  const [answeredQuery, setAnsweredQuery] = useState("");
   // chat_message_id -> the feedback already submitted for it (one per answer).
   const [feedbackGiven, setFeedbackGiven] = useState<"like" | "dislike" | null>(
     null
@@ -309,6 +312,7 @@ export function AutoSearch({ userRole }: { userRole: string | null }) {
     setSourceResult(null);
     setSourceError(null);
     setSourceLoading(false);
+    setAnsweredQuery("");
     try {
       const response = await fetch("/api/query/auto-search", {
         method: "POST",
@@ -324,18 +328,11 @@ export function AutoSearch({ userRole }: { userRole: string | null }) {
       setResult(data);
       pushRecent(trimmed);
       setForcedPersona(null); // one-shot: don't carry the pick to the next query
-      // Lazily fetch the union (compare) answer AFTER the primary answer is shown,
-      // so the two never block each other. The top-1 answer is already on screen.
-      if (data.compare_enabled && data.union_assistants.length > 0) {
-        void fetchUnionAnswer(
-          trimmed,
-          data.union_assistants.map((a) => a.persona_id)
-        );
-      }
-      // Third tab (HighSpot + docs sites) — also lazy, in parallel with the union.
-      if (data.compare_enabled && data.source_tab_enabled) {
-        void fetchSourceAnswer(trimmed);
-      }
+      // NOTE: the compare answers (union + source-scoped) are NOT generated here.
+      // Each is fetched only when the user clicks its tab — so if they're happy
+      // with the top match, we never spend those two extra LLM calls. Remember the
+      // query so the tab handlers can generate on demand.
+      setAnsweredQuery(trimmed);
     } catch {
       setError("Something went wrong running the search.");
     } finally {
@@ -680,7 +677,16 @@ export function AutoSearch({ userRole }: { userRole: string | null }) {
                   <button
                     role="tab"
                     aria-selected={activeTab === "union"}
-                    onClick={() => setActiveTab("union")}
+                    onClick={() => {
+                      setActiveTab("union");
+                      // Generate the combined answer on first open only.
+                      if (!unionResult && !unionLoading && answeredQuery) {
+                        void fetchUnionAnswer(
+                          answeredQuery,
+                          unionAssistants.map((a) => a.persona_id)
+                        );
+                      }
+                    }}
                     className={`-mb-px flex items-center gap-2 border-b-2 pb-2.5 text-sm font-medium transition-colors ${
                       activeTab === "union"
                         ? "border-accent text-default"
@@ -696,7 +702,13 @@ export function AutoSearch({ userRole }: { userRole: string | null }) {
                     <button
                       role="tab"
                       aria-selected={activeTab === "sources"}
-                      onClick={() => setActiveTab("sources")}
+                      onClick={() => {
+                        setActiveTab("sources");
+                        // Generate the HighSpot+Docs answer on first open only.
+                        if (!sourceResult && !sourceLoading && answeredQuery) {
+                          void fetchSourceAnswer(answeredQuery);
+                        }
+                      }}
                       className={`-mb-px flex items-center gap-2 border-b-2 pb-2.5 text-sm font-medium transition-colors ${
                         activeTab === "sources"
                           ? "border-accent text-default"
