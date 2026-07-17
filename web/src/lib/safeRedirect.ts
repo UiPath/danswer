@@ -18,7 +18,7 @@ export const LOGIN_NEXT_COOKIE = "darwin_login_next";
 
 // App pages a post-login redirect may land on. Deliberately excludes /admin,
 // /auth, etc. — a login flow should never bounce a user into a privileged route.
-const ALLOWED_NEXT_PREFIXES = ["/chat"];
+const ALLOWED_NEXT_PREFIXES = ["/chat", "/onboarding"];
 
 const MAX_NEXT_LENGTH = 512;
 
