@@ -26,9 +26,11 @@ from danswer.utils.logger import setup_logger
 
 logger = setup_logger()
 
-# Bounded scan for name->channel lookup (Slack has no name lookup API). Prefer a
-# #mention (carries the id) — that path is a single, exact call.
-_MAX_CHANNEL_PAGES = 12
+# Slack has no name->channel lookup API. On a large Enterprise Grid org a bare
+# name can be thousands of channels deep, so instead of enumerating everything we
+# search only the channels the bot is a MEMBER of (users.conversations — a small
+# set), which is also the real precondition for the bot to operate in a channel.
+_MEMBER_CHANNEL_PAGES = 6  # ~6k channels the bot is in — plenty
 _MENTION_RE = re.compile(r"<#(C[A-Z0-9]+)(?:\|[^>]*)?>")
 _CHANNEL_ID_RE = re.compile(r"^C[A-Z0-9]{6,}$")
 
@@ -42,6 +44,24 @@ class ValidationResult(BaseModel):
 
 def _bot_client() -> WebClient:
     return WebClient(token=fetch_tokens().bot_token)
+
+
+def _find_channel_by_name(
+    method: object, name: str, max_pages: int, **kwargs: object
+) -> dict | None:
+    """Paginate a Slack list endpoint (conversations_list / users_conversations)
+    looking for an exact channel-name match."""
+    cursor: str | None = None
+    for _ in range(max_pages):
+        resp = method(limit=1000, cursor=cursor, **kwargs)  # type: ignore[operator]
+        for ch in resp.get("channels", []):
+            if ch.get("name", "").lower() == name:
+                return ch
+        meta = resp.get("response_metadata")
+        cursor = meta.get("next_cursor") if isinstance(meta, dict) else None
+        if not cursor:
+            break
+    return None
 
 
 def validate_slack_channel(value: str) -> ValidationResult:
@@ -75,34 +95,33 @@ def validate_slack_channel(value: str) -> ValidationResult:
                 message=f"Channel not found or bot lacks access ({e.response.get('error')})",
             )
 
+    # Bare name. Slack has no name->channel lookup API, and every channel-read
+    # endpoint (conversations_info/history/replies) needs the ID, so there's no
+    # cheap indirect check. Rather than enumerate the whole org (tens of
+    # thousands of channels on Enterprise Grid), we search only the channels the
+    # BOT is a member of (users.conversations — a small set) — which is also the
+    # real precondition: the bot must be in the channel to answer and index it.
     name = raw.lstrip("#").lower()
-    cursor: str | None = None
     try:
-        for _ in range(_MAX_CHANNEL_PAGES):
-            resp = client.conversations_list(
-                types="public_channel,private_channel",
-                limit=1000,
-                cursor=cursor,
-                exclude_archived=True,
-            )
-            for ch in resp.get("channels", []):
-                if ch.get("name", "").lower() == name:
-                    return ValidationResult(
-                        valid=True,
-                        message=f"#{ch['name']}",
-                        resolved={"channel_id": ch["id"], "channel_name": ch["name"]},
-                    )
-            meta = resp.get("response_metadata")
-            cursor = meta.get("next_cursor") if isinstance(meta, dict) else None
-            if not cursor:
-                break
+        ch = _find_channel_by_name(
+            client.users_conversations,
+            name,
+            _MEMBER_CHANNEL_PAGES,
+            types="public_channel,private_channel",
+        )
     except SlackApiError as e:
         return ValidationResult(
             valid=False, message=f"Couldn't verify channel ({e.response.get('error')})"
         )
+    if ch:
+        return ValidationResult(
+            valid=True,
+            message=f"#{ch['name']}",
+            resolved={"channel_id": ch["id"], "channel_name": ch["name"]},
+        )
     return ValidationResult(
         valid=False,
-        message="Channel not found — paste it as a #mention to be sure",
+        message=f"The Darwin bot isn't in #{name} yet — invite it to the channel, then re-check.",
     )
 
 

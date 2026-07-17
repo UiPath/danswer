@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   FiCheck,
   FiChevronDown,
   FiChevronUp,
   FiInfo,
+  FiMoon,
   FiPlus,
+  FiSun,
   FiTrash2,
   FiX,
 } from "react-icons/fi";
@@ -28,6 +30,79 @@ const inputClass =
   "w-full rounded-md border border-border-medium bg-background px-3 py-2 " +
   "text-sm text-default placeholder:text-subtle focus:outline-none " +
   "focus:ring-2 focus:ring-accent/40 focus:border-accent";
+
+// How long to wait after the last keystroke before hitting the backend
+// validator (so you don't have to blur the field).
+const VALIDATE_DEBOUNCE_MS = 600;
+
+// --- lightweight, synchronous client-side format checks ---------------------
+// These catch obvious mistakes instantly (before any network round-trip) and
+// suppress the backend call until the format looks plausible. They return a
+// short hint string, or null when the value looks fine to send to the server.
+
+type ClientCheck = (value: string) => string | null;
+
+const checkChannel: ClientCheck = (v) => {
+  const raw = v.trim().replace(/^#/, "");
+  if (!raw) return null;
+  // A channel id or a pasted link/mention — let the server resolve it.
+  if (
+    /^C[A-Z0-9]{6,}$/.test(raw) ||
+    raw.includes("slack.com/") ||
+    raw.includes("<#")
+  )
+    return null;
+  if (/\s/.test(raw))
+    return "Channel names have no spaces — paste a link to be sure.";
+  if (/[A-Z]/.test(raw)) return "Channel names are lowercase.";
+  return null;
+};
+
+const checkUrl: ClientCheck = (v) =>
+  /^https?:\/\//i.test(v.trim()) ? null : "Start with https://";
+
+const checkJql: ClientCheck = (v) =>
+  v.trim().length < 3 ? "Enter a JQL filter, e.g. project = ABC" : null;
+
+const SOURCE_CLIENT_CHECK: Record<OnboardingSourceType, ClientCheck> = {
+  web: checkUrl,
+  confluence: checkUrl,
+  slack: checkChannel,
+  jira: checkJql,
+};
+
+// --- light/dark toggle ------------------------------------------------------
+// Mirrors UserDropdown: flips `.dark` on <html> and persists to the same
+// `darwin-theme` key, so the choice carries across the whole app. The page
+// already honors the global default set elsewhere — this just adds the control.
+
+function ThemeToggle() {
+  const [dark, setDark] = useState(true);
+  useEffect(() => {
+    setDark(document.documentElement.classList.contains("dark"));
+  }, []);
+  const toggle = () => {
+    const next = !dark;
+    setDark(next);
+    try {
+      localStorage.setItem("darwin-theme", next ? "dark" : "light");
+    } catch {
+      /* ignore */
+    }
+    document.documentElement.classList.toggle("dark", next);
+  };
+  return (
+    <button
+      type="button"
+      onClick={toggle}
+      title={dark ? "Switch to light mode" : "Switch to dark mode"}
+      aria-label={dark ? "Switch to light mode" : "Switch to dark mode"}
+      className="rounded-md border border-border-medium p-2 text-subtle hover:bg-hover-light hover:text-default"
+    >
+      {dark ? <FiSun className="h-4 w-4" /> : <FiMoon className="h-4 w-4" />}
+    </button>
+  );
+}
 
 // --- small info tooltip -----------------------------------------------------
 
@@ -83,6 +158,7 @@ function ValidatedField({
   onResolved,
   optional,
   info,
+  clientCheck,
 }: {
   label: string;
   placeholder?: string;
@@ -92,21 +168,34 @@ function ValidatedField({
   onResolved?: (r: ValidationResult) => void;
   optional?: boolean;
   info?: string;
+  clientCheck?: ClientCheck;
 }) {
   const [result, setResult] = useState<ValidationResult | null>(null);
   const [checking, setChecking] = useState(false);
+  // Keep onResolved fresh without retriggering the debounce effect.
+  const onResolvedRef = useRef(onResolved);
+  onResolvedRef.current = onResolved;
 
-  async function check() {
-    if (!value.trim()) {
+  const hint = value.trim() ? (clientCheck?.(value) ?? null) : null;
+
+  // Debounced backend validation: fires VALIDATE_DEBOUNCE_MS after the last
+  // keystroke, and is skipped entirely while the local format check fails.
+  useEffect(() => {
+    if (!value.trim() || hint) {
       setResult(null);
+      onResolvedRef.current?.({ valid: false, message: "", resolved: {} });
       return;
     }
-    setChecking(true);
-    const r = await validateOnboardingField(kind, value);
-    setResult(r);
-    setChecking(false);
-    onResolved?.(r);
-  }
+    const t = setTimeout(async () => {
+      setChecking(true);
+      const r = await validateOnboardingField(kind, value);
+      setResult(r);
+      setChecking(false);
+      onResolvedRef.current?.(r);
+    }, VALIDATE_DEBOUNCE_MS);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value, kind, hint]);
 
   return (
     <div className="mb-4">
@@ -125,11 +214,13 @@ function ValidatedField({
           onChange(e.target.value);
           setResult(null);
         }}
-        onBlur={check}
         className={inputClass}
       />
       {checking && <p className="mt-1.5 text-xs text-subtle">Validating…</p>}
-      <ResultLine result={result} />
+      {!checking && result && <ResultLine result={result} />}
+      {!checking && !result && hint && (
+        <p className="mt-1.5 text-xs text-subtle">{hint}</p>
+      )}
     </div>
   );
 }
@@ -184,6 +275,27 @@ function SourceRow({
   canMoveDown: boolean;
 }) {
   const [result, setResult] = useState<ValidationResult | null>(null);
+  const [checking, setChecking] = useState(false);
+  const hint = source.value.trim()
+    ? SOURCE_CLIENT_CHECK[source.type](source.value)
+    : null;
+
+  useEffect(() => {
+    if (!source.value.trim() || hint) {
+      setResult(null);
+      return;
+    }
+    const t = setTimeout(async () => {
+      setChecking(true);
+      setResult(
+        await validateOnboardingField(SOURCE_KIND[source.type], source.value)
+      );
+      setChecking(false);
+    }, VALIDATE_DEBOUNCE_MS);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [source.value, source.type, hint]);
+
   return (
     <div className="mb-2 flex items-start gap-2">
       <select
@@ -207,18 +319,13 @@ function SourceRow({
             onChange({ ...source, value: e.target.value });
             setResult(null);
           }}
-          onBlur={async () => {
-            if (!source.value.trim()) return;
-            setResult(
-              await validateOnboardingField(
-                SOURCE_KIND[source.type],
-                source.value
-              )
-            );
-          }}
           className={inputClass}
         />
-        <ResultLine result={result} />
+        {checking && <p className="mt-1.5 text-xs text-subtle">Validating…</p>}
+        {!checking && result && <ResultLine result={result} />}
+        {!checking && !result && hint && (
+          <p className="mt-1.5 text-xs text-subtle">{hint}</p>
+        )}
       </div>
       <div className="flex shrink-0 items-center">
         <button
@@ -401,18 +508,21 @@ export function OnboardingForm() {
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-10">
-      <header className="mb-8">
-        <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-accent">
-          Team onboarding
-        </p>
-        <h1 className="text-2xl font-semibold text-default">
-          Onboarding Darwin to Slack Channel
-        </h1>
-        <p className="mt-2 text-sm text-subtle">
-          Point Darwin at your team&apos;s knowledge and channel. An admin
-          approves the request, then Darwin scrapes your sources and wires up
-          the assistant. Every field is checked live before you submit.
-        </p>
+      <header className="mb-8 flex items-start justify-between gap-4">
+        <div>
+          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-accent">
+            Team onboarding
+          </p>
+          <h1 className="text-2xl font-semibold text-default">
+            Onboarding Darwin to Slack Channel
+          </h1>
+          <p className="mt-2 text-sm text-subtle">
+            Point Darwin at your team&apos;s knowledge and channel. An admin
+            approves the request, then Darwin scrapes your sources and wires up
+            the assistant. Every field is checked live before you submit.
+          </p>
+        </div>
+        <ThemeToggle />
       </header>
 
       <Section step={1} title="Channel & assistant">
@@ -422,6 +532,7 @@ export function OnboardingForm() {
           kind="slack_channel"
           value={channelInput}
           onChange={setChannelInput}
+          clientCheck={checkChannel}
           info="This is the channel where the Darwin Slack bot will be configured — it answers questions here."
           onResolved={(r) =>
             setChannel(
@@ -456,6 +567,7 @@ export function OnboardingForm() {
           kind="docs"
           value={docsCloud}
           onChange={setDocsCloud}
+          clientCheck={checkUrl}
           optional
         />
         <ValidatedField
@@ -464,6 +576,7 @@ export function OnboardingForm() {
           kind="docs"
           value={docsOnprem}
           onChange={setDocsOnprem}
+          clientCheck={checkUrl}
           optional
         />
         <p className="mb-4 text-xs text-subtle">
@@ -572,8 +685,15 @@ export function OnboardingForm() {
       )}
       <button
         onClick={submit}
-        disabled={submitting}
-        className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-inverted transition-opacity hover:opacity-90 disabled:opacity-60"
+        disabled={submitting || !teamName.trim() || !channel}
+        title={
+          !channel
+            ? "Validate the bot channel first"
+            : !teamName.trim()
+              ? "Enter a team name"
+              : undefined
+        }
+        className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-inverted transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
       >
         {submitting ? "Submitting…" : "Submit onboarding request"}
       </button>
