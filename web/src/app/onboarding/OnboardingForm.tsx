@@ -25,6 +25,7 @@ import {
   ClientCheck,
   SOURCE_CLIENT_CHECK,
 } from "@/lib/onboarding/clientChecks";
+import { useSearchParams } from "next/navigation";
 
 // All colors come from the app's semantic theme tokens (text-default,
 // bg-background, border-border, …) so the page follows the global light/dark
@@ -329,6 +330,12 @@ function Section({
 // --- main form --------------------------------------------------------------
 
 export function OnboardingForm() {
+  const searchParams = useSearchParams();
+  // "Submit a request" vs "My requests" — surfaced as top tabs so status isn't
+  // buried at the bottom. Deep-linkable via ?view=requests (e.g. from the nav).
+  const [tab, setTab] = useState<"form" | "requests">(
+    searchParams?.get("view") === "requests" ? "requests" : "form"
+  );
   const [teamName, setTeamName] = useState("");
   const [channelInput, setChannelInput] = useState("");
   const [channel, setChannel] = useState<{ id: string; name: string } | null>(
@@ -361,13 +368,18 @@ export function OnboardingForm() {
     void refreshMine();
   }, []);
 
-  async function refreshMine() {
+  async function refreshMine(): Promise<OnboardingRequestSnapshot[]> {
     try {
       const r = await fetch("/api/onboarding/mine");
-      if (r.ok) setMine((await r.json()) as OnboardingRequestSnapshot[]);
+      if (r.ok) {
+        const data = (await r.json()) as OnboardingRequestSnapshot[];
+        setMine(data);
+        return data;
+      }
     } catch {
       /* ignore */
     }
+    return [];
   }
 
   async function loadStatus(id: number) {
@@ -377,6 +389,30 @@ export function OnboardingForm() {
       setStatuses((prev) => ({ ...prev, [id]: data }));
     }
   }
+
+  // On the "My requests" tab, auto-load each request's per-source scrape status
+  // (and re-poll every 15s) so the requester can see work happening without
+  // clicking anything.
+  useEffect(() => {
+    if (tab !== "requests") return;
+    let active = true;
+    const load = async () => {
+      const list = await refreshMine();
+      if (!active) return;
+      await Promise.all(
+        list
+          .filter((r) => (r.cc_pair_ids?.length ?? 0) > 0)
+          .map((r) => loadStatus(r.id))
+      );
+    };
+    void load();
+    const interval = setInterval(load, 15000);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab]);
 
   function buildSources(): OnboardingSource[] {
     const s: OnboardingSource[] = [];
@@ -465,201 +501,234 @@ export function OnboardingForm() {
         </p>
       </header>
 
-      <Section step={1} title="Channel & assistant">
-        <ValidatedField
-          label="Slack Channel"
-          placeholder="https://your-workspace.slack.com/archives/C0123ABCDE"
-          kind="slack_channel"
-          value={channelInput}
-          onChange={setChannelInput}
-          clientCheck={checkChannelLink}
-          helpText="Get the link in Slack: open the channel → click ⋯ (More) → Copy → Copy link. A link lets us verify the exact channel; a name can't be checked reliably."
-          info="This is the channel where the Darwin Slack bot answers questions. By default this channel is scraped and kept updated, so its knowledge stays current."
-          onResolved={(r) =>
-            setChannel(
-              r.valid
-                ? {
-                    id: String(r.resolved.channel_id ?? ""),
-                    name: String(r.resolved.channel_name ?? ""),
-                  }
-                : null
-            )
-          }
-        />
-        <label className="mb-1 block text-sm font-medium text-default">
-          Team name
-        </label>
-        <input
-          value={teamName}
-          onChange={(e) => setTeamName(e.target.value)}
-          placeholder="e.g. Integration Service"
-          className={inputClass}
-        />
-      </Section>
-
-      <Section
-        step={2}
-        title="Sources"
-        hint="Add everything Darwin should read. Order sets retrieval priority — drag the arrows to reorder."
-      >
-        <ValidatedField
-          label="Docs-URL - Cloud"
-          placeholder="https://docs.uipath.com/<product>/automation-cloud/latest"
-          kind="docs"
-          value={docsCloud}
-          onChange={setDocsCloud}
-          clientCheck={checkUrl}
-          optional
-        />
-        <ValidatedField
-          label="Docs-URL - On-prem"
-          placeholder="https://docs.uipath.com/<product>/standalone/latest"
-          kind="docs"
-          value={docsOnprem}
-          onChange={setDocsOnprem}
-          clientCheck={checkUrl}
-          helpText="Also accepts an automation-suite URL, e.g. https://docs.uipath.com/<product>/automation-suite/<latest-version>"
-          optional
-        />
-        <p className="mb-4 text-xs text-subtle">
-          Paste the product root URL only. For automation-suite docs the version
-          is stripped and Darwin scrapes the latest 3 versions automatically —
-          you don&apos;t need to list each version.
-        </p>
-
-        <div className="mb-2 text-sm font-medium text-default">
-          Additional sources
-        </div>
-        {extraSources.map((s, i) => (
-          <SourceRow
-            key={i}
-            source={s}
-            canMoveUp={i > 0}
-            canMoveDown={i < extraSources.length - 1}
-            onChange={(ns) =>
-              setExtraSources((p) => p.map((x, j) => (j === i ? ns : x)))
-            }
-            onRemove={() => setExtraSources((p) => p.filter((_, j) => j !== i))}
-            onMove={(dir) =>
-              setExtraSources((p) => {
-                const j = i + dir;
-                if (j < 0 || j >= p.length) return p;
-                const c = [...p];
-                [c[i], c[j]] = [c[j], c[i]];
-                return c;
-              })
-            }
-          />
+      <div className="mb-6 flex gap-1 border-b border-border">
+        {(["form", "requests"] as const).map((t) => (
+          <button
+            key={t}
+            type="button"
+            onClick={() => setTab(t)}
+            className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
+              tab === t
+                ? "border-accent text-default"
+                : "border-transparent text-subtle hover:text-default"
+            }`}
+          >
+            {t === "form"
+              ? "Submit a request"
+              : `My requests${mine.length ? ` (${mine.length})` : ""}`}
+          </button>
         ))}
-        <button
-          type="button"
-          onClick={() =>
-            setExtraSources((p) => [...p, { type: "confluence", value: "" }])
-          }
-          className="mt-1 inline-flex items-center gap-1 text-sm text-link hover:underline"
-        >
-          <FiPlus className="h-4 w-4" /> Add source
-        </button>
-      </Section>
+      </div>
 
-      <Section
-        step={3}
-        title="Assistant prompt"
-        hint="Prefilled from the default (Orchestrator) — edit if your team needs different behavior."
-      >
-        <textarea
-          value={systemPrompt}
-          onChange={(e) => setSystemPrompt(e.target.value)}
-          rows={6}
-          className={`${inputClass} font-mono leading-relaxed`}
-        />
-      </Section>
-
-      <Section step={4} title="Options">
-        <label className="mb-3 flex items-center gap-2 text-sm text-default">
-          <input
-            type="checkbox"
-            checked={smeEnabled}
-            onChange={(e) => setSmeEnabled(e.target.checked)}
-            className="accent-accent"
-          />
-          Let SMEs verify answers
-        </label>
-        {smeEnabled && (
-          <ValidatedField
-            label="SME Slack user group(s)"
-            placeholder="e.g. as-smes (comma-separated)"
-            kind="slack_group"
-            value={smeGroup}
-            onChange={setSmeGroup}
-          />
-        )}
-        <label className="flex items-center gap-2 text-sm text-default">
-          <input
-            type="checkbox"
-            checked={oncallEnabled}
-            onChange={(e) => setOncallEnabled(e.target.checked)}
-            className="accent-accent"
-          />
-          On &quot;need more help&quot;, tag the on-call
-        </label>
-        {oncallEnabled && (
-          <div className="mt-3">
+      {tab === "form" && (
+        <>
+          <Section step={1} title="Channel & assistant">
             <ValidatedField
-              label="DRI Slack handle(s)"
-              placeholder="@as-dri (comma-separated for multiple)"
-              kind="slack_group"
-              value={oncallHandles}
-              onChange={setOncallHandles}
-              helpText="Slack user-group handle(s) to @-mention when someone needs more help, e.g. @as-dri."
-              optional
+              label="Slack Channel"
+              placeholder="https://your-workspace.slack.com/archives/C0123ABCDE"
+              kind="slack_channel"
+              value={channelInput}
+              onChange={setChannelInput}
+              clientCheck={checkChannelLink}
+              helpText="Get the link in Slack: open the channel → click ⋯ (More) → Copy → Copy link. A link lets us verify the exact channel; a name can't be checked reliably."
+              info="This is the channel where the Darwin Slack bot answers questions. By default this channel is scraped and kept updated, so its knowledge stays current."
+              onResolved={(r) =>
+                setChannel(
+                  r.valid
+                    ? {
+                        id: String(r.resolved.channel_id ?? ""),
+                        name: String(r.resolved.channel_name ?? ""),
+                      }
+                    : null
+                )
+              }
             />
+            <label className="mb-1 block text-sm font-medium text-default">
+              Team name
+            </label>
             <input
-              value={oncallSchedule}
-              onChange={(e) => setOncallSchedule(e.target.value)}
-              placeholder="OpsGenie schedule name (optional)"
+              value={teamName}
+              onChange={(e) => setTeamName(e.target.value)}
+              placeholder="e.g. Integration Service"
               className={inputClass}
             />
-            <p className="mt-1.5 text-xs text-subtle">
-              Optionally pull the current DRI from an OpsGenie schedule instead
-              of (or in addition to) the handles above.
+          </Section>
+
+          <Section
+            step={2}
+            title="Sources"
+            hint="Add everything Darwin should read. Order sets retrieval priority — drag the arrows to reorder."
+          >
+            <ValidatedField
+              label="Docs-URL - Cloud"
+              placeholder="https://docs.uipath.com/<product>/automation-cloud/latest"
+              kind="docs"
+              value={docsCloud}
+              onChange={setDocsCloud}
+              clientCheck={checkUrl}
+              optional
+            />
+            <ValidatedField
+              label="Docs-URL - On-prem"
+              placeholder="https://docs.uipath.com/<product>/standalone/latest"
+              kind="docs"
+              value={docsOnprem}
+              onChange={setDocsOnprem}
+              clientCheck={checkUrl}
+              helpText="Also accepts an automation-suite URL, e.g. https://docs.uipath.com/<product>/automation-suite/<latest-version>"
+              optional
+            />
+            <p className="mb-4 text-xs text-subtle">
+              Paste the product root URL only. For automation-suite docs the
+              version is stripped and Darwin scrapes the latest 3 versions
+              automatically — you don&apos;t need to list each version.
             </p>
-          </div>
-        )}
-      </Section>
 
-      {error && (
-        <p className="mb-3 flex items-center gap-1.5 text-sm text-error">
-          <FiX className="h-4 w-4 shrink-0" />
-          {error}
-        </p>
-      )}
-      {submitted && !error && (
-        <p className="mb-3 flex items-center gap-1.5 text-sm text-link">
-          <FiCheck className="h-4 w-4 shrink-0" />
-          Request submitted — an admin will review it. Track it below.
-        </p>
-      )}
-      <button
-        onClick={submit}
-        disabled={submitting || !teamName.trim() || !channel}
-        title={
-          !channel
-            ? "Validate the bot channel first"
-            : !teamName.trim()
-              ? "Enter a team name"
-              : undefined
-        }
-        className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-inverted transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
-      >
-        {submitting ? "Submitting…" : "Submit onboarding request"}
-      </button>
+            <div className="mb-2 text-sm font-medium text-default">
+              Additional sources
+            </div>
+            {extraSources.map((s, i) => (
+              <SourceRow
+                key={i}
+                source={s}
+                canMoveUp={i > 0}
+                canMoveDown={i < extraSources.length - 1}
+                onChange={(ns) =>
+                  setExtraSources((p) => p.map((x, j) => (j === i ? ns : x)))
+                }
+                onRemove={() =>
+                  setExtraSources((p) => p.filter((_, j) => j !== i))
+                }
+                onMove={(dir) =>
+                  setExtraSources((p) => {
+                    const j = i + dir;
+                    if (j < 0 || j >= p.length) return p;
+                    const c = [...p];
+                    [c[i], c[j]] = [c[j], c[i]];
+                    return c;
+                  })
+                }
+              />
+            ))}
+            <button
+              type="button"
+              onClick={() =>
+                setExtraSources((p) => [
+                  ...p,
+                  { type: "confluence", value: "" },
+                ])
+              }
+              className="mt-1 inline-flex items-center gap-1 text-sm text-link hover:underline"
+            >
+              <FiPlus className="h-4 w-4" /> Add source
+            </button>
+          </Section>
 
-      {mine.length > 0 && (
-        <div className="mt-12">
+          <Section
+            step={3}
+            title="Assistant prompt"
+            hint="Prefilled from the default (Orchestrator) — edit if your team needs different behavior."
+          >
+            <textarea
+              value={systemPrompt}
+              onChange={(e) => setSystemPrompt(e.target.value)}
+              rows={6}
+              className={`${inputClass} font-mono leading-relaxed`}
+            />
+          </Section>
+
+          <Section step={4} title="Options">
+            <label className="mb-3 flex items-center gap-2 text-sm text-default">
+              <input
+                type="checkbox"
+                checked={smeEnabled}
+                onChange={(e) => setSmeEnabled(e.target.checked)}
+                className="accent-accent"
+              />
+              Let SMEs verify answers
+            </label>
+            {smeEnabled && (
+              <ValidatedField
+                label="SME Slack user group(s)"
+                placeholder="e.g. as-smes (comma-separated)"
+                kind="slack_group"
+                value={smeGroup}
+                onChange={setSmeGroup}
+              />
+            )}
+            <label className="flex items-center gap-2 text-sm text-default">
+              <input
+                type="checkbox"
+                checked={oncallEnabled}
+                onChange={(e) => setOncallEnabled(e.target.checked)}
+                className="accent-accent"
+              />
+              On &quot;need more help&quot;, tag the on-call
+            </label>
+            {oncallEnabled && (
+              <div className="mt-3">
+                <ValidatedField
+                  label="DRI Slack handle(s)"
+                  placeholder="@as-dri (comma-separated for multiple)"
+                  kind="slack_group"
+                  value={oncallHandles}
+                  onChange={setOncallHandles}
+                  helpText="Slack user-group handle(s) to @-mention when someone needs more help, e.g. @as-dri."
+                  optional
+                />
+                <input
+                  value={oncallSchedule}
+                  onChange={(e) => setOncallSchedule(e.target.value)}
+                  placeholder="OpsGenie schedule name (optional)"
+                  className={inputClass}
+                />
+                <p className="mt-1.5 text-xs text-subtle">
+                  Optionally pull the current DRI from an OpsGenie schedule
+                  instead of (or in addition to) the handles above.
+                </p>
+              </div>
+            )}
+          </Section>
+
+          {error && (
+            <p className="mb-3 flex items-center gap-1.5 text-sm text-error">
+              <FiX className="h-4 w-4 shrink-0" />
+              {error}
+            </p>
+          )}
+          {submitted && !error && (
+            <p className="mb-3 flex items-center gap-1.5 text-sm text-link">
+              <FiCheck className="h-4 w-4 shrink-0" />
+              Request submitted — an admin will review it. Track it below.
+            </p>
+          )}
+          <button
+            onClick={submit}
+            disabled={submitting || !teamName.trim() || !channel}
+            title={
+              !channel
+                ? "Validate the bot channel first"
+                : !teamName.trim()
+                  ? "Enter a team name"
+                  : undefined
+            }
+            className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-inverted transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {submitting ? "Submitting…" : "Submit onboarding request"}
+          </button>
+        </>
+      )}
+
+      {tab === "requests" && (
+        <div>
           <h2 className="mb-3 text-lg font-semibold text-default">
             Your requests
           </h2>
+          {mine.length === 0 && (
+            <p className="text-sm text-subtle">
+              You haven&apos;t submitted any onboarding requests yet.
+            </p>
+          )}
           {mine.map((r) => (
             <div
               key={r.id}

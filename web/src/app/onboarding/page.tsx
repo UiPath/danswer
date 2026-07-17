@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { getAuthTypeMetadataSS, getCurrentUserSS } from "@/lib/userSS";
 import { Header } from "@/components/header/Header";
@@ -26,7 +27,11 @@ export default async function Page() {
   return (
     <div className="h-screen overflow-y-auto bg-background">
       <Header user={user} />
-      <OnboardingForm />
+      {/* Suspense: OnboardingForm reads useSearchParams (?view=requests deep
+          link), which the prod build requires be wrapped. */}
+      <Suspense fallback={null}>
+        <OnboardingForm />
+      </Suspense>
     </div>
   );
 }

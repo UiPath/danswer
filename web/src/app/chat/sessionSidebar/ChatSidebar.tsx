@@ -4,6 +4,7 @@ import {
   FiBook,
   FiEdit,
   FiFolderPlus,
+  FiList,
   FiLoader,
   FiPlusSquare,
   FiUserPlus,
@@ -197,6 +198,16 @@ export const ChatSidebar = ({
             <BasicClickable fullWidth>
               <div className="flex items-center text-default font-medium">
                 <FiUserPlus className="ml-1 mr-2" /> Onboard a Team
+              </div>
+            </BasicClickable>
+          </Link>
+        </div>
+
+        <div className="mt-1 mb-1 mx-3">
+          <Link href="/onboarding?view=requests">
+            <BasicClickable fullWidth>
+              <div className="flex items-center text-default font-medium">
+                <FiList className="ml-1 mr-2" /> My onboarding requests
               </div>
             </BasicClickable>
           </Link>
