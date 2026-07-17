@@ -93,15 +93,26 @@ def validate_slack_channel(value: str) -> ValidationResult:
     if channel_id:
         try:
             ch = client.conversations_info(channel=channel_id)["channel"]
+            # Scraping needs the bot IN the channel. It auto-joins PUBLIC channels
+            # on scrape, but can't self-join PRIVATE ones — those need an invite.
+            if ch.get("is_member"):
+                note = "the bot is already in this channel"
+            elif ch.get("is_private"):
+                note = "invite @Darwin — private channels can't be auto-joined"
+            else:
+                note = "the bot will auto-join this public channel when it scrapes"
             return ValidationResult(
                 valid=True,
-                message=f"#{ch['name']}",
+                message=f"#{ch['name']} · {note}",
                 resolved={"channel_id": ch["id"], "channel_name": ch["name"]},
             )
         except SlackApiError as e:
             return ValidationResult(
                 valid=False,
-                message=f"Channel not found or bot lacks access ({e.response.get('error')})",
+                message=(
+                    "Channel not found or the bot can't access it — for a private "
+                    f"channel, invite @Darwin first ({e.response.get('error')})"
+                ),
             )
 
     # Bare name. Slack has no name->channel lookup API, and every channel-read
@@ -134,7 +145,10 @@ def validate_slack_channel(value: str) -> ValidationResult:
         )
     return ValidationResult(
         valid=True,
-        message=f"#{name} · the bot will be added to this channel during onboarding",
+        message=(
+            f"#{name} · public channels auto-join when scraped; "
+            "invite @Darwin first if it's private"
+        ),
         resolved={"channel_name": name},
     )
 

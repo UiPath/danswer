@@ -244,6 +244,55 @@ def test_slack_channel_from_mention(monkeypatch: pytest.MonkeyPatch) -> None:
     assert validate_slack_channel("<#C0ABC123|help-team>").valid
 
 
+def test_slack_channel_link_member(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_bot(
+        monkeypatch,
+        _SlackClient(info={"id": "C1", "name": "help-team", "is_member": True}),
+    )
+    r = validate_slack_channel("https://x.slack.com/archives/C1")
+    assert r.valid
+    assert "already in this channel" in r.message
+
+
+def test_slack_channel_link_public_not_member(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_bot(
+        monkeypatch,
+        _SlackClient(
+            info={
+                "id": "C1",
+                "name": "help-team",
+                "is_member": False,
+                "is_private": False,
+            }
+        ),
+    )
+    r = validate_slack_channel("https://x.slack.com/archives/C1")
+    assert r.valid
+    assert "auto-join" in r.message  # public -> connector self-joins
+
+
+def test_slack_channel_link_private_not_member(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_bot(
+        monkeypatch,
+        _SlackClient(
+            info={
+                "id": "C1",
+                "name": "secret",
+                "is_member": False,
+                "is_private": True,
+            }
+        ),
+    )
+    r = validate_slack_channel("https://x.slack.com/archives/C1")
+    assert r.valid
+    assert "invite" in r.message.lower()
+    assert "private" in r.message.lower()  # private -> must be invited
+
+
 def test_slack_channel_bad_id_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_bot(monkeypatch, _SlackClient(info_error="channel_not_found"))
     r = validate_slack_channel("C0DEADBEEF")
@@ -269,7 +318,7 @@ def test_slack_channel_bare_name_not_member_accepted(
     _patch_bot(monkeypatch, _SlackClient(member_channels=[]))
     r = validate_slack_channel("brand-new-channel")
     assert r.valid
-    assert "will be added" in r.message
+    assert "auto-join" in r.message  # public auto-join; private needs an invite
     assert r.resolved["channel_name"] == "brand-new-channel"
 
 
