@@ -6,9 +6,7 @@ import {
   FiChevronDown,
   FiChevronUp,
   FiInfo,
-  FiMoon,
   FiPlus,
-  FiSun,
   FiTrash2,
   FiX,
 } from "react-icons/fi";
@@ -40,39 +38,6 @@ const inputClass =
 // How long to wait after the last keystroke before hitting the backend
 // validator (so you don't have to blur the field).
 const VALIDATE_DEBOUNCE_MS = 600;
-
-// --- light/dark toggle ------------------------------------------------------
-// Mirrors UserDropdown: flips `.dark` on <html> and persists to the same
-// `darwin-theme` key, so the choice carries across the whole app. The page
-// already honors the global default set elsewhere — this just adds the control.
-
-function ThemeToggle() {
-  const [dark, setDark] = useState(true);
-  useEffect(() => {
-    setDark(document.documentElement.classList.contains("dark"));
-  }, []);
-  const toggle = () => {
-    const next = !dark;
-    setDark(next);
-    try {
-      localStorage.setItem("darwin-theme", next ? "dark" : "light");
-    } catch {
-      /* ignore */
-    }
-    document.documentElement.classList.toggle("dark", next);
-  };
-  return (
-    <button
-      type="button"
-      onClick={toggle}
-      title={dark ? "Switch to light mode" : "Switch to dark mode"}
-      aria-label={dark ? "Switch to light mode" : "Switch to dark mode"}
-      className="rounded-md border border-border-medium p-2 text-subtle hover:bg-hover-light hover:text-default"
-    >
-      {dark ? <FiSun className="h-4 w-4" /> : <FiMoon className="h-4 w-4" />}
-    </button>
-  );
-}
 
 // --- small info tooltip -----------------------------------------------------
 
@@ -486,21 +451,18 @@ export function OnboardingForm() {
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-10">
-      <header className="mb-8 flex items-start justify-between gap-4">
-        <div>
-          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-accent">
-            Team onboarding
-          </p>
-          <h1 className="text-2xl font-semibold text-default">
-            Onboarding Darwin to Slack Channel
-          </h1>
-          <p className="mt-2 text-sm text-subtle">
-            Point Darwin at your team&apos;s knowledge and channel. An admin
-            approves the request, then Darwin scrapes your sources and wires up
-            the assistant. Every field is checked live before you submit.
-          </p>
-        </div>
-        <ThemeToggle />
+      <header className="mb-8">
+        <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-accent">
+          Team onboarding
+        </p>
+        <h1 className="text-2xl font-semibold text-default">
+          Onboarding Darwin to Slack Channel
+        </h1>
+        <p className="mt-2 text-sm text-subtle">
+          Point Darwin at your team&apos;s knowledge and channel. An admin
+          approves the request, then Darwin scrapes your sources and wires up
+          the assistant. Every field is checked live before you submit.
+        </p>
       </header>
 
       <Section step={1} title="Channel & assistant">

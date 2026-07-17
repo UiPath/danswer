@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { getAuthTypeMetadataSS, getCurrentUserSS } from "@/lib/userSS";
+import { Header } from "@/components/header/Header";
 import { OnboardingForm } from "./OnboardingForm";
 
 // Require an authenticated (SSO) session, mirroring the rest of the app: send
@@ -20,5 +21,12 @@ export default async function Page() {
     return redirect("/auth/waiting-on-verification");
   }
 
-  return <OnboardingForm />;
+  // Render the standard app header so users get the logo (back to chat) and the
+  // user menu — which, for admins, includes the Admin Panel link + theme toggle.
+  return (
+    <div className="h-screen overflow-y-auto bg-background">
+      <Header user={user} />
+      <OnboardingForm />
+    </div>
+  );
 }
