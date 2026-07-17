@@ -544,14 +544,14 @@ export function OnboardingForm() {
 
       <Section step={1} title="Channel & assistant">
         <ValidatedField
-          label="Bot channel link"
+          label="Slack Channel"
           placeholder="https://your-workspace.slack.com/archives/C0123ABCDE"
           kind="slack_channel"
           value={channelInput}
           onChange={setChannelInput}
           clientCheck={checkChannelLink}
           helpText="Get the link in Slack: open the channel → click ⋯ (More) → Copy → Copy link. A link lets us verify the exact channel; a name can't be checked reliably."
-          info="This is the channel where the Darwin Slack bot will be configured — it answers questions here."
+          info="This is the channel where the Darwin Slack bot answers questions. By default this channel is scraped and kept updated, so its knowledge stays current."
           onResolved={(r) =>
             setChannel(
               r.valid
