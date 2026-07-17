@@ -78,6 +78,16 @@ def update_onboarding_status(
     return request
 
 
+def update_onboarding_payload(
+    db_session: Session, request: OnboardingRequest, payload: dict
+) -> OnboardingRequest:
+    """Replace a request's payload (admin edits a pending request before approving).
+    JSONB is only re-persisted on reassignment, so set a fresh dict."""
+    request.payload = dict(payload)
+    db_session.commit()
+    return request
+
+
 def set_provisioned_ids(
     db_session: Session,
     request: OnboardingRequest,

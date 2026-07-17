@@ -26,6 +26,7 @@ from danswer.db.onboarding import create_onboarding_request
 from danswer.db.onboarding import get_onboarding_request
 from danswer.db.onboarding import list_onboarding_requests
 from danswer.db.onboarding import list_onboarding_requests_for_user
+from danswer.db.onboarding import update_onboarding_payload
 from danswer.db.onboarding import update_onboarding_status
 from danswer.onboarding.notify import notify_onboarding_submitted
 from danswer.onboarding.provision import provision_onboarding
@@ -195,6 +196,41 @@ def list_requests(
         OnboardingRequestSnapshot.from_model(r)
         for r in list_onboarding_requests(db_session)
     ]
+
+
+@admin_router.get("/{request_id}")
+def get_request(
+    request_id: int,
+    _: User | None = Depends(current_admin_user),
+    db_session: Session = Depends(get_session),
+) -> OnboardingRequestSnapshot:
+    """Full request (incl. payload) so an admin can open it in the form to edit."""
+    request = get_onboarding_request(db_session, request_id)
+    if request is None:
+        raise HTTPException(status_code=404, detail="Onboarding request not found.")
+    return OnboardingRequestSnapshot.from_model(request)
+
+
+@admin_router.patch("/{request_id}")
+def edit_request(
+    request_id: int,
+    body: OnboardingSubmitRequest,
+    _: User | None = Depends(current_admin_user),
+    db_session: Session = Depends(get_session),
+) -> OnboardingRequestSnapshot:
+    """Admin edits a PENDING request (fix gaps) before approving."""
+    request = get_onboarding_request(db_session, request_id)
+    if request is None:
+        raise HTTPException(status_code=404, detail="Onboarding request not found.")
+    if request.status != OnboardingStatus.PENDING.value:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Request is '{request.status}', only pending requests can be edited.",
+        )
+    if not body.sources:
+        raise HTTPException(status_code=400, detail="At least one source is required.")
+    update_onboarding_payload(db_session, request, body.to_payload())
+    return OnboardingRequestSnapshot.from_model(request)
 
 
 @admin_router.post("/{request_id}/approve")
