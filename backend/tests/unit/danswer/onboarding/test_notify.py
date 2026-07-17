@@ -171,7 +171,7 @@ def test_client_reply_skips_without_thread_ts(
 
     _patch_client(monkeypatch, _Client)
     monkeypatch.setattr(notify, "ONBOARDING_CLIENT_CHANNEL", "help-darwin")
-    notify.notify_client_complete(_req())  # _req has no help_thread_ts
+    notify.notify_client_complete(_req())  # type: ignore[arg-type]
     assert built["n"] == 0
 
 

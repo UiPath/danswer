@@ -5,6 +5,7 @@ in-progress flag) and `finalize_ready_onboarding_requests` (finalize on success,
 flag failure once, recover a previously-FAILED request, and flip a re-indexing
 FAILED request back to INDEXING) — positive and negative paths."""
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -128,7 +129,7 @@ def _wire(
     *,
     indexing: list,
     failed: list,
-    state,  # callable(request) -> (all_indexed, failures, in_progress)
+    state: Any,  # callable(request) -> (all_indexed, failures, in_progress)
 ) -> dict:
     """Patch the finalizer's collaborators and capture what it does."""
     calls: dict = {"finalized": [], "failed_notified": [], "status": []}
@@ -362,7 +363,7 @@ def _wire_finalize(
 
     def _status(db: object, req: object, status: object, **kw: object) -> object:
         req.status = status.value  # type: ignore[attr-defined]
-        order.append(f"status:{status.value}")
+        order.append(f"status:{status.value}")  # type: ignore[attr-defined]
         return req
 
     monkeypatch.setattr(provision, "update_onboarding_status", _status)
