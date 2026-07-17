@@ -556,12 +556,14 @@ export function OnboardingForm() {
           value={docsOnprem}
           onChange={setDocsOnprem}
           clientCheck={checkUrl}
+          helpText="Also accepts an automation-suite URL, e.g. https://docs.uipath.com/<product>/automation-suite/<latest-version>"
           optional
         />
         <p className="mb-4 text-xs text-subtle">
-          Paste the product root URL only — Darwin crawls every version
-          automatically. The bot channel&apos;s own message history is always
-          indexed.
+          Paste the product root URL only. For automation-suite docs the version
+          is stripped and Darwin scrapes the latest 3 versions automatically —
+          you don&apos;t need to list each version. The bot channel&apos;s own
+          message history is always indexed.
         </p>
 
         <div className="mb-2 text-sm font-medium text-default">

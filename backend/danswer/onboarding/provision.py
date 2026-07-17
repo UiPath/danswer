@@ -203,9 +203,10 @@ def _build_connector_base(source: dict, db_session: Session) -> ConnectorBase:
         is_uipath_docs = urlparse(value).netloc == "docs.uipath.com"
         config: dict = {"base_url": value, "web_connector_type": "recursive"}
         if is_uipath_docs:
-            # Take the root URL and let the connector crawl all product versions.
+            # Strip the version from the root URL and crawl the latest few
+            # concrete versions (no need to list each version URL).
             config["uipath_latest_versions"] = True
-            config["max_versions"] = 2
+            config["max_versions"] = 3
         return ConnectorBase(
             name=f"[onboarding] {label}",
             source=DocumentSource.WEB,

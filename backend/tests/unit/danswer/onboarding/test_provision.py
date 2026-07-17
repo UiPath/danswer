@@ -33,6 +33,7 @@ def test_web_docs_uipath_enables_all_versions(
     cfg = cb.connector_specific_config
     assert cfg["base_url"].startswith("https://docs.uipath.com/orchestrator")
     assert cfg["uipath_latest_versions"] is True
+    assert cfg["max_versions"] == 3  # latest 3 versions
     assert cfg["web_connector_type"] == "recursive"
 
 
