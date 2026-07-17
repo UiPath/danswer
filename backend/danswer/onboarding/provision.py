@@ -44,6 +44,7 @@ from danswer.connectors.confluence.connector import extract_confluence_keys_from
 from danswer.connectors.models import InputType
 from danswer.db.connector import create_connector
 from danswer.db.connector_credential_pair import add_credential_to_connector
+from danswer.db.connector_credential_pair import get_connector_credential_pair
 from danswer.db.connector_credential_pair import get_connector_credential_pair_from_id
 from danswer.db.document_set import insert_document_set
 from danswer.db.embedding_model import get_current_db_embedding_model
@@ -478,7 +479,17 @@ def provision_onboarding(
             )
             if ccp.data is None:
                 raise ValueError(f"Failed to create cc_pair for {source['value']}")
-            cc_pair_ids.append(ccp.data)
+            # NB: in this fork add_credential_to_connector returns
+            # data=connector_id, NOT the cc_pair id. Look the pair up by
+            # (connector, credential) to record its real id — otherwise the
+            # request tracks connector ids as if they were cc_pair ids, which
+            # (off by one) points the finalizer/status at the wrong cc_pairs.
+            cc_pair = get_connector_credential_pair(
+                connector_id, credential_id, db_session
+            )
+            if cc_pair is None:
+                raise ValueError(f"Failed to create cc_pair for {source['value']}")
+            cc_pair_ids.append(cc_pair.id)
             index_targets.append((connector_id, credential_id))
 
         set_provisioned_ids(db_session, request, cc_pair_ids=cc_pair_ids)
@@ -532,79 +543,113 @@ def finalize_onboarding(
     owner_id = owner.id if owner else None
     team = payload["team_name"]
     cc_pair_ids = list(request.cc_pair_ids or [])
+    # Capture already-provisioned artifact ids into locals BEFORE dropping the
+    # transaction: the idempotency guards below must not re-open one (a read
+    # would auto-begin) right before insert_document_set's begin().
+    document_set_id = request.document_set_id
+    persona_id = request.persona_id
+    slack_bot_config_id = request.slack_bot_config_id
 
-    doc_set, _ = insert_document_set(
-        DocumentSetCreationRequest(
-            name=f"[onboarding] {team}",
-            description=f"Sources onboarded for {team}",
-            cc_pair_ids=cc_pair_ids,
+    # The finalizer already opened a transaction on this session doing its reads
+    # (list / _source_index_state / _finalize_owner above). insert_document_set
+    # calls db_session.begin(), which raises "A transaction is already begun"
+    # when one is active — so drop the read-only transaction here.
+    db_session.rollback()
+
+    # Idempotent + incremental so this survives a pod crash mid-finalize: create
+    # each artifact only if the request doesn't already reference one, and
+    # persist its id immediately (a checkpoint). A crash between steps resumes on
+    # the next finalizer tick instead of duplicating doc sets / personas / Slack
+    # configs. Each helper commits, so every persisted id is durable.
+
+    # 1. Document set over the request's cc_pairs.
+    if document_set_id is None:
+        doc_set, _ = insert_document_set(
+            DocumentSetCreationRequest(
+                name=f"[onboarding] {team}",
+                description=f"Sources onboarded for {team}",
+                cc_pair_ids=cc_pair_ids,
+                is_public=True,
+            ),
+            owner_id,
+            db_session,
+        )
+        document_set_id = doc_set.id
+        set_provisioned_ids(db_session, request, document_set_id=document_set_id)
+
+    # 2. Assistant (prompt + persona) tied to the document set.
+    if persona_id is None:
+        prompt = _build_prompt(payload, owner, db_session)
+        persona = upsert_persona(
+            user=owner,
+            name=team,
+            description=f"Assistant for {team} (self-serve onboarding)",
+            num_chunks=10,
+            llm_relevance_filter=False,
+            llm_filter_extraction=False,
+            recency_bias=RecencyBiasSetting.BASE_DECAY,
+            llm_model_provider_override=None,
+            llm_model_version_override=None,
+            starter_messages=None,
             is_public=True,
-        ),
-        owner_id,
-        db_session,
-    )
+            db_session=db_session,
+            prompt_ids=[prompt.id],
+            document_set_ids=[document_set_id],
+        )
+        persona_id = persona.id
+        set_provisioned_ids(db_session, request, persona_id=persona_id)
 
-    prompt = _build_prompt(payload, owner, db_session)
-    persona = upsert_persona(
-        user=owner,
-        name=team,
-        description=f"Assistant for {team} (self-serve onboarding)",
-        num_chunks=10,
-        llm_relevance_filter=False,
-        llm_filter_extraction=False,
-        recency_bias=RecencyBiasSetting.BASE_DECAY,
-        llm_model_provider_override=None,
-        llm_model_version_override=None,
-        starter_messages=None,
-        is_public=True,
-        db_session=db_session,
-        prompt_ids=[prompt.id],
-        document_set_ids=[doc_set.id],
-    )
+    # 3. Slack bot config -> persona, making Darwin live in the channel.
+    if slack_bot_config_id is None:
+        channel_config = _build_channel_config(
+            payload, _prioritized_sources(payload["sources"])
+        )
+        response_type = (
+            SlackBotResponseType.QUOTES
+            if payload.get("response_type") == "quotes"
+            else SlackBotResponseType.CITATIONS
+        )
+        slack_config = insert_slack_bot_config(
+            persona_id=persona_id,
+            channel_config=channel_config,
+            response_type=response_type,
+            db_session=db_session,
+        )
+        slack_bot_config_id = slack_config.id
+        set_provisioned_ids(
+            db_session, request, slack_bot_config_id=slack_bot_config_id
+        )
 
-    channel_config = _build_channel_config(
-        payload, _prioritized_sources(payload["sources"])
-    )
-    response_type = (
-        SlackBotResponseType.QUOTES
-        if payload.get("response_type") == "quotes"
-        else SlackBotResponseType.CITATIONS
-    )
-    slack_config = insert_slack_bot_config(
-        persona_id=persona.id,
-        channel_config=channel_config,
-        response_type=response_type,
-        db_session=db_session,
-    )
-
-    set_provisioned_ids(
-        db_session,
-        request,
-        persona_id=persona.id,
-        document_set_id=doc_set.id,
-        slack_bot_config_id=slack_config.id,
-    )
+    # 4. Mark live + notify. A notification failure must not fail finalize — the
+    # request is already COMPLETE (and would otherwise be retried forever).
     update_onboarding_status(db_session, request, OnboardingStatus.COMPLETE)
     logger.info(
         "onboarding %s finalized: persona=%s doc_set=%s config=%s",
         request.id,
-        persona.id,
-        doc_set.id,
-        slack_config.id,
+        persona_id,
+        document_set_id,
+        slack_bot_config_id,
     )
-    notify_onboarding_complete(request)
+    try:
+        notify_onboarding_complete(request)
+    except Exception:
+        logger.exception(
+            "onboarding %s finalized but completion notification failed", request.id
+        )
     return request
 
 
 def _source_index_state(
     request: OnboardingRequest, db_session: Session
-) -> tuple[bool, list[str]]:
-    """(all_indexed, failures) from each cc_pair's LATEST index attempt.
-    all_indexed is True only when every source's latest run succeeded; failures
-    lists reasons for any source whose latest run failed."""
+) -> tuple[bool, list[str], bool]:
+    """(all_indexed, failures, in_progress) from each cc_pair's LATEST index
+    attempt. all_indexed is True only when every source's latest run succeeded;
+    failures lists reasons for any source whose latest run failed; in_progress is
+    True when any source is still scraping (NOT_STARTED / IN_PROGRESS) — used to
+    move a previously-FAILED request back to INDEXING once it's re-indexing."""
     cc_pair_ids = request.cc_pair_ids or []
     if not cc_pair_ids:
-        return False, []
+        return False, [], False
     statuses: list[IndexingStatus | None] = []
     failures: list[str] = []
     for cc_id in cc_pair_ids:
@@ -625,25 +670,50 @@ def _source_index_state(
             reason = (latest.error_msg if latest else None) or "indexing failed"
             failures.append(f"{cc.name}: {reason[:150]}")
     all_indexed = bool(statuses) and all(s == IndexingStatus.SUCCESS for s in statuses)
-    return all_indexed, failures
+    in_progress = any(
+        s in (IndexingStatus.NOT_STARTED, IndexingStatus.IN_PROGRESS) for s in statuses
+    )
+    return all_indexed, failures, in_progress
 
 
 def finalize_ready_onboarding_requests(db_session: Session) -> None:
     """Background poll: for each request still being tracked (INDEXING or FAILED),
-    finalize once all sources have scraped, or flag a failure once. Recoverable by
-    design — a FAILED request whose sources later succeed (after you fix + re-index)
-    is finalized automatically on a later tick; nothing needs restarting."""
+    drive its status from the aggregate state of its sources. Ordering matters —
+    in-progress WINS over a failure so the requester never sees a scary FAILED
+    while work is still happening:
+
+      * all sources succeeded            -> finalize (assistant goes live) -> COMPLETE
+      * any source still scraping        -> INDEXING (defer any failure verdict;
+                                            a stale FAILED is cleared back to
+                                            INDEXING so re-indexing shows progress)
+      * settled with >=1 failed source   -> FAILED + notify ONCE
+
+    Recoverable by design: fix + re-index a source and the request climbs back to
+    INDEXING and then COMPLETE on later ticks; nothing needs restarting. An
+    already-FAILED request that is still fully settled+failing is not re-notified."""
     tracked = list_onboarding_requests(
         db_session, OnboardingStatus.INDEXING
     ) + list_onboarding_requests(db_session, OnboardingStatus.FAILED)
     for request in tracked:
         try:
-            all_indexed, failures = _source_index_state(request, db_session)
+            all_indexed, failures, in_progress = _source_index_state(
+                request, db_session
+            )
             if all_indexed:
                 finalize_onboarding(request, db_session)
-            elif failures and request.status == OnboardingStatus.INDEXING.value:
-                # Flip to FAILED + notify ONCE (an already-FAILED request that is
-                # still failing is not re-notified; it stays tracked for recovery).
+            elif in_progress:
+                # Something is still scraping (initial run or a re-index). Show
+                # INDEXING and hold off on any failure verdict — a transient
+                # failure may still be superseded by an in-flight or retried
+                # source. Only flips the row if it isn't already INDEXING (also
+                # clears a stale error_msg from a prior FAILED).
+                if request.status != OnboardingStatus.INDEXING.value:
+                    update_onboarding_status(
+                        db_session, request, OnboardingStatus.INDEXING
+                    )
+            elif failures and request.status != OnboardingStatus.FAILED.value:
+                # Everything settled and at least one source failed: flag FAILED +
+                # notify ONCE (an already-FAILED request is not re-notified).
                 detail = "; ".join(failures)
                 update_onboarding_status(
                     db_session, request, OnboardingStatus.FAILED, error_msg=detail

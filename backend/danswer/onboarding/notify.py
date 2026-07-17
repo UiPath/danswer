@@ -32,12 +32,6 @@ ONBOARDING_NOTIFY_CHANNEL = _resolve_channel(
 )
 
 
-def _sources_summary(payload: dict) -> str:
-    sources = payload.get("sources") or []
-    parts = [f"{s.get('type')}: {s.get('label') or s.get('value')}" for s in sources]
-    return ", ".join(parts) if parts else "none"
-
-
 def _post(text: str, request_id: int | None = None) -> None:
     """Post to the ops channel. Best-effort — never raises."""
     if not ONBOARDING_NOTIFY_CHANNEL:
@@ -70,8 +64,7 @@ def notify_onboarding_submitted(request: OnboardingRequest) -> None:
         f":inbox_tray: *New Darwin onboarding request* from "
         f"*{request.requester_email}*\n"
         f"• Team: *{team}*  →  #{channel}\n"
-        f"• Sources: {_sources_summary(request.payload or {})}\n"
-        f"Review & approve: {WEB_DOMAIN}/admin/onboarding",
+        f"Review & approve: {WEB_DOMAIN}/admin/onboarding/{request.id}",
         request.id,
     )
 
@@ -81,7 +74,8 @@ def notify_onboarding_complete(request: OnboardingRequest) -> None:
     team, channel = _team_and_channel(request)
     _post(
         f":white_check_mark: *Darwin is now live in #{channel}* for *{team}* — "
-        f"all sources scraped, the assistant is wired to the new document set.",
+        f"all sources scraped, the assistant is wired to the new document set.\n"
+        f"Status: {WEB_DOMAIN}/admin/onboarding",
         request.id,
     )
 

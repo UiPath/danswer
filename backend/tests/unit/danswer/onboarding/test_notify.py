@@ -42,6 +42,31 @@ def test_notify_posts_message(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "jo@uipath.com" in text
     assert "Automation Suite" in text
     assert "help-automation-suite" in text
+    # Submitted notification links to the request's form so the admin can open,
+    # review and approve it directly.
+    assert "/admin/onboarding/7" in text
+
+
+def test_notify_complete_includes_status_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict = {}
+
+    class _Client:
+        def __init__(self, token: str) -> None:
+            pass
+
+        def chat_postMessage(self, **kwargs: object) -> None:
+            captured.update(kwargs)
+
+    _patch_client(monkeypatch, _Client)
+    monkeypatch.setattr(notify, "ONBOARDING_NOTIFY_CHANNEL", "darwin-devs")
+    monkeypatch.setattr(notify, "WEB_DOMAIN", "https://darwin.example.com")
+    notify.notify_onboarding_complete(_req())  # type: ignore[arg-type]
+
+    text = captured["text"]
+    assert "is now live in #help-automation-suite" in text
+    assert "https://darwin.example.com/admin/onboarding" in text
 
 
 def test_notify_swallows_slack_errors(monkeypatch: pytest.MonkeyPatch) -> None:

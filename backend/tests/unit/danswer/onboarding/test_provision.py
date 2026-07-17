@@ -322,3 +322,117 @@ def test_dedup_keeps_unrelated_pages(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     out = _dedup_confluence_sources([a, b], db_session=None)  # type: ignore[arg-type]
     assert out == [a, b]
+
+
+# --- provision_onboarding: cc_pair_ids records real cc_pair ids ------------
+
+from types import SimpleNamespace  # noqa: E402
+
+from danswer.db.models import OnboardingStatus  # noqa: E402
+from danswer.onboarding.provision import provision_onboarding  # noqa: E402
+
+
+def test_provision_records_cc_pair_ids_not_connector_ids(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: in this fork add_credential_to_connector returns
+    data=connector_id (not the cc_pair id). provision_onboarding must store the
+    real cc_pair ids on the request — otherwise the finalizer/status track the
+    wrong pairs (the bug that surfaced an unrelated '[local-copy] jira' and
+    dropped a real source). We simulate connector_id != cc_pair_id and assert the
+    request gets the cc_pair ids."""
+    # Each created connector gets an incrementing id (1, 2, ...).
+    connector_ids = iter(range(1, 100))
+    captured: dict = {}
+
+    monkeypatch.setattr(provision, "update_onboarding_status", lambda *a, **k: None)
+    monkeypatch.setattr(
+        provision, "get_current_db_embedding_model", lambda db: SimpleNamespace(id=1)
+    )
+    monkeypatch.setattr(
+        provision, "_dedup_confluence_sources", lambda sources, db: sources
+    )
+    monkeypatch.setattr(provision, "_assert_source_accessible", lambda s, db: None)
+    monkeypatch.setattr(provision, "_build_connector_base", lambda s, db: s)
+    monkeypatch.setattr(
+        provision,
+        "create_connector",
+        lambda base, db: SimpleNamespace(id=next(connector_ids)),
+    )
+    monkeypatch.setattr(provision, "_credential_id_for_source", lambda stype, db: 500)
+    # The fork's real return shape: .data is the CONNECTOR id.
+    monkeypatch.setattr(
+        provision,
+        "add_credential_to_connector",
+        lambda **kw: SimpleNamespace(data=kw["connector_id"]),
+    )
+    # The real cc_pair id is deliberately different (connector_id + 1000).
+    monkeypatch.setattr(
+        provision,
+        "get_connector_credential_pair",
+        lambda connector_id, credential_id, db: SimpleNamespace(id=connector_id + 1000),
+    )
+    monkeypatch.setattr(
+        provision,
+        "set_provisioned_ids",
+        lambda db, req, cc_pair_ids: captured.__setitem__("cc_pair_ids", cc_pair_ids),
+    )
+    monkeypatch.setattr(provision, "create_index_attempt", lambda **k: 0)
+
+    request = SimpleNamespace(
+        id=1,
+        payload={
+            "team_name": "T",
+            "sources": [
+                {"type": "web", "value": "https://a", "label": "A"},
+                {"type": "slack", "value": "chan", "label": "B"},
+            ],
+        },
+    )
+    provision_onboarding(request, SimpleNamespace(id=42), None)  # type: ignore[arg-type]
+
+    # connectors were 1 and 2; real cc_pair ids are 1001 and 1002 — NOT [1, 2].
+    assert captured["cc_pair_ids"] == [1001, 1002]
+
+
+def test_provision_marks_failed_when_cc_pair_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If the freshly-created pair can't be found, provisioning fails loudly
+    (marks FAILED + raises) rather than silently recording a bad id."""
+    statuses: list = []
+    monkeypatch.setattr(
+        provision,
+        "update_onboarding_status",
+        lambda db, req, status, **kw: statuses.append(status),
+    )
+    monkeypatch.setattr(
+        provision, "get_current_db_embedding_model", lambda db: SimpleNamespace(id=1)
+    )
+    monkeypatch.setattr(
+        provision, "_dedup_confluence_sources", lambda sources, db: sources
+    )
+    monkeypatch.setattr(provision, "_assert_source_accessible", lambda s, db: None)
+    monkeypatch.setattr(provision, "_build_connector_base", lambda s, db: s)
+    monkeypatch.setattr(
+        provision, "create_connector", lambda base, db: SimpleNamespace(id=7)
+    )
+    monkeypatch.setattr(provision, "_credential_id_for_source", lambda stype, db: 500)
+    monkeypatch.setattr(
+        provision, "add_credential_to_connector", lambda **kw: SimpleNamespace(data=7)
+    )
+    monkeypatch.setattr(
+        provision, "get_connector_credential_pair", lambda c, cr, db: None
+    )
+    monkeypatch.setattr(provision, "set_provisioned_ids", lambda *a, **k: None)
+
+    request = SimpleNamespace(
+        id=1,
+        payload={
+            "team_name": "T",
+            "sources": [{"type": "web", "value": "https://a", "label": "A"}],
+        },
+    )
+    with pytest.raises(ValueError):
+        provision_onboarding(request, SimpleNamespace(id=42), None)  # type: ignore[arg-type]
+    assert OnboardingStatus.FAILED in statuses
