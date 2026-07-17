@@ -96,11 +96,14 @@ def validate_slack_channel(value: str) -> ValidationResult:
             )
 
     # Bare name. Slack has no name->channel lookup API, and every channel-read
-    # endpoint (conversations_info/history/replies) needs the ID, so there's no
-    # cheap indirect check. Rather than enumerate the whole org (tens of
-    # thousands of channels on Enterprise Grid), we search only the channels the
-    # BOT is a member of (users.conversations — a small set) — which is also the
-    # real precondition: the bot must be in the channel to answer and index it.
+    # endpoint (conversations_info/history/replies) needs the ID — so there's no
+    # cheap way to confirm a channel the bot isn't in yet, and enumerating the
+    # whole org (tens of thousands of channels on Enterprise Grid) is too costly.
+    # Crucially, the bot is only added to the channel DURING onboarding, so a
+    # brand-new channel legitimately isn't a member yet. We therefore never block
+    # on existence: we do a cheap membership check purely as a positive signal
+    # (and to resolve the real id/name when we can), and otherwise accept the
+    # name — provisioning uses the name, and the connector auto-joins on index.
     name = raw.lstrip("#").lower()
     try:
         ch = _find_channel_by_name(
@@ -110,18 +113,20 @@ def validate_slack_channel(value: str) -> ValidationResult:
             types="public_channel,private_channel",
         )
     except SlackApiError as e:
-        return ValidationResult(
-            valid=False, message=f"Couldn't verify channel ({e.response.get('error')})"
+        logger.warning(
+            "slack membership check failed for %s: %s", name, e.response.get("error")
         )
+        ch = None
     if ch:
         return ValidationResult(
             valid=True,
-            message=f"#{ch['name']}",
+            message=f"#{ch['name']} · the bot is already in this channel",
             resolved={"channel_id": ch["id"], "channel_name": ch["name"]},
         )
     return ValidationResult(
-        valid=False,
-        message=f"The Darwin bot isn't in #{name} yet — invite it to the channel, then re-check.",
+        valid=True,
+        message=f"#{name} · the bot will be added to this channel during onboarding",
+        resolved={"channel_name": name},
     )
 
 
