@@ -1723,6 +1723,7 @@ class OnboardingStatus(str, PyEnum):
 
     PENDING = "pending"  # submitted, awaiting admin approval
     REJECTED = "rejected"  # admin declined
+    CANCELLED = "cancelled"  # withdrawn by the requester while still pending
     PROVISIONING = "provisioning"  # approved; creating connectors/persona/config
     INDEXING = "indexing"  # resources created; sources scraping
     COMPLETE = "complete"  # all sources indexed successfully

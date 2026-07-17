@@ -26,6 +26,7 @@ import {
   SOURCE_CLIENT_CHECK,
 } from "@/lib/onboarding/clientChecks";
 import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
 
 // All colors come from the app's semantic theme tokens (text-default,
 // bg-background, border-border, …) so the page follows the global light/dark
@@ -172,7 +173,9 @@ function StatusBadge({ status }: { status: string }) {
       ? "bg-link/10 text-link"
       : status === "failed" || status === "rejected"
         ? "bg-error/10 text-error"
-        : "bg-accent/10 text-accent";
+        : status === "cancelled"
+          ? "bg-subtle/10 text-subtle"
+          : "bg-accent/10 text-accent";
   return (
     <span
       className={`rounded-full px-2 py-0.5 text-xs font-semibold capitalize ${tone}`}
@@ -347,13 +350,18 @@ function Section({
 
 export function OnboardingForm({
   initialRequest,
+  editMode = "admin",
 }: {
-  // When set, the form runs in admin "edit a pending request" mode (prefilled).
+  // When set, the form runs in "edit a pending request" mode (prefilled).
   initialRequest?: OnboardingRequestSnapshot;
+  // Who's editing: admin (save + approve) or the requester (save only).
+  editMode?: "admin" | "requester";
 } = {}) {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const adminEdit = !!initialRequest;
+  const editing = !!initialRequest;
+  const adminEdit = editing && editMode === "admin";
+  const requesterEdit = editing && editMode === "requester";
   const p = initialRequest?.payload;
 
   // "Submit a request" vs "My requests" — surfaced as top tabs so status isn't
@@ -395,7 +403,7 @@ export function OnboardingForm({
   >({});
 
   useEffect(() => {
-    if (adminEdit) return; // edit mode is fully prefilled from the request
+    if (editing) return; // edit mode is fully prefilled from the request
     fetch("/api/onboarding/default-prompt")
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => d?.system_prompt && setSystemPrompt(d.system_prompt))
@@ -426,11 +434,21 @@ export function OnboardingForm({
     }
   }
 
+  // Requester withdraws a still-pending request. Soft cancel: the backend flips
+  // status to "cancelled" (kept for the audit trail), so just refresh the list.
+  async function cancelRequest(id: number) {
+    if (!window.confirm("Cancel this onboarding request?")) return;
+    const r = await fetch(`/api/onboarding/${id}/cancel`, { method: "POST" });
+    if (r.ok) {
+      await refreshMine();
+    }
+  }
+
   // On the "My requests" tab, auto-load each request's per-source scrape status
   // (and re-poll every 15s) so the requester can see work happening without
   // clicking anything.
   useEffect(() => {
-    if (adminEdit || tab !== "requests") return;
+    if (editing || tab !== "requests") return;
     let active = true;
     const load = async () => {
       const list = await refreshMine();
@@ -509,14 +527,16 @@ export function OnboardingForm({
     return (await res.json().catch(() => null))?.detail || fallback;
   }
 
-  // Admin edit: PATCH the pending request's payload (without approving).
+  // Edit mode: PATCH the pending request's payload (admin uses the admin route,
+  // the requester their own). Does not approve.
   async function saveEdits(): Promise<boolean> {
     if (!initialRequest) return false;
     setError(null);
     setSavedNote(null);
     const payload = buildPayload();
     if (!payload) return false;
-    const res = await fetch(`/api/admin/onboarding/${initialRequest.id}`, {
+    const base = adminEdit ? "/api/admin/onboarding" : "/api/onboarding";
+    const res = await fetch(`${base}/${initialRequest.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -552,6 +572,13 @@ export function OnboardingForm({
         return;
       }
 
+      // Requester edit mode: save the edits, then back to My requests.
+      if (requesterEdit && initialRequest) {
+        if (!(await saveEdits())) return;
+        router.push("/onboarding?view=requests");
+        return;
+      }
+
       // Requester create mode.
       const res = await fetch("/api/onboarding", {
         method: "POST",
@@ -580,7 +607,11 @@ export function OnboardingForm({
     <div className="mx-auto max-w-3xl px-4 py-10">
       <header className="mb-8">
         <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-accent">
-          {adminEdit ? "Review onboarding request" : "Team onboarding"}
+          {adminEdit
+            ? "Review onboarding request"
+            : requesterEdit
+              ? "Edit onboarding request"
+              : "Team onboarding"}
         </p>
         <h1 className="text-2xl font-semibold text-default">
           Onboarding Darwin to Slack Channel
@@ -593,6 +624,12 @@ export function OnboardingForm({
             </span>
             . Fix any gaps below, then Save &amp; approve to provision.
           </p>
+        ) : requesterEdit ? (
+          <p className="mt-2 text-sm text-subtle">
+            Update the details of your pending request. Changes are saved for
+            the admin to review — the request stays pending until it&apos;s
+            approved.
+          </p>
         ) : (
           <p className="mt-2 text-sm text-subtle">
             Point Darwin at your team&apos;s knowledge and channel. An admin
@@ -602,7 +639,7 @@ export function OnboardingForm({
         )}
       </header>
 
-      {!adminEdit && (
+      {!editing && (
         <div className="mb-6 flex gap-1 border-b border-border">
           {(["form", "requests"] as const).map((t) => (
             <button
@@ -623,7 +660,7 @@ export function OnboardingForm({
         </div>
       )}
 
-      {(adminEdit || tab === "form") && (
+      {(editing || tab === "form") && (
         <>
           <Section step={1} title="Channel & assistant">
             <ValidatedField
@@ -825,12 +862,14 @@ export function OnboardingForm({
               className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-inverted transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {submitting
-                ? adminEdit
+                ? editing
                   ? "Saving…"
                   : "Submitting…"
                 : adminEdit
                   ? "Save & approve"
-                  : "Submit onboarding request"}
+                  : requesterEdit
+                    ? "Save changes"
+                    : "Submit onboarding request"}
             </button>
             {adminEdit && (
               <button
@@ -852,10 +891,16 @@ export function OnboardingForm({
                 Save changes
               </button>
             )}
-            {adminEdit && (
+            {editing && (
               <button
                 type="button"
-                onClick={() => router.push("/admin/onboarding")}
+                onClick={() =>
+                  router.push(
+                    adminEdit
+                      ? "/admin/onboarding"
+                      : "/onboarding?view=requests"
+                  )
+                }
                 className="text-sm text-subtle hover:text-default"
               >
                 Cancel
@@ -865,7 +910,7 @@ export function OnboardingForm({
         </>
       )}
 
-      {!adminEdit && tab === "requests" && (
+      {!editing && tab === "requests" && (
         <div>
           <h2 className="mb-3 text-lg font-semibold text-default">
             Your requests
@@ -893,6 +938,23 @@ export function OnboardingForm({
                 <p className="mt-1 text-xs text-subtle">
                   Note: {r.decision_reason}
                 </p>
+              )}
+              {r.status === "pending" && (
+                <div className="mt-3 flex items-center gap-2">
+                  <Link
+                    href={`/onboarding/${r.id}/edit`}
+                    className="rounded-md border border-border-medium px-3 py-1.5 text-xs font-medium text-default hover:bg-hover"
+                  >
+                    Edit
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={() => cancelRequest(r.id)}
+                    className="rounded-md border border-border-medium px-3 py-1.5 text-xs font-medium text-error hover:bg-hover"
+                  >
+                    Cancel request
+                  </button>
+                </div>
               )}
               {(r.cc_pair_ids?.length ?? 0) > 0 && (
                 <div className="mt-2">

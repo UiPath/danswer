@@ -39,7 +39,13 @@ export interface ValidationResult {
 }
 
 export type OnboardingRequestStatus =
-  "pending" | "rejected" | "provisioning" | "indexing" | "complete" | "failed";
+  | "pending"
+  | "rejected"
+  | "cancelled"
+  | "provisioning"
+  | "indexing"
+  | "complete"
+  | "failed";
 
 export interface OnboardingRequestSnapshot {
   id: number;

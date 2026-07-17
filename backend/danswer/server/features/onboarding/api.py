@@ -184,6 +184,73 @@ def onboarding_status(
     )
 
 
+def _require_owner_or_admin(request: OnboardingRequest, user: User | None) -> None:
+    _require_user(user)
+    if (
+        user is not None
+        and user.role != UserRole.ADMIN
+        and request.requester_id != user.id
+    ):
+        raise HTTPException(status_code=403, detail="Not your onboarding request.")
+
+
+@basic_router.get("/{request_id}")
+def get_my_request(
+    request_id: int,
+    user: User | None = Depends(current_user),
+    db_session: Session = Depends(get_session),
+) -> OnboardingRequestSnapshot:
+    """Full request (incl. payload) for the requester to open it in the form."""
+    request = get_onboarding_request(db_session, request_id)
+    if request is None:
+        raise HTTPException(status_code=404, detail="Onboarding request not found.")
+    _require_owner_or_admin(request, user)
+    return OnboardingRequestSnapshot.from_model(request)
+
+
+@basic_router.patch("/{request_id}")
+def edit_my_request(
+    request_id: int,
+    body: OnboardingSubmitRequest,
+    user: User | None = Depends(current_user),
+    db_session: Session = Depends(get_session),
+) -> OnboardingRequestSnapshot:
+    """Requester edits their own request while it's still pending."""
+    request = get_onboarding_request(db_session, request_id)
+    if request is None:
+        raise HTTPException(status_code=404, detail="Onboarding request not found.")
+    _require_owner_or_admin(request, user)
+    if request.status != OnboardingStatus.PENDING.value:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Request is '{request.status}', only pending requests can be edited.",
+        )
+    if not body.sources:
+        raise HTTPException(status_code=400, detail="At least one source is required.")
+    update_onboarding_payload(db_session, request, body.to_payload())
+    return OnboardingRequestSnapshot.from_model(request)
+
+
+@basic_router.post("/{request_id}/cancel")
+def cancel_my_request(
+    request_id: int,
+    user: User | None = Depends(current_user),
+    db_session: Session = Depends(get_session),
+) -> OnboardingRequestSnapshot:
+    """Requester withdraws their own request while it's still pending."""
+    request = get_onboarding_request(db_session, request_id)
+    if request is None:
+        raise HTTPException(status_code=404, detail="Onboarding request not found.")
+    _require_owner_or_admin(request, user)
+    if request.status != OnboardingStatus.PENDING.value:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Request is '{request.status}', only pending requests can be cancelled.",
+        )
+    update_onboarding_status(db_session, request, OnboardingStatus.CANCELLED)
+    return OnboardingRequestSnapshot.from_model(request)
+
+
 # --- admin approval ---------------------------------------------------------
 
 
