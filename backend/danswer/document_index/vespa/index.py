@@ -59,6 +59,7 @@ from danswer.configs.model_configs import SEARCH_DISTANCE_CUTOFF
 from danswer.connectors.cross_connector_utils.miscellaneous_utils import (
     get_experts_stores_representations,
 )
+from danswer.connectors.slack.utils import normalize_slack_link
 from danswer.document_index.document_index_utils import get_uuid_from_chunk
 from danswer.document_index.interfaces import DocumentIndex
 from danswer.document_index.interfaces import DocumentInsertionRecord
@@ -681,8 +682,12 @@ def _vespa_hit_to_inference_chunk(hit: dict[str, Any]) -> InferenceChunk:
     source_links_dict_unprocessed = (
         json.loads(source_links) if isinstance(source_links, str) else source_links
     )
+    # Slack: historical docs were indexed with a mis-configured workspace, so
+    # their permalinks point at a dead host. Rewrite to the canonical workspace
+    # at read time so every citation (chat / search / Slack bot) resolves.
+    is_slack = str(fields.get(SOURCE_TYPE, "")).lower() == "slack"
     source_links_dict = {
-        int(k): v
+        int(k): (normalize_slack_link(v) if is_slack else v)
         for k, v in cast(dict[str, str], source_links_dict_unprocessed).items()
     }
 

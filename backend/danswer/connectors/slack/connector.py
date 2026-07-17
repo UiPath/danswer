@@ -27,6 +27,7 @@ from danswer.connectors.slack.utils import get_message_link
 from danswer.connectors.slack.utils import make_slack_api_call_logged
 from danswer.connectors.slack.utils import make_slack_api_call_paginated
 from danswer.connectors.slack.utils import make_slack_api_rate_limited
+from danswer.connectors.slack.utils import resolve_workspace_subdomain
 from danswer.connectors.slack.utils import SlackTextCleaner
 from danswer.utils.logger import setup_logger
 
@@ -323,6 +324,11 @@ def get_all_docs(
             client=client, channel=channel, oldest=oldest, latest=latest
         )
 
+        # Resolve the channel's true workspace subdomain (Grid-safe) lazily on
+        # the first message, then reuse it for every thread in the channel — one
+        # chat.getPermalink call per channel rather than per message.
+        channel_workspace: str | None = None
+
         seen_thread_ts: set[str] = set()
         for message_batch in channel_message_batches:
             for message in message_batch:
@@ -344,9 +350,16 @@ def get_all_docs(
                     filtered_thread = [message]
 
                 if filtered_thread:
+                    if channel_workspace is None:
+                        channel_workspace = resolve_workspace_subdomain(
+                            client=client,
+                            channel_id=channel["id"],
+                            message_ts=filtered_thread[0]["ts"],
+                            fallback=workspace,
+                        )
                     channel_docs += 1
                     yield thread_to_doc(
-                        workspace=workspace,
+                        workspace=channel_workspace,
                         channel=channel,
                         thread=filtered_thread,
                         slack_cleaner=slack_cleaner,
