@@ -18,7 +18,6 @@ from danswer.configs.app_configs import DISABLE_AUTH
 from danswer.db.connector_credential_pair import get_connector_credential_pair_from_id
 from danswer.db.engine import get_session
 from danswer.db.models import IndexAttempt
-from danswer.db.models import IndexingStatus
 from danswer.db.models import OnboardingRequest
 from danswer.db.models import OnboardingStatus
 from danswer.db.models import User
@@ -175,14 +174,10 @@ def onboarding_status(
     ):
         raise HTTPException(status_code=403, detail="Not your onboarding request.")
 
+    # Status transitions (INDEXING -> COMPLETE / FAILED) are driven by the
+    # background finalizer, which also creates the doc set + assistant + Slack
+    # config once scraping finishes. This endpoint just reports current state.
     sources = _source_statuses(request, db_session)
-    # Auto-advance INDEXING -> COMPLETE once every source has indexed successfully.
-    if (
-        request.status == OnboardingStatus.INDEXING.value
-        and sources
-        and all(s.status == IndexingStatus.SUCCESS.value for s in sources)
-    ):
-        update_onboarding_status(db_session, request, OnboardingStatus.COMPLETE)
     return OnboardingStatusResponse(
         request_id=request.id, status=request.status, sources=sources
     )

@@ -190,6 +190,60 @@ def _allowed_confluence_hosts(db_session: Session) -> set[str]:
     return hosts
 
 
+def _confluence_base_url(db_session: Session) -> str | None:
+    """Wiki base URL of an existing Confluence connector (to build a client)."""
+    for connector in (
+        db_session.execute(
+            select(Connector).where(Connector.source == DocumentSource.CONFLUENCE)
+        )
+        .scalars()
+        .all()
+    ):
+        wiki_url = (connector.connector_specific_config or {}).get("wiki_page_url")
+        if wiki_url:
+            try:
+                base, _s, _p, _c = extract_confluence_keys_from_url(wiki_url)
+                return base
+            except Exception:
+                continue
+    return None
+
+
+def confluence_page_ancestors(
+    page_ids: list[str], db_session: Session
+) -> dict[str, list[str]]:
+    """Map each Confluence page id -> list of its ancestor page ids (best-effort).
+
+    Used to drop child pages when a parent is also provided (the connector
+    already recurses a page's descendants). Returns {} if we can't build a
+    client; individual failures resolve to an empty ancestor list."""
+    base = _confluence_base_url(db_session)
+    creds = _first_confluence_credential(db_session)
+    if not base or creds is None:
+        return {}
+    result: dict[str, list[str]] = {}
+    try:
+        from atlassian import Confluence  # type: ignore[import-untyped]
+
+        client = Confluence(
+            url=base,
+            username=creds["confluence_username"],
+            password=creds["confluence_access_token"],
+            cloud="atlassian.net" in base,
+        )
+        for pid in page_ids:
+            try:
+                ancestors = client.get_page_ancestors(pid) or []
+                result[pid] = [str(a["id"]) for a in ancestors if a.get("id")]
+            except Exception as e:
+                logger.info("confluence ancestors lookup failed for %s: %s", pid, e)
+                result[pid] = []
+    except Exception as e:
+        logger.info("confluence ancestry client unavailable: %s", e)
+        return {}
+    return result
+
+
 def validate_confluence_url(url: str, db_session: Session) -> ValidationResult:
     """Parse the wiki URL and confirm the space exists, using an existing
     Confluence connector's credentials — but ONLY if the URL's host matches an

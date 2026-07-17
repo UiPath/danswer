@@ -222,3 +222,102 @@ def test_channel_config_oncall_enabled_but_no_schedule_omitted() -> None:
         prioritized_sources=[],
     )
     assert "opsgenie_schedule" not in cfg
+
+
+# --- per-source refresh cadence -------------------------------------------
+
+from danswer.onboarding.provision import _MONTHLY_REFRESH_FREQ  # noqa: E402
+from danswer.onboarding.provision import DEFAULT_REFRESH_FREQ  # noqa: E402
+from danswer.onboarding.provision import _dedup_confluence_sources  # noqa: E402
+from danswer.onboarding.provision import _prioritized_sources  # noqa: E402
+
+
+def test_web_source_refresh_is_monthly(monkeypatch: pytest.MonkeyPatch) -> None:
+    _allow_public_dns(monkeypatch)
+    cb = _build_connector_base(
+        {"type": "web", "value": "https://docs.uipath.com/x/latest"},
+        db_session=None,  # type: ignore[arg-type]
+    )
+    assert cb.refresh_freq == _MONTHLY_REFRESH_FREQ
+
+
+def test_confluence_source_refresh_is_daily(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        provision, "_allowed_confluence_hosts", lambda db: {"x.atlassian.net"}
+    )
+    cb = _build_connector_base(
+        {"type": "confluence", "value": "https://x.atlassian.net/wiki/spaces/DEV/x"},
+        db_session=None,  # type: ignore[arg-type]
+    )
+    assert cb.refresh_freq == DEFAULT_REFRESH_FREQ
+
+
+# --- prioritized sources ---------------------------------------------------
+
+
+def test_prioritized_sources_distinct_in_order() -> None:
+    sources = [
+        {"type": "web", "value": "a"},
+        {"type": "slack", "value": "b"},
+        {"type": "web", "value": "c"},  # duplicate type
+    ]
+    assert _prioritized_sources(sources) == ["web", "slack"]
+
+
+# --- confluence parent/child dedup ----------------------------------------
+
+
+def test_dedup_passthrough_when_fewer_than_two_confluence() -> None:
+    sources = [
+        {"type": "confluence", "value": "https://x.atlassian.net/wiki/spaces/DEV/x"},
+        {"type": "web", "value": "https://docs.example.com"},
+    ]
+    assert _dedup_confluence_sources(sources, db_session=None) == sources  # type: ignore[arg-type]
+
+
+def test_dedup_space_supersedes_page() -> None:
+    space = {
+        "type": "confluence",
+        "value": "https://x.atlassian.net/wiki/spaces/DEV/overview",
+    }
+    page = {
+        "type": "confluence",
+        "value": "https://x.atlassian.net/wiki/spaces/DEV/pages/123/Title",
+    }
+    out = _dedup_confluence_sources([space, page], db_session=None)  # type: ignore[arg-type]
+    assert out == [space]  # the page (child of the space) is dropped
+
+
+def test_dedup_parent_page_supersedes_child(monkeypatch: pytest.MonkeyPatch) -> None:
+    parent = {
+        "type": "confluence",
+        "value": "https://x.atlassian.net/wiki/spaces/DEV/pages/100/Parent",
+    }
+    child = {
+        "type": "confluence",
+        "value": "https://x.atlassian.net/wiki/spaces/DEV/pages/200/Child",
+    }
+    # 200's ancestor is 100 (also provided) -> child dropped.
+    monkeypatch.setattr(
+        provision,
+        "confluence_page_ancestors",
+        lambda ids, db: {"100": [], "200": ["100"]},
+    )
+    out = _dedup_confluence_sources([parent, child], db_session=None)  # type: ignore[arg-type]
+    assert out == [parent]
+
+
+def test_dedup_keeps_unrelated_pages(monkeypatch: pytest.MonkeyPatch) -> None:
+    a = {
+        "type": "confluence",
+        "value": "https://x.atlassian.net/wiki/spaces/DEV/pages/100/A",
+    }
+    b = {
+        "type": "confluence",
+        "value": "https://x.atlassian.net/wiki/spaces/DEV/pages/300/B",
+    }
+    monkeypatch.setattr(
+        provision, "confluence_page_ancestors", lambda ids, db: {"100": [], "300": []}
+    )
+    out = _dedup_confluence_sources([a, b], db_session=None)  # type: ignore[arg-type]
+    assert out == [a, b]

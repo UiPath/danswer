@@ -1,15 +1,21 @@
 """Provisioning orchestrator for approved onboarding requests.
 
-On admin approval this turns a validated onboarding payload into real Darwin
-resources, in order:
+Two phases, so Darwin only goes live in a channel once it actually has the
+knowledge:
+
+Phase 1 — `provision_onboarding` (on admin approval):
   per source -> Connector (+ credential) -> connector_credential_pair
-  -> DocumentSet (over all cc_pairs)
-  -> Prompt (Orchestrator's as the default template, overridden by the requester)
-  -> Persona (the team's assistant, scoped to the document set)
-  -> slack_bot_config (channel -> persona, with SME / oncall / Jira options and
-     the requested source order as prioritized_sources)
   -> one high-priority IndexAttempt per cc_pair (so the new sources scrape first)
-and records the created ids on the OnboardingRequest for status monitoring.
+  -> status INDEXING. Redundant child Confluence pages are dropped (parent only);
+  per-source scrape cadence is set (Slack/Confluence/Jira daily, docs monthly).
+
+Phase 2 — `finalize_onboarding` (background sweep, once every source is scraped):
+  DocumentSet (over the cc_pairs) -> Prompt (Orchestrator default, requester-
+  edited) -> Persona (tied to the document set) -> slack_bot_config (channel ->
+  persona, SME / oncall / Jira options, prioritized_sources) -> status COMPLETE,
+  and a #darwin-devs notification. The sweep (`finalize_ready_onboarding_requests`)
+  also flags source failures; it re-checks FAILED requests too, so fixing +
+  re-indexing a source lets it complete with nothing to restart.
 
 Payload contract (assembled + validated by the form):
   {
@@ -29,32 +35,41 @@ import ipaddress
 import socket
 from urllib.parse import urlparse
 
+from sqlalchemy import desc
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from danswer.configs.constants import DocumentSource
+from danswer.connectors.confluence.connector import extract_confluence_keys_from_url
 from danswer.connectors.models import InputType
 from danswer.db.connector import create_connector
 from danswer.db.connector_credential_pair import add_credential_to_connector
+from danswer.db.connector_credential_pair import get_connector_credential_pair_from_id
 from danswer.db.document_set import insert_document_set
 from danswer.db.embedding_model import get_current_db_embedding_model
 from danswer.db.index_attempt import create_index_attempt
 from danswer.db.models import ChannelConfig
 from danswer.db.models import Connector
 from danswer.db.models import Credential
+from danswer.db.models import IndexAttempt
+from danswer.db.models import IndexingStatus
 from danswer.db.models import OnboardingRequest
 from danswer.db.models import OnboardingStatus
 from danswer.db.models import Prompt
 from danswer.db.models import RecencyBiasSetting
 from danswer.db.models import SlackBotResponseType
 from danswer.db.models import User
+from danswer.db.onboarding import list_onboarding_requests
 from danswer.db.onboarding import set_provisioned_ids
 from danswer.db.onboarding import update_onboarding_status
 from danswer.db.persona import get_persona_by_name
 from danswer.db.persona import upsert_persona
 from danswer.db.persona import upsert_prompt
 from danswer.db.slack_bot_config import insert_slack_bot_config
+from danswer.onboarding.notify import notify_onboarding_complete
+from danswer.onboarding.notify import notify_onboarding_failed
 from danswer.onboarding.validation import _allowed_confluence_hosts
+from danswer.onboarding.validation import confluence_page_ancestors
 from danswer.onboarding.validation import jira_base_url
 from danswer.onboarding.validation import validate_confluence_url
 from danswer.onboarding.validation import validate_github_repo
@@ -68,7 +83,17 @@ logger = setup_logger()
 
 # Onboarded sources scrape ahead of routine re-indexing (IndexAttempt priority 0-100).
 ONBOARDING_INDEXING_PRIORITY = 80
-DEFAULT_REFRESH_FREQ = 86400  # daily; picks up new docs versions / channel messages
+DEFAULT_REFRESH_FREQ = 86400  # daily
+_MONTHLY_REFRESH_FREQ = 2592000  # 30 days
+
+# Per-source scrape cadence: Slack / Confluence / Jira change often (daily); docs
+# sites change slowly and are large, so monthly.
+REFRESH_FREQ_BY_SOURCE = {
+    "slack": DEFAULT_REFRESH_FREQ,
+    "confluence": DEFAULT_REFRESH_FREQ,
+    "jira": DEFAULT_REFRESH_FREQ,
+    "web": _MONTHLY_REFRESH_FREQ,  # docs
+}
 PUBLIC_CREDENTIAL_ID = (
     0  # the empty public credential (create_initial_public_credential)
 )
@@ -169,6 +194,7 @@ def _build_connector_base(source: dict, db_session: Session) -> ConnectorBase:
     stype = source["type"]
     value = source["value"]
     label = source.get("label") or value
+    refresh_freq = REFRESH_FREQ_BY_SOURCE.get(stype, DEFAULT_REFRESH_FREQ)
 
     if stype == "web":
         # SSRF guard: never let a submitted URL point the crawler at internal
@@ -185,7 +211,7 @@ def _build_connector_base(source: dict, db_session: Session) -> ConnectorBase:
             source=DocumentSource.WEB,
             input_type=InputType.POLL,
             connector_specific_config=config,
-            refresh_freq=DEFAULT_REFRESH_FREQ,
+            refresh_freq=refresh_freq,
             prune_freq=None,
             disabled=False,
         )
@@ -207,7 +233,7 @@ def _build_connector_base(source: dict, db_session: Session) -> ConnectorBase:
             source=DocumentSource.CONFLUENCE,
             input_type=InputType.POLL,
             connector_specific_config={"wiki_page_url": value},
-            refresh_freq=DEFAULT_REFRESH_FREQ,
+            refresh_freq=refresh_freq,
             prune_freq=None,
             disabled=False,
         )
@@ -226,7 +252,7 @@ def _build_connector_base(source: dict, db_session: Session) -> ConnectorBase:
                 "include_prs": True,
                 "include_issues": True,
             },
-            refresh_freq=DEFAULT_REFRESH_FREQ,
+            refresh_freq=refresh_freq,
             prune_freq=None,
             disabled=False,
         )
@@ -243,7 +269,7 @@ def _build_connector_base(source: dict, db_session: Session) -> ConnectorBase:
                 "channels": [value.lstrip("#")],
                 "channel_regex_enabled": False,
             },
-            refresh_freq=DEFAULT_REFRESH_FREQ,
+            refresh_freq=refresh_freq,
             prune_freq=None,
             disabled=False,
         )
@@ -258,7 +284,7 @@ def _build_connector_base(source: dict, db_session: Session) -> ConnectorBase:
             source=DocumentSource.JIRA,
             input_type=InputType.POLL,
             connector_specific_config={"jira_base_url": base, "jira_filter": value},
-            refresh_freq=DEFAULT_REFRESH_FREQ,
+            refresh_freq=refresh_freq,
             prune_freq=None,
             disabled=False,
         )
@@ -299,7 +325,9 @@ def _source_type_value(source_type: str) -> str:
     }.get(source_type, source_type)
 
 
-def _build_prompt(payload: dict, admin_user: User, db_session: Session) -> Prompt:
+def _build_prompt(
+    payload: dict, admin_user: User | None, db_session: Session
+) -> Prompt:
     """Create the team's prompt, defaulting to the Orchestrator persona's prompt
     and overriding with whatever the requester edited in the form."""
     template = get_persona_by_name(_DEFAULT_TEMPLATE_PERSONA, admin_user, db_session)
@@ -360,13 +388,66 @@ def _build_channel_config(
     return config
 
 
+def _prioritized_sources(sources: list[dict]) -> list[str]:
+    """Distinct DocumentSource values in the requester's priority order."""
+    ordered: list[str] = []
+    for s in sources:
+        st = _source_type_value(s["type"])
+        if st not in ordered:
+            ordered.append(st)
+    return ordered
+
+
+def _dedup_confluence_sources(sources: list[dict], db_session: Session) -> list[dict]:
+    """Drop child Confluence pages when a parent is also provided, keeping the
+    parent alone (the connector already recurses a page's descendants). A whole-
+    space URL supersedes any page in that space; a parent page supersedes its
+    descendant pages (best-effort via the Confluence ancestry API)."""
+    conf = [(i, s) for i, s in enumerate(sources) if s.get("type") == "confluence"]
+    if len(conf) < 2:
+        return sources
+    keys: dict[int, tuple[str, str]] = {}
+    for i, s in conf:
+        try:
+            _b, space, page_id, _c = extract_confluence_keys_from_url(s["value"])
+            keys[i] = (space.lower(), page_id or "")
+        except Exception:
+            keys[i] = ("", "")
+    drop: set[int] = set()
+
+    # A whole-space URL supersedes pages in the same space.
+    space_roots = {sp for (sp, pid) in keys.values() if sp and not pid}
+    for i, _s in conf:
+        sp, pid = keys[i]
+        if pid and sp in space_roots:
+            drop.add(i)
+
+    # A parent page supersedes its descendant pages (best-effort).
+    remaining = [i for i, _s in conf if i not in drop and keys[i][1]]
+    if len(remaining) >= 2:
+        provided = {keys[i][1] for i in remaining}
+        ancestry = confluence_page_ancestors(list(provided), db_session)
+        for i in remaining:
+            if provided & set(ancestry.get(keys[i][1], [])):
+                drop.add(i)  # an ancestor of this page was also provided
+
+    if drop:
+        logger.info(
+            "onboarding: dropped %d redundant child Confluence source(s)", len(drop)
+        )
+    return [s for i, s in enumerate(sources) if i not in drop]
+
+
 def provision_onboarding(
     request: OnboardingRequest,
     admin_user: User,
     db_session: Session,
 ) -> OnboardingRequest:
-    """Create all resources for an approved request. On any failure the request
-    is marked FAILED with the error and the exception is re-raised."""
+    """Phase 1 (on approval): create the connectors + cc_pairs and kick off
+    high-priority indexing; status -> INDEXING. The document set, assistant, and
+    Slack config are created later by `finalize_onboarding`, once every source
+    has finished scraping (so Darwin only goes live once it has real knowledge).
+    On any failure here the request is marked FAILED and the exception re-raised."""
     payload = request.payload
     update_onboarding_status(
         db_session, request, OnboardingStatus.PROVISIONING, approver_id=admin_user.id
@@ -374,12 +455,11 @@ def provision_onboarding(
     try:
         embedding_model = get_current_db_embedding_model(db_session)
         team = payload["team_name"]
+        sources = _dedup_confluence_sources(list(payload["sources"]), db_session)
 
-        # 1) connectors + cc_pairs (track connector/credential ids for indexing).
         cc_pair_ids: list[int] = []
         index_targets: list[tuple[int, int]] = []  # (connector_id, credential_id)
-        prioritized_sources: list[str] = []
-        for source in payload["sources"]:
+        for source in sources:
             # Preflight: the reusable credential must be able to reach the source.
             _assert_source_accessible(source, db_session)
             connector = create_connector(
@@ -399,65 +479,10 @@ def provision_onboarding(
                 raise ValueError(f"Failed to create cc_pair for {source['value']}")
             cc_pair_ids.append(ccp.data)
             index_targets.append((connector_id, credential_id))
-            st = _source_type_value(source["type"])
-            if st not in prioritized_sources:
-                prioritized_sources.append(st)
 
-        # 2) document set over all cc_pairs.
-        doc_set, _ = insert_document_set(
-            DocumentSetCreationRequest(
-                name=f"[onboarding] {team}",
-                description=f"Sources onboarded for {team}",
-                cc_pair_ids=cc_pair_ids,
-                is_public=True,
-            ),
-            admin_user.id,
-            db_session,
-        )
+        set_provisioned_ids(db_session, request, cc_pair_ids=cc_pair_ids)
 
-        # 3) prompt (Orchestrator default + requester edits) + persona.
-        prompt = _build_prompt(payload, admin_user, db_session)
-        persona = upsert_persona(
-            user=admin_user,
-            name=team,
-            description=f"Assistant for {team} (self-serve onboarding)",
-            num_chunks=10,
-            llm_relevance_filter=False,
-            llm_filter_extraction=False,
-            recency_bias=RecencyBiasSetting.BASE_DECAY,
-            llm_model_provider_override=None,
-            llm_model_version_override=None,
-            starter_messages=None,
-            is_public=True,
-            db_session=db_session,
-            prompt_ids=[prompt.id],
-            document_set_ids=[doc_set.id],
-        )
-
-        # 4) slack bot config (channel -> persona) with the options + priority order.
-        channel_config = _build_channel_config(payload, prioritized_sources)
-        response_type = (
-            SlackBotResponseType.QUOTES
-            if payload.get("response_type") == "quotes"
-            else SlackBotResponseType.CITATIONS
-        )
-        slack_config = insert_slack_bot_config(
-            persona_id=persona.id,
-            channel_config=channel_config,
-            response_type=response_type,
-            db_session=db_session,
-        )
-
-        set_provisioned_ids(
-            db_session,
-            request,
-            persona_id=persona.id,
-            document_set_id=doc_set.id,
-            slack_bot_config_id=slack_config.id,
-            cc_pair_ids=cc_pair_ids,
-        )
-
-        # 5) kick off high-priority indexing for each new source.
+        # Kick off high-priority indexing for each source.
         for connector_id, credential_id in index_targets:
             create_index_attempt(
                 connector_id=connector_id,
@@ -470,11 +495,9 @@ def provision_onboarding(
 
         update_onboarding_status(db_session, request, OnboardingStatus.INDEXING)
         logger.info(
-            "onboarding %s provisioned: persona=%s doc_set=%s config=%s cc_pairs=%s",
+            "onboarding %s provisioned %d source(s); indexing. cc_pairs=%s",
             request.id,
-            persona.id,
-            doc_set.id,
-            slack_config.id,
+            len(cc_pair_ids),
             cc_pair_ids,
         )
         return request
@@ -484,3 +507,147 @@ def provision_onboarding(
             db_session, request, OnboardingStatus.FAILED, error_msg=str(e)
         )
         raise
+
+
+def _finalize_owner(request: OnboardingRequest, db_session: Session) -> User | None:
+    """Owner of the created assistant/doc-set — the approver, else the requester.
+    finalize runs in the background, so we resolve it from the row."""
+    for uid in (request.approver_id, request.requester_id):
+        if uid is not None:
+            user = db_session.get(User, uid)
+            if user is not None:
+                return user
+    return None
+
+
+def finalize_onboarding(
+    request: OnboardingRequest, db_session: Session
+) -> OnboardingRequest:
+    """Phase 2 (after all sources are scraped): create the document set over the
+    request's cc_pairs, the assistant (prompt + persona) tied to it, and the Slack
+    bot config — making Darwin live in the channel — then mark COMPLETE + notify."""
+    payload = request.payload
+    owner = _finalize_owner(request, db_session)
+    owner_id = owner.id if owner else None
+    team = payload["team_name"]
+    cc_pair_ids = list(request.cc_pair_ids or [])
+
+    doc_set, _ = insert_document_set(
+        DocumentSetCreationRequest(
+            name=f"[onboarding] {team}",
+            description=f"Sources onboarded for {team}",
+            cc_pair_ids=cc_pair_ids,
+            is_public=True,
+        ),
+        owner_id,
+        db_session,
+    )
+
+    prompt = _build_prompt(payload, owner, db_session)
+    persona = upsert_persona(
+        user=owner,
+        name=team,
+        description=f"Assistant for {team} (self-serve onboarding)",
+        num_chunks=10,
+        llm_relevance_filter=False,
+        llm_filter_extraction=False,
+        recency_bias=RecencyBiasSetting.BASE_DECAY,
+        llm_model_provider_override=None,
+        llm_model_version_override=None,
+        starter_messages=None,
+        is_public=True,
+        db_session=db_session,
+        prompt_ids=[prompt.id],
+        document_set_ids=[doc_set.id],
+    )
+
+    channel_config = _build_channel_config(
+        payload, _prioritized_sources(payload["sources"])
+    )
+    response_type = (
+        SlackBotResponseType.QUOTES
+        if payload.get("response_type") == "quotes"
+        else SlackBotResponseType.CITATIONS
+    )
+    slack_config = insert_slack_bot_config(
+        persona_id=persona.id,
+        channel_config=channel_config,
+        response_type=response_type,
+        db_session=db_session,
+    )
+
+    set_provisioned_ids(
+        db_session,
+        request,
+        persona_id=persona.id,
+        document_set_id=doc_set.id,
+        slack_bot_config_id=slack_config.id,
+    )
+    update_onboarding_status(db_session, request, OnboardingStatus.COMPLETE)
+    logger.info(
+        "onboarding %s finalized: persona=%s doc_set=%s config=%s",
+        request.id,
+        persona.id,
+        doc_set.id,
+        slack_config.id,
+    )
+    notify_onboarding_complete(request)
+    return request
+
+
+def _source_index_state(
+    request: OnboardingRequest, db_session: Session
+) -> tuple[bool, list[str]]:
+    """(all_indexed, failures) from each cc_pair's LATEST index attempt.
+    all_indexed is True only when every source's latest run succeeded; failures
+    lists reasons for any source whose latest run failed."""
+    cc_pair_ids = request.cc_pair_ids or []
+    if not cc_pair_ids:
+        return False, []
+    statuses: list[IndexingStatus | None] = []
+    failures: list[str] = []
+    for cc_id in cc_pair_ids:
+        cc = get_connector_credential_pair_from_id(cc_id, db_session)
+        if cc is None:
+            statuses.append(None)
+            continue
+        latest = db_session.execute(
+            select(IndexAttempt)
+            .where(IndexAttempt.connector_id == cc.connector_id)
+            .where(IndexAttempt.credential_id == cc.credential_id)
+            .order_by(desc(IndexAttempt.time_created))
+            .limit(1)
+        ).scalar_one_or_none()
+        status = latest.status if latest else None
+        statuses.append(status)
+        if status == IndexingStatus.FAILED:
+            reason = (latest.error_msg if latest else None) or "indexing failed"
+            failures.append(f"{cc.name}: {reason[:150]}")
+    all_indexed = bool(statuses) and all(s == IndexingStatus.SUCCESS for s in statuses)
+    return all_indexed, failures
+
+
+def finalize_ready_onboarding_requests(db_session: Session) -> None:
+    """Background poll: for each request still being tracked (INDEXING or FAILED),
+    finalize once all sources have scraped, or flag a failure once. Recoverable by
+    design — a FAILED request whose sources later succeed (after you fix + re-index)
+    is finalized automatically on a later tick; nothing needs restarting."""
+    tracked = list_onboarding_requests(
+        db_session, OnboardingStatus.INDEXING
+    ) + list_onboarding_requests(db_session, OnboardingStatus.FAILED)
+    for request in tracked:
+        try:
+            all_indexed, failures = _source_index_state(request, db_session)
+            if all_indexed:
+                finalize_onboarding(request, db_session)
+            elif failures and request.status == OnboardingStatus.INDEXING.value:
+                # Flip to FAILED + notify ONCE (an already-FAILED request that is
+                # still failing is not re-notified; it stays tracked for recovery).
+                detail = "; ".join(failures)
+                update_onboarding_status(
+                    db_session, request, OnboardingStatus.FAILED, error_msg=detail
+                )
+                notify_onboarding_failed(request, detail)
+        except Exception:
+            logger.exception("onboarding %s finalize check failed", request.id)
+            db_session.rollback()

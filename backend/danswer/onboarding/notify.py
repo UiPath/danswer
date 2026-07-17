@@ -38,21 +38,10 @@ def _sources_summary(payload: dict) -> str:
     return ", ".join(parts) if parts else "none"
 
 
-def notify_onboarding_submitted(request: OnboardingRequest) -> None:
-    """Post a heads-up to the ops channel that a new request needs review."""
+def _post(text: str, request_id: int | None = None) -> None:
+    """Post to the ops channel. Best-effort — never raises."""
     if not ONBOARDING_NOTIFY_CHANNEL:
         return
-    payload = request.payload or {}
-    team = payload.get("team_name") or "?"
-    channel = (payload.get("channel") or {}).get("channel_name") or "?"
-    review_url = f"{WEB_DOMAIN}/admin/onboarding"
-    text = (
-        f":inbox_tray: *New Darwin onboarding request* from "
-        f"*{request.requester_email}*\n"
-        f"• Team: *{team}*  →  #{channel}\n"
-        f"• Sources: {_sources_summary(payload)}\n"
-        f"Review & approve: {review_url}"
-    )
     try:
         client = WebClient(token=fetch_tokens().bot_token)
         client.chat_postMessage(
@@ -62,6 +51,46 @@ def notify_onboarding_submitted(request: OnboardingRequest) -> None:
         logger.warning(
             "failed to notify '%s' of onboarding request %s: %s",
             ONBOARDING_NOTIFY_CHANNEL,
-            request.id,
+            request_id,
             e,
         )
+
+
+def _team_and_channel(request: OnboardingRequest) -> tuple[str, str]:
+    payload = request.payload or {}
+    team = payload.get("team_name") or "?"
+    channel = (payload.get("channel") or {}).get("channel_name") or "?"
+    return team, channel
+
+
+def notify_onboarding_submitted(request: OnboardingRequest) -> None:
+    """A new request was submitted and needs admin review."""
+    team, channel = _team_and_channel(request)
+    _post(
+        f":inbox_tray: *New Darwin onboarding request* from "
+        f"*{request.requester_email}*\n"
+        f"• Team: *{team}*  →  #{channel}\n"
+        f"• Sources: {_sources_summary(request.payload or {})}\n"
+        f"Review & approve: {WEB_DOMAIN}/admin/onboarding",
+        request.id,
+    )
+
+
+def notify_onboarding_complete(request: OnboardingRequest) -> None:
+    """All sources scraped, assistant wired up, Darwin live in the channel."""
+    team, channel = _team_and_channel(request)
+    _post(
+        f":white_check_mark: *Darwin is now live in #{channel}* for *{team}* — "
+        f"all sources scraped, the assistant is wired to the new document set.",
+        request.id,
+    )
+
+
+def notify_onboarding_failed(request: OnboardingRequest, detail: str) -> None:
+    """One or more sources failed to scrape (or provisioning errored)."""
+    team, channel = _team_and_channel(request)
+    _post(
+        f":x: *Darwin onboarding failed for {team}* (#{channel}) — {detail}\n"
+        f"Details: {WEB_DOMAIN}/admin/onboarding",
+        request.id,
+    )
