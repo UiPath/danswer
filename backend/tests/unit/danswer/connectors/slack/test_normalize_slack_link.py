@@ -5,15 +5,22 @@ from danswer.connectors.slack.utils import normalize_slack_link
 from danswer.connectors.slack.utils import resolve_workspace_subdomain
 
 
+class _FakeResp(dict):
+    """Minimal stand-in for slack_sdk's SlackResponse (dict-like + validate())."""
+
+    def validate(self) -> "_FakeResp":
+        return self
+
+
 class _FakeClient:
     def __init__(self, permalink: str | None = None, error: str | None = None):
         self._permalink = permalink
         self._error = error
 
-    def chat_getPermalink(self, channel: str, message_ts: str) -> dict:
+    def chat_getPermalink(self, channel: str, message_ts: str) -> _FakeResp:
         if self._error is not None:
             raise SlackApiError(self._error, {"ok": False, "error": self._error})
-        return {"ok": True, "permalink": self._permalink}
+        return _FakeResp({"ok": True, "permalink": self._permalink})
 
 
 @pytest.mark.parametrize(

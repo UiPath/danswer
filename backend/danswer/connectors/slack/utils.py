@@ -86,7 +86,11 @@ def resolve_workspace_subdomain(
     longer depends on a hand-typed `workspace` config being right. Falls back to
     `fallback` (the configured workspace) if the call fails."""
     try:
-        resp = client.chat_getPermalink(channel=channel_id, message_ts=message_ts)
+        # Same rate-limit + logging wrapping as every other Slack call in the
+        # connector, so a 429 retries (with Retry-After) instead of falling back.
+        resp = make_slack_api_rate_limited(
+            make_slack_api_call_logged(client.chat_getPermalink)
+        )(channel=channel_id, message_ts=message_ts)
         permalink = cast(str, resp.get("permalink") or "")
         host = urlparse(permalink).netloc.lower()
         if host.endswith(".slack.com"):
