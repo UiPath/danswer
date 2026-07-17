@@ -397,6 +397,64 @@ def test_confluence_url_space_accessible(monkeypatch: pytest.MonkeyPatch) -> Non
     r = validate_confluence_url("https://uipath.atlassian.net/wiki/spaces/DEV/x", None)  # type: ignore[arg-type]
     assert r.valid
     assert r.resolved["space"] == "DEV"
+    assert "whole" in r.message and "space" in r.message  # space url -> whole space
+
+
+def test_confluence_url_page_scope(monkeypatch: pytest.MonkeyPatch) -> None:
+    import atlassian as atlassian_mod
+
+    class _OkConfluence:
+        def __init__(self, **kwargs: object) -> None:
+            pass
+
+        def get_page_by_id(self, page_id: str) -> dict:
+            return {"id": page_id}
+
+    monkeypatch.setattr(
+        validation, "_allowed_confluence_hosts", lambda db: {"uipath.atlassian.net"}
+    )
+    monkeypatch.setattr(
+        validation,
+        "_first_confluence_credential",
+        lambda db: {"confluence_username": "u", "confluence_access_token": "t"},
+    )
+    monkeypatch.setattr(atlassian_mod, "Confluence", _OkConfluence)
+    r = validate_confluence_url(
+        "https://uipath.atlassian.net/wiki/spaces/DEV/pages/88998707616/Pro+Dev",
+        None,  # type: ignore[arg-type]
+    )
+    assert r.valid
+    # page url -> page + children, NOT the whole space
+    assert "child pages" in r.message
+    assert "whole" not in r.message
+    assert r.resolved["page_id"] == "88998707616"
+
+
+def test_confluence_url_page_inaccessible(monkeypatch: pytest.MonkeyPatch) -> None:
+    import atlassian as atlassian_mod
+
+    class _DenyConfluence:
+        def __init__(self, **kwargs: object) -> None:
+            pass
+
+        def get_page_by_id(self, page_id: str) -> dict:
+            raise Exception("403 forbidden token=secret")
+
+    monkeypatch.setattr(
+        validation, "_allowed_confluence_hosts", lambda db: {"uipath.atlassian.net"}
+    )
+    monkeypatch.setattr(
+        validation,
+        "_first_confluence_credential",
+        lambda db: {"confluence_username": "u", "confluence_access_token": "t"},
+    )
+    monkeypatch.setattr(atlassian_mod, "Confluence", _DenyConfluence)
+    r = validate_confluence_url(
+        "https://uipath.atlassian.net/wiki/spaces/DEV/pages/123/T", None  # type: ignore[arg-type]
+    )
+    assert not r.valid
+    assert "Page not found" in r.message
+    assert "secret" not in r.message  # no token/exception leakage
 
 
 def test_confluence_url_space_inaccessible(monkeypatch: pytest.MonkeyPatch) -> None:

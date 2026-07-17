@@ -259,14 +259,17 @@ def confluence_page_ancestors(
 
 
 def validate_confluence_url(url: str, db_session: Session) -> ValidationResult:
-    """Parse the wiki URL and confirm the space exists, using an existing
+    """Parse the wiki URL and confirm the target is reachable, using an existing
     Confluence connector's credentials — but ONLY if the URL's host matches an
-    existing Confluence connector (never send creds to an arbitrary host)."""
+    existing Confluence connector (never send creds to an arbitrary host).
+
+    Scope depends on the URL, mirroring the connector: a PAGE url scrapes that
+    page + all its child pages; a SPACE url scrapes the whole space."""
     raw = (url or "").strip()
     if not raw:
         return ValidationResult(valid=False, message="Enter a Confluence URL")
     try:
-        wiki_base, space, _page_id, is_cloud = extract_confluence_keys_from_url(raw)
+        wiki_base, space, page_id, is_cloud = extract_confluence_keys_from_url(raw)
     except ValueError:
         return ValidationResult(valid=False, message="Not a valid Confluence wiki URL")
 
@@ -279,14 +282,24 @@ def validate_confluence_url(url: str, db_session: Session) -> ValidationResult:
             message=f"Confluence host not allowed — must be one of {sorted(allowed_hosts)}",
         )
 
+    scope = (
+        "this page and all its child pages" if page_id else f"the whole '{space}' space"
+    )
+    resolved = {
+        "wiki_base": wiki_base,
+        "space": space,
+        "page_id": page_id,
+        "is_cloud": is_cloud,
+    }
+
     creds = _first_confluence_credential(db_session)
     # No creds, or no known Confluence host to vet against -> parse-only (never
     # send the token to an unvetted host).
     if creds is None or not allowed_hosts:
         return ValidationResult(
             valid=True,
-            message=f"Space '{space}' (existence unverified)",
-            resolved={"wiki_base": wiki_base, "space": space, "is_cloud": is_cloud},
+            message=f"Will scrape {scope} (access unverified)",
+            resolved=resolved,
         )
     try:
         from atlassian import Confluence  # type: ignore[import-untyped]
@@ -297,16 +310,19 @@ def validate_confluence_url(url: str, db_session: Session) -> ValidationResult:
             password=creds["confluence_access_token"],
             cloud=is_cloud,
         )
-        client.get_space(space)
+        # Verify the actual target: the page for a page url, else the space.
+        if page_id:
+            client.get_page_by_id(page_id)
+        else:
+            client.get_space(space)
     except Exception as e:
-        logger.info("confluence space validation failed for %s: %s", space, e)
+        logger.info("confluence validation failed for %s: %s", raw, e)
+        target = "Page" if page_id else f"Space '{space}'"
         return ValidationResult(
-            valid=False, message=f"Space '{space}' not found or inaccessible"
+            valid=False, message=f"{target} not found or inaccessible"
         )
     return ValidationResult(
-        valid=True,
-        message=f"Space '{space}'",
-        resolved={"wiki_base": wiki_base, "space": space, "is_cloud": is_cloud},
+        valid=True, message=f"Will scrape {scope}", resolved=resolved
     )
 
 
