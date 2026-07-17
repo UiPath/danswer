@@ -158,7 +158,13 @@ export function OnboardingRequestsTable() {
                   key={s.cc_pair_id}
                   className="mt-1 flex items-center justify-between text-xs"
                 >
-                  <span className="text-subtle">{s.name}</span>
+                  <Link
+                    href={`/admin/connector/${s.cc_pair_id}`}
+                    className="text-link hover:underline"
+                    title="Open this connector to see full indexing status"
+                  >
+                    {s.name}
+                  </Link>
                   <span>
                     <Badge status={s.status} /> · {s.docs_indexed} docs
                     {s.error_msg ? (
