@@ -562,8 +562,7 @@ export function OnboardingForm() {
         <p className="mb-4 text-xs text-subtle">
           Paste the product root URL only. For automation-suite docs the version
           is stripped and Darwin scrapes the latest 3 versions automatically —
-          you don&apos;t need to list each version. The bot channel&apos;s own
-          message history is always indexed.
+          you don&apos;t need to list each version.
         </p>
 
         <div className="mb-2 text-sm font-medium text-default">
