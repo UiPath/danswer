@@ -111,3 +111,13 @@ def set_provisioned_ids(
     if commit:
         db_session.commit()
     return request
+
+
+def set_help_thread_ts(
+    db_session: Session, request: OnboardingRequest, thread_ts: str
+) -> OnboardingRequest:
+    """Persist the Slack ts of the customer-facing root message so later lifecycle
+    updates can be posted as replies in that thread."""
+    request.help_thread_ts = thread_ts
+    db_session.commit()
+    return request

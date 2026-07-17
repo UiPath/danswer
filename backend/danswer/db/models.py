@@ -1776,6 +1776,11 @@ class OnboardingRequest(Base):
     cc_pair_ids: Mapped[list[int] | None] = mapped_column(
         postgresql.JSONB(), nullable=True
     )
+    # Slack message ts of the customer-facing root message posted to #help-darwin
+    # on submit. Subsequent lifecycle updates (approved / complete / failed) are
+    # posted as replies in this thread (thread_ts), so the requester tracks their
+    # request in one quiet thread. Null if the root post failed/was skipped.
+    help_thread_ts: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

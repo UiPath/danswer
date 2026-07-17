@@ -67,6 +67,9 @@ from danswer.db.persona import get_persona_by_name
 from danswer.db.persona import upsert_persona
 from danswer.db.persona import upsert_prompt
 from danswer.db.slack_bot_config import insert_slack_bot_config
+from danswer.onboarding.notify import notify_client_approved
+from danswer.onboarding.notify import notify_client_complete
+from danswer.onboarding.notify import notify_client_failed
 from danswer.onboarding.notify import notify_onboarding_complete
 from danswer.onboarding.notify import notify_onboarding_failed
 from danswer.onboarding.validation import _allowed_confluence_hosts
@@ -512,6 +515,8 @@ def provision_onboarding(
             len(cc_pair_ids),
             cc_pair_ids,
         )
+        # Customer thread: reviewed + approved, indexing started.
+        notify_client_approved(request)
         return request
     except Exception as e:
         logger.exception("onboarding %s provisioning failed", request.id)
@@ -632,6 +637,7 @@ def finalize_onboarding(
     )
     try:
         notify_onboarding_complete(request)
+        notify_client_complete(request)
     except Exception:
         logger.exception(
             "onboarding %s finalized but completion notification failed", request.id
@@ -719,6 +725,7 @@ def finalize_ready_onboarding_requests(db_session: Session) -> None:
                     db_session, request, OnboardingStatus.FAILED, error_msg=detail
                 )
                 notify_onboarding_failed(request, detail)
+                notify_client_failed(request)
         except Exception:
             logger.exception("onboarding %s finalize check failed", request.id)
             db_session.rollback()
