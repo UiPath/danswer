@@ -69,3 +69,15 @@ def test_notify_noop_when_channel_unset(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setattr(notify, "ONBOARDING_NOTIFY_CHANNEL", "")
     notify.notify_onboarding_submitted(_req())  # type: ignore[arg-type]
     assert created["n"] == 0  # no client built, nothing posted
+
+
+def test_resolve_channel_accepts_id_name_or_link() -> None:
+    assert notify._resolve_channel("C07B2V8E99S") == "C07B2V8E99S"
+    assert notify._resolve_channel("darwin-devs") == "darwin-devs"
+    assert (
+        notify._resolve_channel(
+            "https://uipath.enterprise.slack.com/archives/C07B2V8E99S"
+        )
+        == "C07B2V8E99S"
+    )
+    assert notify._resolve_channel("  #ops  ") == "#ops"

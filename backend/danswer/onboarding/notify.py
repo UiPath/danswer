@@ -3,6 +3,7 @@
 Best-effort: a Slack failure must never break the request itself, so every send
 is wrapped and only logged on error."""
 import os
+import re
 
 from slack_sdk import WebClient
 
@@ -13,9 +14,22 @@ from danswer.utils.logger import setup_logger
 
 logger = setup_logger()
 
-# Channel to notify when a new onboarding request is submitted. Accepts a channel
-# name (the bot must be a member) or a channel id; override via env / configmap.
-ONBOARDING_NOTIFY_CHANNEL = os.environ.get("ONBOARDING_NOTIFY_CHANNEL") or "darwin-devs"
+_ARCHIVES_RE = re.compile(r"/archives/(C[A-Z0-9]+)")
+
+
+def _resolve_channel(value: str) -> str:
+    """Accept a channel id, a bare name, or a pasted channel link (id parsed out)."""
+    m = _ARCHIVES_RE.search(value or "")
+    return m.group(1) if m else (value or "").strip()
+
+
+# Channel to notify when a new onboarding request is submitted, addressed by ID.
+# Default is #darwin-devs (C07B2V8E99S) — a PRIVATE channel in another Grid
+# workspace, so it must be addressed by id, not name. The DanswerBot app token is
+# a member. Override via env/configmap (an id, a name, or a channel link).
+ONBOARDING_NOTIFY_CHANNEL = _resolve_channel(
+    os.environ.get("ONBOARDING_NOTIFY_CHANNEL") or "C07B2V8E99S"
+)
 
 
 def _sources_summary(payload: dict) -> str:
