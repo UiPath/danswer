@@ -273,6 +273,70 @@ def validate_github_repo(url: str, db_session: Session) -> ValidationResult:
     )
 
 
+def _first_jira_credential(db_session: Session) -> dict | None:
+    """Reuse an existing Jira connector's credential for the filter check."""
+    for cred in db_session.execute(select(Credential)).scalars():
+        cj = cred.credential_json or {}
+        if cj.get("jira_api_token"):
+            return cj
+    return None
+
+
+def jira_base_url(db_session: Session) -> str | None:
+    """Base URL of an existing Jira connector (onboarding reuses it — the
+    requester supplies only the filter, never the host/creds)."""
+    for connector in (
+        db_session.execute(
+            select(Connector).where(Connector.source == DocumentSource.JIRA)
+        )
+        .scalars()
+        .all()
+    ):
+        base = (connector.connector_specific_config or {}).get("jira_base_url")
+        if base:
+            return base
+    return None
+
+
+def validate_jira_filter(jql: str, db_session: Session) -> ValidationResult:
+    """Confirm a Jira JQL filter is valid and reachable with the stored Jira
+    credential (the same one provisioning will reuse).
+
+    The credential is only ever sent to the existing Jira connector's base URL,
+    never a user-supplied host. Errors are reported generically and logged by
+    exception type only, so a token or JQL-echoing API payload can't leak."""
+    raw = (jql or "").strip()
+    if not raw:
+        return ValidationResult(valid=False, message="Enter a Jira filter (JQL)")
+
+    base = jira_base_url(db_session)
+    creds = _first_jira_credential(db_session)
+    if base is None or creds is None:
+        return ValidationResult(
+            valid=True,
+            message="Filter unverified — no Jira connector/credential on file",
+            resolved={"jira_filter": raw},
+        )
+    try:
+        from jira import JIRA  # type: ignore[import-untyped]
+
+        token = creds["jira_api_token"]
+        if creds.get("jira_user_email"):
+            client = JIRA(basic_auth=(creds["jira_user_email"], token), server=base)
+        else:
+            client = JIRA(token_auth=token, server=base)
+        # maxResults=1 keeps this cheap; an invalid JQL or access error raises.
+        client.search_issues(raw, maxResults=1)
+    except Exception as e:
+        logger.info("jira filter validation failed: %s", type(e).__name__)
+        return ValidationResult(
+            valid=False, message="Invalid Jira filter (JQL) or no access"
+        )
+    return ValidationResult(
+        valid=True, message="Jira filter OK", resolved={"jira_filter": raw}
+    )
+
+
 def validate_docs_url(url: str) -> ValidationResult:
     """A docs.uipath.com root URL. We normalize to the product root (version /
     'latest' segment stripped) since the web connector auto-crawls all versions."""

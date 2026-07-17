@@ -14,8 +14,9 @@ class ChannelRef(BaseModel):
 
 class OnboardingSourceModel(BaseModel):
     # Priority is the order in the sources list (index 0 = highest).
-    type: Literal["web", "confluence", "github", "slack"]
-    value: str  # docs root URL / confluence URL / github repo URL / slack channel name
+    type: Literal["web", "confluence", "github", "slack", "jira"]
+    # docs root URL / confluence URL / github repo URL / slack channel / jira JQL
+    value: str
     label: str | None = None
 
 
@@ -85,7 +86,9 @@ class OnboardingRequestSnapshot(BaseModel):
 
 
 class ValidateRequest(BaseModel):
-    kind: Literal["slack_channel", "slack_group", "confluence", "github", "docs"]
+    kind: Literal[
+        "slack_channel", "slack_group", "confluence", "github", "jira", "docs"
+    ]
     value: str
 
 

@@ -2,6 +2,15 @@
 
 import { useEffect, useState } from "react";
 import {
+  FiCheck,
+  FiChevronDown,
+  FiChevronUp,
+  FiInfo,
+  FiPlus,
+  FiTrash2,
+  FiX,
+} from "react-icons/fi";
+import {
   OnboardingRequestSnapshot,
   OnboardingSource,
   OnboardingSourceType,
@@ -10,6 +19,58 @@ import {
   ValidateKind,
   ValidationResult,
 } from "@/lib/onboarding/interfaces";
+
+// All colors come from the app's semantic theme tokens (text-default,
+// bg-background, border-border, …) so the page follows the global light/dark
+// setting automatically — no hardcoded colors anywhere.
+
+const inputClass =
+  "w-full rounded-md border border-border-medium bg-background px-3 py-2 " +
+  "text-sm text-default placeholder:text-subtle focus:outline-none " +
+  "focus:ring-2 focus:ring-accent/40 focus:border-accent";
+
+// --- small info tooltip -----------------------------------------------------
+
+function InfoHint({ text }: { text: string }) {
+  return (
+    <span className="group relative ml-1.5 inline-flex align-middle">
+      <FiInfo
+        className="h-3.5 w-3.5 cursor-help text-subtle"
+        aria-hidden
+        tabIndex={0}
+      />
+      <span
+        role="tooltip"
+        className="pointer-events-none absolute left-1/2 top-6 z-20 w-60 -translate-x-1/2
+          rounded-md border border-border bg-background px-3 py-2 text-xs font-normal
+          leading-snug text-default opacity-0 shadow-lg transition-opacity duration-150
+          group-hover:opacity-100 group-focus-within:opacity-100"
+      >
+        {text}
+      </span>
+    </span>
+  );
+}
+
+// --- validation result line -------------------------------------------------
+
+function ResultLine({ result }: { result: ValidationResult | null }) {
+  if (!result) return null;
+  return (
+    <p
+      className={`mt-1.5 flex items-center gap-1 text-xs ${
+        result.valid ? "text-link" : "text-error"
+      }`}
+    >
+      {result.valid ? (
+        <FiCheck className="h-3.5 w-3.5 shrink-0" />
+      ) : (
+        <FiX className="h-3.5 w-3.5 shrink-0" />
+      )}
+      {result.message}
+    </p>
+  );
+}
 
 // --- inline-validated text field --------------------------------------------
 
@@ -21,6 +82,7 @@ function ValidatedField({
   onChange,
   onResolved,
   optional,
+  info,
 }: {
   label: string;
   placeholder?: string;
@@ -29,6 +91,7 @@ function ValidatedField({
   onChange: (v: string) => void;
   onResolved?: (r: ValidationResult) => void;
   optional?: boolean;
+  info?: string;
 }) {
   const [result, setResult] = useState<ValidationResult | null>(null);
   const [checking, setChecking] = useState(false);
@@ -46,12 +109,13 @@ function ValidatedField({
   }
 
   return (
-    <div className="mb-3">
-      <label className="block text-sm font-medium text-default mb-1">
+    <div className="mb-4">
+      <label className="mb-1 flex items-center text-sm font-medium text-default">
         {label}
         {optional && (
-          <span className="text-subtle font-normal"> (optional)</span>
+          <span className="ml-1 font-normal text-subtle">(optional)</span>
         )}
+        {info && <InfoHint text={info} />}
       </label>
       <input
         type="text"
@@ -62,19 +126,10 @@ function ValidatedField({
           setResult(null);
         }}
         onBlur={check}
-        className="w-full rounded-md border border-border-medium bg-background-weak px-3 py-2 text-sm text-default focus:outline-none focus:ring-1 focus:ring-accent"
+        className={inputClass}
       />
-      {checking && <p className="mt-1 text-xs text-subtle">Validating…</p>}
-      {result && (
-        <p
-          className={`mt-1 text-xs ${
-            result.valid ? "text-link" : "text-error"
-          }`}
-        >
-          {result.valid ? "✓ " : "✗ "}
-          {result.message}
-        </p>
-      )}
+      {checking && <p className="mt-1.5 text-xs text-subtle">Validating…</p>}
+      <ResultLine result={result} />
     </div>
   );
 }
@@ -82,34 +137,52 @@ function ValidatedField({
 // --- status badge -----------------------------------------------------------
 
 function StatusBadge({ status }: { status: string }) {
-  const color =
+  const tone =
     status === "complete"
-      ? "text-link"
+      ? "bg-link/10 text-link"
       : status === "failed" || status === "rejected"
-        ? "text-error"
-        : "text-subtle";
-  return <span className={`text-xs font-semibold ${color}`}>{status}</span>;
+        ? "bg-error/10 text-error"
+        : "bg-accent/10 text-accent";
+  return (
+    <span
+      className={`rounded-full px-2 py-0.5 text-xs font-semibold capitalize ${tone}`}
+    >
+      {status}
+    </span>
+  );
 }
 
 // --- one extra source row ---------------------------------------------------
+
+const SOURCE_KIND: Record<OnboardingSourceType, ValidateKind> = {
+  web: "docs",
+  confluence: "confluence",
+  slack: "slack_channel",
+  jira: "jira",
+};
+
+const SOURCE_PLACEHOLDER: Record<OnboardingSourceType, string> = {
+  web: "https://docs.example.com/…",
+  confluence: "https://<org>.atlassian.net/wiki/spaces/KEY",
+  slack: "#another-channel",
+  jira: "project = ABC AND status != Done",
+};
 
 function SourceRow({
   source,
   onChange,
   onRemove,
   onMove,
+  canMoveUp,
+  canMoveDown,
 }: {
   source: OnboardingSource;
   onChange: (s: OnboardingSource) => void;
   onRemove: () => void;
   onMove: (dir: -1 | 1) => void;
+  canMoveUp: boolean;
+  canMoveDown: boolean;
 }) {
-  const kindFor: Record<OnboardingSourceType, ValidateKind> = {
-    web: "docs",
-    confluence: "confluence",
-    github: "github", // live-validated: confirms the stored token can reach the repo
-    slack: "slack_channel",
-  };
   const [result, setResult] = useState<ValidationResult | null>(null);
   return (
     <div className="mb-2 flex items-start gap-2">
@@ -118,10 +191,10 @@ function SourceRow({
         onChange={(e) =>
           onChange({ ...source, type: e.target.value as OnboardingSourceType })
         }
-        className="rounded-md border border-border-medium bg-background-weak px-2 py-2 text-sm"
+        className="rounded-md border border-border-medium bg-background px-2 py-2 text-sm text-default focus:outline-none focus:ring-2 focus:ring-accent/40"
       >
         <option value="confluence">Confluence</option>
-        <option value="github">GitHub repo</option>
+        <option value="jira">Jira (filter)</option>
         <option value="slack">Slack channel</option>
         <option value="web">Web / docs</option>
       </select>
@@ -129,7 +202,7 @@ function SourceRow({
         <input
           type="text"
           value={source.value}
-          placeholder="URL, repo, or #channel"
+          placeholder={SOURCE_PLACEHOLDER[source.type]}
           onChange={(e) => {
             onChange({ ...source, value: e.target.value });
             setResult(null);
@@ -137,45 +210,74 @@ function SourceRow({
           onBlur={async () => {
             if (!source.value.trim()) return;
             setResult(
-              await validateOnboardingField(kindFor[source.type], source.value)
+              await validateOnboardingField(
+                SOURCE_KIND[source.type],
+                source.value
+              )
             );
           }}
-          className="w-full rounded-md border border-border-medium bg-background-weak px-3 py-2 text-sm"
+          className={inputClass}
         />
-        {result && (
-          <p
-            className={`mt-1 text-xs ${result.valid ? "text-link" : "text-error"}`}
-          >
-            {result.valid ? "✓ " : "✗ "}
-            {result.message}
-          </p>
-        )}
+        <ResultLine result={result} />
       </div>
-      <button
-        type="button"
-        onClick={() => onMove(-1)}
-        title="Move up"
-        className="px-1 text-subtle hover:text-default"
-      >
-        ↑
-      </button>
-      <button
-        type="button"
-        onClick={() => onMove(1)}
-        title="Move down"
-        className="px-1 text-subtle hover:text-default"
-      >
-        ↓
-      </button>
-      <button
-        type="button"
-        onClick={onRemove}
-        title="Remove"
-        className="px-1 text-subtle hover:text-error"
-      >
-        ✕
-      </button>
+      <div className="flex shrink-0 items-center">
+        <button
+          type="button"
+          onClick={() => onMove(-1)}
+          disabled={!canMoveUp}
+          title="Higher priority"
+          className="p-1.5 text-subtle hover:text-default disabled:opacity-30"
+        >
+          <FiChevronUp className="h-4 w-4" />
+        </button>
+        <button
+          type="button"
+          onClick={() => onMove(1)}
+          disabled={!canMoveDown}
+          title="Lower priority"
+          className="p-1.5 text-subtle hover:text-default disabled:opacity-30"
+        >
+          <FiChevronDown className="h-4 w-4" />
+        </button>
+        <button
+          type="button"
+          onClick={onRemove}
+          title="Remove source"
+          className="p-1.5 text-subtle hover:text-error"
+        >
+          <FiTrash2 className="h-4 w-4" />
+        </button>
+      </div>
     </div>
+  );
+}
+
+// --- section shell with a numbered step marker ------------------------------
+
+function Section({
+  step,
+  title,
+  hint,
+  children,
+}: {
+  step: number;
+  title: string;
+  hint?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="mb-5 rounded-xl border border-border-medium bg-background-weak p-5">
+      <div className="mb-4 flex items-baseline gap-3">
+        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-accent/10 text-xs font-semibold text-accent">
+          {step}
+        </span>
+        <div>
+          <h2 className="text-sm font-semibold text-default">{title}</h2>
+          {hint && <p className="mt-0.5 text-xs text-subtle">{hint}</p>}
+        </div>
+      </div>
+      {children}
+    </section>
   );
 }
 
@@ -187,26 +289,19 @@ export function OnboardingForm() {
   const [channel, setChannel] = useState<{ id: string; name: string } | null>(
     null
   );
-  const [responseType, setResponseType] = useState<"citations" | "quotes">(
-    "citations"
-  );
-  const [respondTagOnly, setRespondTagOnly] = useState(false);
   const [systemPrompt, setSystemPrompt] = useState("");
   const [smeEnabled, setSmeEnabled] = useState(false);
   const [smeGroup, setSmeGroup] = useState("");
   const [oncallEnabled, setOncallEnabled] = useState(false);
   const [oncallSchedule, setOncallSchedule] = useState("");
-  const [jiraEnabled, setJiraEnabled] = useState(false);
-  const [jiraProject, setJiraProject] = useState("");
-  const [jiraIssueType, setJiraIssueType] = useState("");
 
   const [docsCloud, setDocsCloud] = useState("");
   const [docsOnprem, setDocsOnprem] = useState("");
-  const [includeHistory, setIncludeHistory] = useState(true);
   const [extraSources, setExtraSources] = useState<OnboardingSource[]>([]);
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [submitted, setSubmitted] = useState(false);
   const [mine, setMine] = useState<OnboardingRequestSnapshot[]>([]);
   const [statuses, setStatuses] = useState<
     Record<number, OnboardingStatusResponse>
@@ -247,7 +342,8 @@ export function OnboardingForm() {
         value: docsOnprem.trim(),
         label: "Docs (on-prem)",
       });
-    if (includeHistory && channel)
+    // The bot channel's message history is always indexed.
+    if (channel)
       s.push({
         type: "slack",
         value: channel.name,
@@ -259,10 +355,12 @@ export function OnboardingForm() {
 
   async function submit() {
     setError(null);
-    if (!teamName.trim()) return setError("Team name is required.");
+    setSubmitted(false);
+    if (!teamName.trim()) return setError("Enter a team name.");
     if (!channel) return setError("Validate the bot channel first.");
     const sources = buildSources();
-    if (sources.length === 0) return setError("Add at least one source.");
+    if (sources.length === 0)
+      return setError("Add at least one source to index.");
 
     setSubmitting(true);
     try {
@@ -272,32 +370,27 @@ export function OnboardingForm() {
         body: JSON.stringify({
           team_name: teamName.trim(),
           channel: { channel_id: channel.id, channel_name: channel.name },
-          response_type: responseType,
-          respond_tag_only: respondTagOnly,
+          // Response format is standardized to citations for every channel.
+          response_type: "citations",
+          respond_tag_only: false,
           system_prompt: systemPrompt,
           task_prompt: "",
           sme: { enabled: smeEnabled, group_name: smeGroup },
           oncall: { enabled: oncallEnabled, schedule: oncallSchedule },
-          jira: {
-            enabled: jiraEnabled,
-            project_key: jiraProject,
-            issue_type: jiraIssueType,
-            component: "",
-          },
           sources,
         }),
       });
       if (!res.ok) {
         setError(
           (await res.json().catch(() => null))?.detail ||
-            `Submit failed (${res.status}).`
+            `Couldn't submit the request (${res.status}).`
         );
         return;
       }
-      // reset the source fields; keep it simple.
       setDocsCloud("");
       setDocsOnprem("");
       setExtraSources([]);
+      setSubmitted(true);
       await refreshMine();
     } catch {
       setError("Something went wrong submitting the request.");
@@ -306,26 +399,30 @@ export function OnboardingForm() {
     }
   }
 
-  const section =
-    "mb-6 rounded-lg border border-border-medium bg-background-weak p-4";
-
   return (
-    <div className="mx-auto max-w-3xl px-4 py-8">
-      <h1 className="text-2xl font-semibold text-default mb-1">
-        Onboard a team to Darwin
-      </h1>
-      <p className="text-sm text-subtle mb-6">
-        Submit this request; an admin approves it, then Darwin auto-scrapes your
-        sources and wires up your assistant. Every field is validated live.
-      </p>
+    <div className="mx-auto max-w-3xl px-4 py-10">
+      <header className="mb-8">
+        <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-accent">
+          Team onboarding
+        </p>
+        <h1 className="text-2xl font-semibold text-default">
+          Onboarding Darwin to Slack Channel
+        </h1>
+        <p className="mt-2 text-sm text-subtle">
+          Point Darwin at your team&apos;s knowledge and channel. An admin
+          approves the request, then Darwin scrapes your sources and wires up
+          the assistant. Every field is checked live before you submit.
+        </p>
+      </header>
 
-      <div className={section}>
+      <Section step={1} title="Channel & assistant">
         <ValidatedField
           label="Bot channel"
           placeholder="#help-your-team or a channel link"
           kind="slack_channel"
           value={channelInput}
           onChange={setChannelInput}
+          info="This is the channel where the Darwin Slack bot will be configured — it answers questions here."
           onResolved={(r) =>
             setChannel(
               r.valid
@@ -337,46 +434,24 @@ export function OnboardingForm() {
             )
           }
         />
-        <label className="block text-sm font-medium text-default mb-1 mt-2">
+        <label className="mb-1 block text-sm font-medium text-default">
           Team name
         </label>
         <input
           value={teamName}
           onChange={(e) => setTeamName(e.target.value)}
           placeholder="e.g. Integration Service"
-          className="w-full rounded-md border border-border-medium bg-background-weak px-3 py-2 text-sm mb-3"
+          className={inputClass}
         />
-        <div className="flex items-center gap-4">
-          <label className="text-sm text-default">
-            Response format:{" "}
-            <select
-              value={responseType}
-              onChange={(e) =>
-                setResponseType(e.target.value as "citations" | "quotes")
-              }
-              className="rounded-md border border-border-medium bg-background-weak px-2 py-1 text-sm"
-            >
-              <option value="citations">Citations</option>
-              <option value="quotes">Quotes</option>
-            </select>
-          </label>
-          <label className="flex items-center gap-2 text-sm text-default">
-            <input
-              type="checkbox"
-              checked={respondTagOnly}
-              onChange={(e) => setRespondTagOnly(e.target.checked)}
-            />
-            Respond only when tagged
-          </label>
-        </div>
-      </div>
+      </Section>
 
-      <div className={section}>
-        <h2 className="text-sm font-semibold text-default mb-2">
-          Sources (priority order)
-        </h2>
+      <Section
+        step={2}
+        title="Sources"
+        hint="Add everything Darwin should read. Order sets retrieval priority — drag the arrows to reorder."
+      >
         <ValidatedField
-          label="Documentation — Cloud (root URL)"
+          label="Docs-URL - Cloud"
           placeholder="https://docs.uipath.com/<product>/automation-cloud/latest"
           kind="docs"
           value={docsCloud}
@@ -384,32 +459,28 @@ export function OnboardingForm() {
           optional
         />
         <ValidatedField
-          label="Documentation — On-prem / standalone (root URL)"
+          label="Docs-URL - On-prem"
           placeholder="https://docs.uipath.com/<product>/standalone/latest"
           kind="docs"
           value={docsOnprem}
           onChange={setDocsOnprem}
           optional
         />
-        <p className="text-xs text-subtle mb-3">
-          Paste the product root URL only — Darwin crawls all versions
-          automatically.
+        <p className="mb-4 text-xs text-subtle">
+          Paste the product root URL only — Darwin crawls every version
+          automatically. The bot channel&apos;s own message history is always
+          indexed.
         </p>
-        <label className="flex items-center gap-2 text-sm text-default mb-3">
-          <input
-            type="checkbox"
-            checked={includeHistory}
-            onChange={(e) => setIncludeHistory(e.target.checked)}
-          />
-          Include this channel&apos;s message history
-        </label>
-        <div className="text-sm font-medium text-default mb-1">
+
+        <div className="mb-2 text-sm font-medium text-default">
           Additional sources
         </div>
         {extraSources.map((s, i) => (
           <SourceRow
             key={i}
             source={s}
+            canMoveUp={i > 0}
+            canMoveDown={i < extraSources.length - 1}
             onChange={(ns) =>
               setExtraSources((p) => p.map((x, j) => (j === i ? ns : x)))
             }
@@ -430,34 +501,32 @@ export function OnboardingForm() {
           onClick={() =>
             setExtraSources((p) => [...p, { type: "confluence", value: "" }])
           }
-          className="mt-1 text-sm text-link hover:underline"
+          className="mt-1 inline-flex items-center gap-1 text-sm text-link hover:underline"
         >
-          + Add source
+          <FiPlus className="h-4 w-4" /> Add source
         </button>
-      </div>
+      </Section>
 
-      <div className={section}>
-        <label className="block text-sm font-medium text-default mb-1">
-          System prompt
-        </label>
-        <p className="text-xs text-subtle mb-1">
-          Prefilled from the default (Orchestrator) — edit as needed.
-        </p>
+      <Section
+        step={3}
+        title="Assistant prompt"
+        hint="Prefilled from the default (Orchestrator) — edit if your team needs different behavior."
+      >
         <textarea
           value={systemPrompt}
           onChange={(e) => setSystemPrompt(e.target.value)}
-          rows={5}
-          className="w-full rounded-md border border-border-medium bg-background-weak px-3 py-2 text-sm font-mono"
+          rows={6}
+          className={`${inputClass} font-mono leading-relaxed`}
         />
-      </div>
+      </Section>
 
-      <div className={section}>
-        <h2 className="text-sm font-semibold text-default mb-2">Options</h2>
-        <label className="flex items-center gap-2 text-sm text-default mb-2">
+      <Section step={4} title="Options">
+        <label className="mb-3 flex items-center gap-2 text-sm text-default">
           <input
             type="checkbox"
             checked={smeEnabled}
             onChange={(e) => setSmeEnabled(e.target.checked)}
+            className="accent-accent"
           />
           Let SMEs verify answers
         </label>
@@ -470,11 +539,12 @@ export function OnboardingForm() {
             onChange={setSmeGroup}
           />
         )}
-        <label className="flex items-center gap-2 text-sm text-default mb-2">
+        <label className="flex items-center gap-2 text-sm text-default">
           <input
             type="checkbox"
             checked={oncallEnabled}
             onChange={(e) => setOncallEnabled(e.target.checked)}
+            className="accent-accent"
           />
           On &quot;need more help&quot;, tag the on-call
         </label>
@@ -483,53 +553,40 @@ export function OnboardingForm() {
             value={oncallSchedule}
             onChange={(e) => setOncallSchedule(e.target.value)}
             placeholder="Opsgenie schedule name"
-            className="w-full rounded-md border border-border-medium bg-background-weak px-3 py-2 text-sm mb-3"
+            className={`${inputClass} mt-3`}
           />
         )}
-        <label className="flex items-center gap-2 text-sm text-default mb-2">
-          <input
-            type="checkbox"
-            checked={jiraEnabled}
-            onChange={(e) => setJiraEnabled(e.target.checked)}
-          />
-          Enable Jira ticket creation
-        </label>
-        {jiraEnabled && (
-          <div className="flex gap-2">
-            <input
-              value={jiraProject}
-              onChange={(e) => setJiraProject(e.target.value)}
-              placeholder="Project key"
-              className="flex-1 rounded-md border border-border-medium bg-background-weak px-3 py-2 text-sm"
-            />
-            <input
-              value={jiraIssueType}
-              onChange={(e) => setJiraIssueType(e.target.value)}
-              placeholder="Issue type"
-              className="flex-1 rounded-md border border-border-medium bg-background-weak px-3 py-2 text-sm"
-            />
-          </div>
-        )}
-      </div>
+      </Section>
 
-      {error && <p className="mb-3 text-sm text-error">{error}</p>}
+      {error && (
+        <p className="mb-3 flex items-center gap-1.5 text-sm text-error">
+          <FiX className="h-4 w-4 shrink-0" />
+          {error}
+        </p>
+      )}
+      {submitted && !error && (
+        <p className="mb-3 flex items-center gap-1.5 text-sm text-link">
+          <FiCheck className="h-4 w-4 shrink-0" />
+          Request submitted — an admin will review it. Track it below.
+        </p>
+      )}
       <button
         onClick={submit}
         disabled={submitting}
-        className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-inverted disabled:opacity-60"
+        className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-inverted transition-opacity hover:opacity-90 disabled:opacity-60"
       >
         {submitting ? "Submitting…" : "Submit onboarding request"}
       </button>
 
       {mine.length > 0 && (
-        <div className="mt-10">
-          <h2 className="text-lg font-semibold text-default mb-3">
+        <div className="mt-12">
+          <h2 className="mb-3 text-lg font-semibold text-default">
             Your requests
           </h2>
           {mine.map((r) => (
             <div
               key={r.id}
-              className="mb-3 rounded-lg border border-border-medium p-3"
+              className="mb-3 rounded-xl border border-border-medium bg-background-weak p-4"
             >
               <div className="flex items-center justify-between">
                 <div className="text-sm font-medium text-default">
@@ -559,9 +616,8 @@ export function OnboardingForm() {
                       className="mt-1 flex items-center justify-between text-xs"
                     >
                       <span className="text-subtle">{s.name}</span>
-                      <span>
-                        <StatusBadge status={s.status} /> · {s.docs_indexed}{" "}
-                        docs
+                      <span className="flex items-center gap-2">
+                        <StatusBadge status={s.status} /> {s.docs_indexed} docs
                         {s.error_msg ? (
                           <span className="text-error"> · {s.error_msg}</span>
                         ) : null}

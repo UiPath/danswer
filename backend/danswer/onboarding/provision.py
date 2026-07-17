@@ -55,8 +55,10 @@ from danswer.db.persona import upsert_persona
 from danswer.db.persona import upsert_prompt
 from danswer.db.slack_bot_config import insert_slack_bot_config
 from danswer.onboarding.validation import _allowed_confluence_hosts
+from danswer.onboarding.validation import jira_base_url
 from danswer.onboarding.validation import validate_confluence_url
 from danswer.onboarding.validation import validate_github_repo
+from danswer.onboarding.validation import validate_jira_filter
 from danswer.onboarding.validation import validate_slack_channel
 from danswer.server.documents.models import ConnectorBase
 from danswer.server.features.document_set.models import DocumentSetCreationRequest
@@ -154,6 +156,8 @@ def _assert_source_accessible(source: dict, db_session: Session) -> None:
         result = validate_github_repo(value, db_session)
     elif stype == "slack":
         result = validate_slack_channel(value)
+    elif stype == "jira":
+        result = validate_jira_filter(value, db_session)
     else:
         return
     if not result.valid:
@@ -243,6 +247,21 @@ def _build_connector_base(source: dict, db_session: Session) -> ConnectorBase:
             prune_freq=None,
             disabled=False,
         )
+    if stype == "jira":
+        # value is a JQL filter; reuse an existing Jira connector's base URL so
+        # the requester never supplies the host/credentials.
+        base = jira_base_url(db_session)
+        if not base:
+            raise ValueError("No existing Jira connector to copy the base URL from")
+        return ConnectorBase(
+            name=f"[onboarding] {label}",
+            source=DocumentSource.JIRA,
+            input_type=InputType.POLL,
+            connector_specific_config={"jira_base_url": base, "jira_filter": value},
+            refresh_freq=DEFAULT_REFRESH_FREQ,
+            prune_freq=None,
+            disabled=False,
+        )
     raise ValueError(f"Unsupported source type: {stype}")
 
 
@@ -251,6 +270,7 @@ _CREDENTIAL_KEY_BY_SOURCE = {
     "confluence": "confluence_access_token",
     "github": "github_access_token",
     "slack": "slack_bot_token",
+    "jira": "jira_api_token",
 }
 
 
@@ -275,6 +295,7 @@ def _source_type_value(source_type: str) -> str:
         "confluence": DocumentSource.CONFLUENCE.value,
         "github": DocumentSource.GITHUB.value,
         "slack": DocumentSource.SLACK.value,
+        "jira": DocumentSource.JIRA.value,
     }.get(source_type, source_type)
 
 

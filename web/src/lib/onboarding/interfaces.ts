@@ -1,7 +1,7 @@
 // Types for the self-serve Darwin onboarding flow. Mirrors the backend models in
 // danswer/server/features/onboarding/.
 
-export type OnboardingSourceType = "web" | "confluence" | "github" | "slack";
+export type OnboardingSourceType = "web" | "confluence" | "slack" | "jira";
 
 export interface OnboardingSource {
   type: OnboardingSourceType;
@@ -71,7 +71,7 @@ export interface OnboardingStatusResponse {
 }
 
 export type ValidateKind =
-  "slack_channel" | "slack_group" | "confluence" | "github" | "docs";
+  "slack_channel" | "slack_group" | "confluence" | "github" | "jira" | "docs";
 
 export async function validateOnboardingField(
   kind: ValidateKind,

@@ -4,8 +4,10 @@ Slack/Confluence validators hit live APIs and are covered by manual/integration
 checks, not here."""
 import pytest
 
+from danswer.onboarding import validation
 from danswer.onboarding.validation import validate_docs_url
 from danswer.onboarding.validation import validate_github_repo
+from danswer.onboarding.validation import validate_jira_filter
 
 
 class _Cred:
@@ -119,3 +121,69 @@ def test_github_repo_inaccessible_reports_generic_error(
     assert not r.valid
     assert "not found or the GitHub app lacks access" in r.message
     assert "ghp_" not in r.message  # no token / raw payload leakage
+
+
+# --- validate_jira_filter -------------------------------------------------
+
+
+def test_jira_filter_empty() -> None:
+    assert not validate_jira_filter("", db_session=None).valid  # type: ignore[arg-type]
+
+
+def test_jira_filter_unverified_without_connector(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(validation, "jira_base_url", lambda db: None)
+    monkeypatch.setattr(validation, "_first_jira_credential", lambda db: None)
+    r = validate_jira_filter("project = ABC", db_session=None)  # type: ignore[arg-type]
+    assert r.valid
+    assert "unverified" in r.message.lower()
+
+
+def test_jira_filter_valid(monkeypatch: pytest.MonkeyPatch) -> None:
+    import jira as jira_mod
+
+    class _OkJira:
+        def __init__(self, **kwargs: object) -> None:
+            pass
+
+        def search_issues(self, jql: str, maxResults: int = 1) -> list:
+            return []
+
+    monkeypatch.setattr(
+        validation, "jira_base_url", lambda db: "https://x.atlassian.net"
+    )
+    monkeypatch.setattr(
+        validation,
+        "_first_jira_credential",
+        lambda db: {"jira_api_token": "t", "jira_user_email": "e@x.com"},
+    )
+    monkeypatch.setattr(jira_mod, "JIRA", _OkJira)
+    r = validate_jira_filter("project = ABC", db_session=None)  # type: ignore[arg-type]
+    assert r.valid
+    assert r.message == "Jira filter OK"
+
+
+def test_jira_filter_invalid_reports_generic_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import jira as jira_mod
+
+    class _BadJira:
+        def __init__(self, **kwargs: object) -> None:
+            pass
+
+        def search_issues(self, jql: str, maxResults: int = 1) -> list:
+            raise Exception("400 bad JQL token=ghp_should_not_leak")
+
+    monkeypatch.setattr(
+        validation, "jira_base_url", lambda db: "https://x.atlassian.net"
+    )
+    monkeypatch.setattr(
+        validation, "_first_jira_credential", lambda db: {"jira_api_token": "t"}
+    )
+    monkeypatch.setattr(jira_mod, "JIRA", _BadJira)
+    r = validate_jira_filter("nonsense jql", db_session=None)  # type: ignore[arg-type]
+    assert not r.valid
+    assert "Invalid Jira filter" in r.message
+    assert "token=" not in r.message  # no payload/token leakage
