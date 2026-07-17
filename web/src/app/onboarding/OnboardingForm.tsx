@@ -25,6 +25,8 @@ import {
   ClientCheck,
   SOURCE_CLIENT_CHECK,
 } from "@/lib/onboarding/clientChecks";
+import { SourceStatusSummary } from "@/app/onboarding/SourceStatusSummary";
+import { OnboardingJourney } from "@/app/onboarding/OnboardingJourney";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 
@@ -362,6 +364,11 @@ export function OnboardingForm({
   const editing = !!initialRequest;
   const adminEdit = editing && editMode === "admin";
   const requesterEdit = editing && editMode === "requester";
+  // Only PENDING requests can be edited/approved. Once a request has moved on
+  // (provisioning/indexing/complete/failed/rejected/cancelled) the form is shown
+  // read-only — Save/Approve hidden, fields dimmed — so it's clear nothing can
+  // change from here.
+  const readOnly = editing && initialRequest!.status !== "pending";
   const p = initialRequest?.payload;
 
   // "Submit a request" vs "My requests" — surfaced as top tabs so status isn't
@@ -607,16 +614,30 @@ export function OnboardingForm({
     <div className="mx-auto max-w-3xl px-4 py-10">
       <header className="mb-8">
         <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-accent">
-          {adminEdit
-            ? "Review onboarding request"
-            : requesterEdit
-              ? "Edit onboarding request"
-              : "Team onboarding"}
+          {readOnly
+            ? "Onboarding request"
+            : adminEdit
+              ? "Review onboarding request"
+              : requesterEdit
+                ? "Edit onboarding request"
+                : "Team onboarding"}
         </p>
         <h1 className="text-2xl font-semibold text-default">
           Onboarding Darwin to Slack Channel
         </h1>
-        {adminEdit ? (
+        {readOnly ? (
+          <p className="mt-2 text-sm text-subtle">
+            Submitted by{" "}
+            <span className="font-medium text-default">
+              {initialRequest?.requester_email}
+            </span>
+            . This request is{" "}
+            <span className="font-medium capitalize text-default">
+              {initialRequest?.status}
+            </span>{" "}
+            — editing and approval are no longer available.
+          </p>
+        ) : adminEdit ? (
           <p className="mt-2 text-sm text-subtle">
             Submitted by{" "}
             <span className="font-medium text-default">
@@ -851,15 +872,20 @@ export function OnboardingForm({
           <div className="flex items-center gap-3">
             <button
               onClick={submit}
-              disabled={submitting || !teamName.trim() || !channel}
+              disabled={readOnly || submitting || !teamName.trim() || !channel}
               title={
-                !channel
-                  ? "Validate the bot channel first"
-                  : !teamName.trim()
-                    ? "Enter a team name"
-                    : undefined
+                readOnly
+                  ? `This request is ${initialRequest?.status} — it can no longer be edited or approved.`
+                  : !channel
+                    ? "Validate the bot channel first"
+                    : !teamName.trim()
+                      ? "Enter a team name"
+                      : undefined
               }
-              className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-inverted transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+              className={
+                "rounded-md bg-accent px-4 py-2 text-sm font-medium text-inverted transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60" +
+                (readOnly ? " blur-[1px]" : "")
+              }
             >
               {submitting
                 ? editing
@@ -885,8 +911,18 @@ export function OnboardingForm({
                     setSubmitting(false);
                   }
                 }}
-                disabled={submitting || !teamName.trim() || !channel}
-                className="rounded-md border border-border-medium px-4 py-2 text-sm font-medium text-default hover:bg-hover-light disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={
+                  readOnly || submitting || !teamName.trim() || !channel
+                }
+                title={
+                  readOnly
+                    ? `This request is ${initialRequest?.status} — it can no longer be edited.`
+                    : undefined
+                }
+                className={
+                  "rounded-md border border-border-medium px-4 py-2 text-sm font-medium text-default hover:bg-hover-light disabled:cursor-not-allowed disabled:opacity-60" +
+                  (readOnly ? " blur-[1px]" : "")
+                }
               >
                 Save changes
               </button>
@@ -903,7 +939,7 @@ export function OnboardingForm({
                 }
                 className="text-sm text-subtle hover:text-default"
               >
-                Cancel
+                {readOnly ? "Back" : "Cancel"}
               </button>
             )}
           </div>
@@ -925,14 +961,23 @@ export function OnboardingForm({
               key={r.id}
               className="mb-3 rounded-xl border border-border-medium bg-background-weak p-4 shadow-sm"
             >
-              <div className="flex items-center justify-between">
+              <div className="flex items-start justify-between gap-3">
                 <div className="text-sm font-medium text-default">
                   {r.payload.team_name} → #{r.payload.channel.channel_name}
                 </div>
-                <StatusBadge status={r.status} />
+                <div className="flex flex-col items-end gap-1">
+                  <StatusBadge status={r.status} />
+                  {statuses[r.id] && (
+                    <SourceStatusSummary sources={statuses[r.id].sources} />
+                  )}
+                </div>
               </div>
+              <OnboardingJourney
+                request={r}
+                sources={statuses[r.id]?.sources}
+              />
               {r.error_msg && (
-                <p className="mt-1 text-xs text-error">{r.error_msg}</p>
+                <p className="mt-2 text-xs text-error">{r.error_msg}</p>
               )}
               {r.decision_reason && (
                 <p className="mt-1 text-xs text-subtle">
@@ -965,17 +1010,23 @@ export function OnboardingForm({
                     Refresh scrape status
                   </button>
                   {statuses[r.id]?.sources.map((s) => (
-                    <div
-                      key={s.cc_pair_id}
-                      className="mt-1 flex items-center justify-between text-xs"
-                    >
-                      <span className="text-subtle">{s.name}</span>
-                      <span className="flex items-center gap-2">
-                        <StatusBadge status={s.status} /> {s.docs_indexed} docs
-                        {s.error_msg ? (
-                          <span className="text-error"> · {s.error_msg}</span>
-                        ) : null}
-                      </span>
+                    <div key={s.cc_pair_id} className="mt-1 text-xs">
+                      <div className="flex items-start gap-2">
+                        <span className="min-w-0 flex-1 text-subtle [overflow-wrap:anywhere]">
+                          {s.name}
+                        </span>
+                        <span className="w-24 shrink-0">
+                          <StatusBadge status={s.status} />
+                        </span>
+                        <span className="w-16 shrink-0 text-right text-subtle">
+                          {s.docs_indexed} docs
+                        </span>
+                      </div>
+                      {s.error_msg && (
+                        <p className="mt-0.5 [overflow-wrap:anywhere] text-error">
+                          {s.error_msg}
+                        </p>
+                      )}
                     </div>
                   ))}
                 </div>

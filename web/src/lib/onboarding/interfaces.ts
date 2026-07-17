@@ -76,6 +76,36 @@ export interface OnboardingStatusResponse {
   sources: SourceStatus[];
 }
 
+export interface SourceStatusCounts {
+  total: number;
+  succeeded: number;
+  indexing: number;
+  pending: number;
+  failed: number;
+}
+
+// Roll the per-source scrape statuses up into counts for an at-a-glance summary
+// (e.g. "4/6 succeeded · 1 indexing · 1 failed"). Anything that isn't
+// success/in_progress/failed (i.e. not_started) counts as pending.
+export function countSourceStatuses(
+  sources: SourceStatus[]
+): SourceStatusCounts {
+  const counts: SourceStatusCounts = {
+    total: sources.length,
+    succeeded: 0,
+    indexing: 0,
+    pending: 0,
+    failed: 0,
+  };
+  for (const s of sources) {
+    if (s.status === "success") counts.succeeded += 1;
+    else if (s.status === "in_progress") counts.indexing += 1;
+    else if (s.status === "failed") counts.failed += 1;
+    else counts.pending += 1;
+  }
+  return counts;
+}
+
 export type ValidateKind =
   "slack_channel" | "slack_group" | "confluence" | "github" | "jira" | "docs";
 

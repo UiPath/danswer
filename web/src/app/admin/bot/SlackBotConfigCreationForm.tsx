@@ -1,6 +1,7 @@
 "use client";
 
 import { ArrayHelpers, FieldArray, Form, Formik } from "formik";
+import { FiCheck } from "react-icons/fi";
 import * as Yup from "yup";
 import { usePopup } from "@/components/admin/connectors/Popup";
 import { DocumentSet, SlackBotConfig } from "@/lib/types";
@@ -542,17 +543,19 @@ export const SlackBotCreationForm = ({
                                     key={documentSet.id}
                                     className={
                                       `
-                                      px-3 
+                                      px-3
                                       py-1
-                                      rounded-lg 
+                                      rounded-lg
                                       border
-                                      border-border 
-                                      w-fit 
-                                      flex 
-                                      cursor-pointer ` +
+                                      w-fit
+                                      flex
+                                      items-center
+                                      gap-1.5
+                                      cursor-pointer
+                                      transition-colors ` +
                                       (isSelected
-                                        ? " bg-hover"
-                                        : " bg-background hover:bg-hover-light")
+                                        ? " border-accent bg-accent/10 font-medium text-accent"
+                                        : " border-border bg-background text-default hover:bg-hover-light")
                                     }
                                     onClick={() => {
                                       if (isSelected) {
@@ -562,6 +565,9 @@ export const SlackBotCreationForm = ({
                                       }
                                     }}
                                   >
+                                    {isSelected && (
+                                      <FiCheck className="h-3.5 w-3.5 shrink-0" />
+                                    )}
                                     <div className="my-auto">
                                       {documentSet.name}
                                     </div>
