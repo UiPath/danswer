@@ -418,6 +418,7 @@ export function OnboardingForm() {
   const [smeGroup, setSmeGroup] = useState("");
   const [oncallEnabled, setOncallEnabled] = useState(false);
   const [oncallSchedule, setOncallSchedule] = useState("");
+  const [oncallHandles, setOncallHandles] = useState("");
 
   const [docsCloud, setDocsCloud] = useState("");
   const [docsOnprem, setDocsOnprem] = useState("");
@@ -500,7 +501,11 @@ export function OnboardingForm() {
           system_prompt: systemPrompt,
           task_prompt: "",
           sme: { enabled: smeEnabled, group_name: smeGroup },
-          oncall: { enabled: oncallEnabled, schedule: oncallSchedule },
+          oncall: {
+            enabled: oncallEnabled,
+            schedule: oncallSchedule,
+            handles: oncallHandles,
+          },
           sources,
         }),
       });
@@ -680,12 +685,27 @@ export function OnboardingForm() {
           On &quot;need more help&quot;, tag the on-call
         </label>
         {oncallEnabled && (
-          <input
-            value={oncallSchedule}
-            onChange={(e) => setOncallSchedule(e.target.value)}
-            placeholder="Opsgenie schedule name"
-            className={`${inputClass} mt-3`}
-          />
+          <div className="mt-3">
+            <ValidatedField
+              label="DRI Slack handle(s)"
+              placeholder="@as-dri (comma-separated for multiple)"
+              kind="slack_group"
+              value={oncallHandles}
+              onChange={setOncallHandles}
+              helpText="Slack user-group handle(s) to @-mention when someone needs more help, e.g. @as-dri."
+              optional
+            />
+            <input
+              value={oncallSchedule}
+              onChange={(e) => setOncallSchedule(e.target.value)}
+              placeholder="OpsGenie schedule name (optional)"
+              className={inputClass}
+            />
+            <p className="mt-1.5 text-xs text-subtle">
+              Optionally pull the current DRI from an OpsGenie schedule instead
+              of (or in addition to) the handles above.
+            </p>
+          </div>
         )}
       </Section>
 

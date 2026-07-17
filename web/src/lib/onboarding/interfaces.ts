@@ -22,7 +22,7 @@ export interface OnboardingSubmitRequest {
   system_prompt: string;
   task_prompt: string;
   sme: { enabled: boolean; group_name: string };
-  oncall: { enabled: boolean; schedule: string };
+  oncall: { enabled: boolean; schedule: string; handles: string };
   jira: {
     enabled: boolean;
     project_key: string;

@@ -28,6 +28,8 @@ class SmeOption(BaseModel):
 class OncallOption(BaseModel):
     enabled: bool = False
     schedule: str = ""  # opsgenie schedule name to tag on "need more help"
+    # comma-separated Slack user-group handles / emails to tag as DRI (e.g. @as-dri)
+    handles: str = ""
 
 
 class JiraOption(BaseModel):

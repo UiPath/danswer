@@ -140,21 +140,26 @@ def validate_slack_channel(value: str) -> ValidationResult:
 
 
 def validate_slack_group(name: str) -> ValidationResult:
-    """A Slack user-group / team name (used for SME groups + oncall)."""
-    raw = (name or "").strip().lstrip("@")
-    if not raw:
-        return ValidationResult(valid=False, message="Enter a group name")
+    """One or more Slack user-group handles/names (comma-separated) — used for SME
+    groups and the on-call DRI handles (e.g. "@as-dri"). Matches on either the
+    group name or its @handle; reports any that don't resolve."""
+    handles = [h.strip().lstrip("@") for h in (name or "").split(",") if h.strip()]
+    if not handles:
+        return ValidationResult(valid=False, message="Enter a group handle")
     try:
         client = _bot_client()
-        group_ids, failed = fetch_groupids_from_names([raw], client)
+        group_ids, failed = fetch_groupids_from_names(handles, client)
     except Exception as e:
         logger.warning("slack group validation failed: %s", e)
         return ValidationResult(valid=False, message="Couldn't reach Slack to verify")
-    if group_ids:
-        return ValidationResult(
-            valid=True, message=f"@{raw}", resolved={"group_id": group_ids[0]}
-        )
-    return ValidationResult(valid=False, message=f"No Slack user group named '{raw}'")
+    if failed:
+        missing = ", ".join(f"@{h}" for h in failed)
+        return ValidationResult(valid=False, message=f"No Slack user group: {missing}")
+    return ValidationResult(
+        valid=True,
+        message=", ".join(f"@{h}" for h in handles),
+        resolved={"group_ids": group_ids},
+    )
 
 
 def _first_confluence_credential(db_session: Session) -> dict | None:

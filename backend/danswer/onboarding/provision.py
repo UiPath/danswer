@@ -337,8 +337,18 @@ def _build_channel_config(
         config["enable_sme_validation"] = True
         config["sme_group_name"] = sme.get("group_name", "")
     oncall = payload.get("oncall") or {}
-    if oncall.get("enabled") and oncall.get("schedule"):
-        config["opsgenie_schedule"] = oncall["schedule"]
+    if oncall.get("enabled"):
+        if oncall.get("schedule"):
+            config["opsgenie_schedule"] = oncall["schedule"]
+        # DRI Slack handles/emails to tag on "need more help" (follow_up_tags is
+        # resolved as emails->users then handles/names->user-groups at runtime).
+        handles = [
+            h.strip().lstrip("@")
+            for h in (oncall.get("handles") or "").split(",")
+            if h.strip()
+        ]
+        if handles:
+            config["follow_up_tags"] = handles
     jira = payload.get("jira") or {}
     if jira.get("enabled"):
         config["jira_config"] = {
