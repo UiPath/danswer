@@ -6,6 +6,7 @@ import {
   FiFolderPlus,
   FiLoader,
   FiPlusSquare,
+  FiUserPlus,
 } from "react-icons/fi";
 import { useContext, useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
@@ -189,6 +190,16 @@ export const ChatSidebar = ({
               {isNavigatingAssistants ? "Loading…" : "Manage Assistants"}
             </div>
           </BasicClickable>
+        </div>
+
+        <div className="mt-1 mb-1 mx-3">
+          <Link href="/onboarding">
+            <BasicClickable fullWidth>
+              <div className="flex items-center text-default font-medium">
+                <FiUserPlus className="ml-1 mr-2" /> Onboard a Team
+              </div>
+            </BasicClickable>
+          </Link>
         </div>
 
         <div className="border-b border-border pb-4 mx-3" />
