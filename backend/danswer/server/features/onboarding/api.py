@@ -28,6 +28,7 @@ from danswer.db.onboarding import get_onboarding_request
 from danswer.db.onboarding import list_onboarding_requests
 from danswer.db.onboarding import list_onboarding_requests_for_user
 from danswer.db.onboarding import update_onboarding_status
+from danswer.onboarding.notify import notify_onboarding_submitted
 from danswer.onboarding.provision import provision_onboarding
 from danswer.onboarding.validation import validate_confluence_url
 from danswer.onboarding.validation import validate_docs_url
@@ -73,6 +74,8 @@ def submit_onboarding(
         requester_email=user.email if user else "system@darwin",
         payload=request.to_payload(),
     )
+    # Best-effort heads-up to the ops channel; never fail the submission on it.
+    notify_onboarding_submitted(created)
     return OnboardingRequestSnapshot.from_model(created)
 
 
