@@ -346,7 +346,7 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <section className="mb-5 rounded-xl border border-border-medium bg-background-weak p-5">
+    <section className="mb-5 rounded-xl border border-border-medium bg-background-weak p-5 shadow-sm">
       <div className="mb-4 flex items-baseline gap-3">
         <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-accent/10 text-xs font-semibold text-accent">
           {step}
@@ -700,7 +700,7 @@ export function OnboardingForm() {
           {mine.map((r) => (
             <div
               key={r.id}
-              className="mb-3 rounded-xl border border-border-medium bg-background-weak p-4"
+              className="mb-3 rounded-xl border border-border-medium bg-background-weak p-4 shadow-sm"
             >
               <div className="flex items-center justify-between">
                 <div className="text-sm font-medium text-default">
