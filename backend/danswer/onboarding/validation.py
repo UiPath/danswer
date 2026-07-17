@@ -33,6 +33,8 @@ logger = setup_logger()
 _MEMBER_CHANNEL_PAGES = 6  # ~6k channels the bot is in — plenty
 _MENTION_RE = re.compile(r"<#(C[A-Z0-9]+)(?:\|[^>]*)?>")
 _CHANNEL_ID_RE = re.compile(r"^C[A-Z0-9]{6,}$")
+# A pasted channel link, e.g. https://<ws>.slack.com/archives/C0123ABC/...
+_ARCHIVES_RE = re.compile(r"/archives/(C[A-Z0-9]+)")
 
 
 class ValidationResult(BaseModel):
@@ -72,8 +74,15 @@ def validate_slack_channel(value: str) -> ValidationResult:
         return ValidationResult(valid=False, message="Enter a channel")
 
     mention = _MENTION_RE.search(raw)
+    link = _ARCHIVES_RE.search(raw)
     channel_id = (
-        mention.group(1) if mention else (raw if _CHANNEL_ID_RE.match(raw) else None)
+        mention.group(1)
+        if mention
+        else link.group(1)
+        if link
+        else raw
+        if _CHANNEL_ID_RE.match(raw)
+        else None
     )
     try:
         client = _bot_client()

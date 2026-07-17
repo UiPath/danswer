@@ -58,6 +58,20 @@ const checkChannel: ClientCheck = (v) => {
   return null;
 };
 
+// The bot channel must be a link (a name can't be verified reliably). Accept a
+// channel link / <#…> mention / raw id; anything else prompts for the link.
+const checkChannelLink: ClientCheck = (v) => {
+  const raw = v.trim();
+  if (!raw) return null;
+  if (
+    /\/archives\/C[A-Z0-9]+/.test(raw) ||
+    /^<#C[A-Z0-9]+/.test(raw) ||
+    /^C[A-Z0-9]{6,}$/.test(raw)
+  )
+    return null;
+  return "Paste the channel link, not the name (steps below).";
+};
+
 const checkUrl: ClientCheck = (v) =>
   /^https?:\/\//i.test(v.trim()) ? null : "Start with https://";
 
@@ -159,6 +173,7 @@ function ValidatedField({
   optional,
   info,
   clientCheck,
+  helpText,
 }: {
   label: string;
   placeholder?: string;
@@ -169,6 +184,7 @@ function ValidatedField({
   optional?: boolean;
   info?: string;
   clientCheck?: ClientCheck;
+  helpText?: string;
 }) {
   const [result, setResult] = useState<ValidationResult | null>(null);
   const [checking, setChecking] = useState(false);
@@ -216,10 +232,11 @@ function ValidatedField({
         }}
         className={inputClass}
       />
+      {helpText && <p className="mt-1.5 text-xs text-subtle">{helpText}</p>}
       {checking && <p className="mt-1.5 text-xs text-subtle">Validating…</p>}
       {!checking && result && <ResultLine result={result} />}
       {!checking && !result && hint && (
-        <p className="mt-1.5 text-xs text-subtle">{hint}</p>
+        <p className="mt-1.5 text-xs text-error">{hint}</p>
       )}
     </div>
   );
@@ -527,12 +544,13 @@ export function OnboardingForm() {
 
       <Section step={1} title="Channel & assistant">
         <ValidatedField
-          label="Bot channel"
-          placeholder="#help-your-team or a channel link"
+          label="Bot channel link"
+          placeholder="https://your-workspace.slack.com/archives/C0123ABCDE"
           kind="slack_channel"
           value={channelInput}
           onChange={setChannelInput}
-          clientCheck={checkChannel}
+          clientCheck={checkChannelLink}
+          helpText="Get the link in Slack: open the channel → click ⋯ (More) → Copy → Copy link. A link lets us verify the exact channel; a name can't be checked reliably."
           info="This is the channel where the Darwin Slack bot will be configured — it answers questions here."
           onResolved={(r) =>
             setChannel(
