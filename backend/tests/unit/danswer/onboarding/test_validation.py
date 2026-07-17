@@ -187,3 +187,188 @@ def test_jira_filter_invalid_reports_generic_error(
     assert not r.valid
     assert "Invalid Jira filter" in r.message
     assert "token=" not in r.message  # no payload/token leakage
+
+
+# --- validate_slack_channel (mocked bot client) ---------------------------
+from slack_sdk.errors import SlackApiError  # noqa: E402
+
+from danswer.onboarding.validation import validate_slack_channel  # noqa: E402
+from danswer.onboarding.validation import validate_slack_group  # noqa: E402
+from danswer.onboarding.validation import validate_confluence_url  # noqa: E402
+
+
+class _SlackClient:
+    """Fake WebClient covering conversations_info + users_conversations paging."""
+
+    def __init__(
+        self,
+        info: dict | None = None,
+        info_error: str | None = None,
+        member_channels: list | None = None,
+    ):
+        self._info = info
+        self._info_error = info_error
+        self._member = member_channels or []
+
+    def conversations_info(self, channel: str) -> dict:
+        if self._info_error:
+            raise SlackApiError(self._info_error, {"error": self._info_error})
+        return {"channel": self._info}
+
+    def users_conversations(
+        self, limit: int = 1000, cursor: str | None = None, **kw: object
+    ) -> dict:
+        return {"channels": self._member, "response_metadata": {"next_cursor": ""}}
+
+
+def _patch_bot(monkeypatch: pytest.MonkeyPatch, client: object) -> None:
+    monkeypatch.setattr(validation, "_bot_client", lambda: client)
+
+
+def test_slack_channel_empty() -> None:
+    assert not validate_slack_channel("").valid
+
+
+def test_slack_channel_from_link(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_bot(monkeypatch, _SlackClient(info={"id": "C0ABC123", "name": "help-team"}))
+    r = validate_slack_channel(
+        "https://uipath-product.slack.com/archives/C0ABC123/p1712"
+    )
+    assert r.valid
+    assert r.resolved["channel_id"] == "C0ABC123"
+    assert r.resolved["channel_name"] == "help-team"
+
+
+def test_slack_channel_from_mention(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_bot(monkeypatch, _SlackClient(info={"id": "C0ABC123", "name": "help-team"}))
+    assert validate_slack_channel("<#C0ABC123|help-team>").valid
+
+
+def test_slack_channel_bad_id_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_bot(monkeypatch, _SlackClient(info_error="channel_not_found"))
+    r = validate_slack_channel("C0DEADBEEF")
+    assert not r.valid
+    assert "not found" in r.message.lower()
+
+
+def test_slack_channel_bare_name_member(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_bot(
+        monkeypatch,
+        _SlackClient(member_channels=[{"id": "C1", "name": "help-team"}]),
+    )
+    r = validate_slack_channel("help-team")
+    assert r.valid
+    assert "already in this channel" in r.message
+    assert r.resolved["channel_id"] == "C1"
+
+
+def test_slack_channel_bare_name_not_member_accepted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Not in the bot's channels yet -> still accepted (bot added during onboarding).
+    _patch_bot(monkeypatch, _SlackClient(member_channels=[]))
+    r = validate_slack_channel("brand-new-channel")
+    assert r.valid
+    assert "will be added" in r.message
+    assert r.resolved["channel_name"] == "brand-new-channel"
+
+
+# --- validate_slack_group (comma-separated handles) -----------------------
+
+
+def test_slack_group_empty() -> None:
+    assert not validate_slack_group("").valid
+
+
+def test_slack_group_all_found(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_bot(monkeypatch, object())
+    monkeypatch.setattr(
+        validation,
+        "fetch_groupids_from_names",
+        lambda handles, client: (["G1", "G2"], []),
+    )
+    r = validate_slack_group("@as-dri, @sre-dri")
+    assert r.valid
+    assert r.message == "@as-dri, @sre-dri"
+
+
+def test_slack_group_some_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_bot(monkeypatch, object())
+    monkeypatch.setattr(
+        validation,
+        "fetch_groupids_from_names",
+        lambda handles, client: (["G1"], ["sre-dri"]),
+    )
+    r = validate_slack_group("@as-dri, @sre-dri")
+    assert not r.valid
+    assert "sre-dri" in r.message
+
+
+# --- validate_confluence_url (mocked host allowlist + client) -------------
+
+
+def test_confluence_url_bad_host_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        validation, "_allowed_confluence_hosts", lambda db: {"uipath.atlassian.net"}
+    )
+    r = validate_confluence_url("https://evil.atlassian.net/wiki/spaces/X", None)  # type: ignore[arg-type]
+    assert not r.valid
+    assert "host not allowed" in r.message.lower()
+
+
+def test_confluence_url_unverified_without_creds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(validation, "_allowed_confluence_hosts", lambda db: set())
+    monkeypatch.setattr(validation, "_first_confluence_credential", lambda db: None)
+    r = validate_confluence_url("https://uipath.atlassian.net/wiki/spaces/DEV/x", None)  # type: ignore[arg-type]
+    assert r.valid
+    assert "unverified" in r.message.lower()
+
+
+def test_confluence_url_space_accessible(monkeypatch: pytest.MonkeyPatch) -> None:
+    import atlassian as atlassian_mod
+
+    class _OkConfluence:
+        def __init__(self, **kwargs: object) -> None:
+            pass
+
+        def get_space(self, space: str) -> dict:
+            return {"key": space}
+
+    monkeypatch.setattr(
+        validation, "_allowed_confluence_hosts", lambda db: {"uipath.atlassian.net"}
+    )
+    monkeypatch.setattr(
+        validation,
+        "_first_confluence_credential",
+        lambda db: {"confluence_username": "u", "confluence_access_token": "t"},
+    )
+    monkeypatch.setattr(atlassian_mod, "Confluence", _OkConfluence)
+    r = validate_confluence_url("https://uipath.atlassian.net/wiki/spaces/DEV/x", None)  # type: ignore[arg-type]
+    assert r.valid
+    assert r.resolved["space"] == "DEV"
+
+
+def test_confluence_url_space_inaccessible(monkeypatch: pytest.MonkeyPatch) -> None:
+    import atlassian as atlassian_mod
+
+    class _DenyConfluence:
+        def __init__(self, **kwargs: object) -> None:
+            pass
+
+        def get_space(self, space: str) -> dict:
+            raise Exception("403 forbidden token=secret")
+
+    monkeypatch.setattr(
+        validation, "_allowed_confluence_hosts", lambda db: {"uipath.atlassian.net"}
+    )
+    monkeypatch.setattr(
+        validation,
+        "_first_confluence_credential",
+        lambda db: {"confluence_username": "u", "confluence_access_token": "t"},
+    )
+    monkeypatch.setattr(atlassian_mod, "Confluence", _DenyConfluence)
+    r = validate_confluence_url("https://uipath.atlassian.net/wiki/spaces/DEV/x", None)  # type: ignore[arg-type]
+    assert not r.valid
+    assert "secret" not in r.message  # no token/exception leakage

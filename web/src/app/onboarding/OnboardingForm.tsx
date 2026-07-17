@@ -21,6 +21,12 @@ import {
   ValidateKind,
   ValidationResult,
 } from "@/lib/onboarding/interfaces";
+import {
+  checkChannelLink,
+  checkUrl,
+  ClientCheck,
+  SOURCE_CLIENT_CHECK,
+} from "@/lib/onboarding/clientChecks";
 
 // All colors come from the app's semantic theme tokens (text-default,
 // bg-background, border-border, …) so the page follows the global light/dark
@@ -34,56 +40,6 @@ const inputClass =
 // How long to wait after the last keystroke before hitting the backend
 // validator (so you don't have to blur the field).
 const VALIDATE_DEBOUNCE_MS = 600;
-
-// --- lightweight, synchronous client-side format checks ---------------------
-// These catch obvious mistakes instantly (before any network round-trip) and
-// suppress the backend call until the format looks plausible. They return a
-// short hint string, or null when the value looks fine to send to the server.
-
-type ClientCheck = (value: string) => string | null;
-
-const checkChannel: ClientCheck = (v) => {
-  const raw = v.trim().replace(/^#/, "");
-  if (!raw) return null;
-  // A channel id or a pasted link/mention — let the server resolve it.
-  if (
-    /^C[A-Z0-9]{6,}$/.test(raw) ||
-    raw.includes("slack.com/") ||
-    raw.includes("<#")
-  )
-    return null;
-  if (/\s/.test(raw))
-    return "Channel names have no spaces — paste a link to be sure.";
-  if (/[A-Z]/.test(raw)) return "Channel names are lowercase.";
-  return null;
-};
-
-// The bot channel must be a link (a name can't be verified reliably). Accept a
-// channel link / <#…> mention / raw id; anything else prompts for the link.
-const checkChannelLink: ClientCheck = (v) => {
-  const raw = v.trim();
-  if (!raw) return null;
-  if (
-    /\/archives\/C[A-Z0-9]+/.test(raw) ||
-    /^<#C[A-Z0-9]+/.test(raw) ||
-    /^C[A-Z0-9]{6,}$/.test(raw)
-  )
-    return null;
-  return "Paste the channel link, not the name (steps below).";
-};
-
-const checkUrl: ClientCheck = (v) =>
-  /^https?:\/\//i.test(v.trim()) ? null : "Start with https://";
-
-const checkJql: ClientCheck = (v) =>
-  v.trim().length < 3 ? "Enter a JQL filter, e.g. project = ABC" : null;
-
-const SOURCE_CLIENT_CHECK: Record<OnboardingSourceType, ClientCheck> = {
-  web: checkUrl,
-  confluence: checkUrl,
-  slack: checkChannel,
-  jira: checkJql,
-};
 
 // --- light/dark toggle ------------------------------------------------------
 // Mirrors UserDropdown: flips `.dark` on <html> and persists to the same
