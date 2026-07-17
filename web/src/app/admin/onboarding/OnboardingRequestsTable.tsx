@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import {
   OnboardingRequestSnapshot,
   OnboardingStatusResponse,
@@ -120,7 +121,13 @@ export function OnboardingRequestsTable() {
           )}
 
           {req.status === "pending" && (
-            <div className="mt-3 flex gap-2">
+            <div className="mt-3 flex items-center gap-2">
+              <Link
+                href={`/admin/onboarding/${req.id}`}
+                className="rounded-md border border-border-medium px-3 py-1.5 text-xs font-medium text-default hover:bg-hover"
+              >
+                Open / edit
+              </Link>
               <button
                 disabled={busy === req.id}
                 onClick={() => decide(req.id, "approve")}

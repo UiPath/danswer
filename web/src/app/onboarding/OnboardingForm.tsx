@@ -25,7 +25,7 @@ import {
   ClientCheck,
   SOURCE_CLIENT_CHECK,
 } from "@/lib/onboarding/clientChecks";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 
 // All colors come from the app's semantic theme tokens (text-default,
 // bg-background, border-border, …) so the page follows the global light/dark
@@ -198,6 +198,22 @@ const SOURCE_PLACEHOLDER: Record<OnboardingSourceType, string> = {
   jira: "project = ABC AND status != Done",
 };
 
+// Admin edit: rebuild the editable "additional sources" from a stored payload.
+// Drop the auto-added channel-history slack source (re-derived from the channel);
+// everything else (incl. docs) becomes an editable row.
+function prefillExtraSources(
+  sources: OnboardingSource[],
+  channelName: string
+): OnboardingSource[] {
+  return sources.filter(
+    (s) =>
+      !(
+        s.type === "slack" &&
+        (s.value === channelName || (s.label ?? "").endsWith(" history"))
+      )
+  );
+}
+
 function SourceRow({
   source,
   onChange,
@@ -329,43 +345,63 @@ function Section({
 
 // --- main form --------------------------------------------------------------
 
-export function OnboardingForm() {
+export function OnboardingForm({
+  initialRequest,
+}: {
+  // When set, the form runs in admin "edit a pending request" mode (prefilled).
+  initialRequest?: OnboardingRequestSnapshot;
+} = {}) {
   const searchParams = useSearchParams();
+  const router = useRouter();
+  const adminEdit = !!initialRequest;
+  const p = initialRequest?.payload;
+
   // "Submit a request" vs "My requests" — surfaced as top tabs so status isn't
   // buried at the bottom. Deep-linkable via ?view=requests (e.g. from the nav).
   const [tab, setTab] = useState<"form" | "requests">(
     searchParams?.get("view") === "requests" ? "requests" : "form"
   );
-  const [teamName, setTeamName] = useState("");
-  const [channelInput, setChannelInput] = useState("");
-  const [channel, setChannel] = useState<{ id: string; name: string } | null>(
-    null
+  const [teamName, setTeamName] = useState(p?.team_name ?? "");
+  const [channelInput, setChannelInput] = useState(
+    p?.channel?.channel_id ?? ""
   );
-  const [systemPrompt, setSystemPrompt] = useState("");
-  const [smeEnabled, setSmeEnabled] = useState(false);
-  const [smeGroup, setSmeGroup] = useState("");
-  const [oncallEnabled, setOncallEnabled] = useState(false);
-  const [oncallSchedule, setOncallSchedule] = useState("");
-  const [oncallHandles, setOncallHandles] = useState("");
+  const [channel, setChannel] = useState<{ id: string; name: string } | null>(
+    p ? { id: p.channel.channel_id, name: p.channel.channel_name } : null
+  );
+  const [systemPrompt, setSystemPrompt] = useState(p?.system_prompt ?? "");
+  const [smeEnabled, setSmeEnabled] = useState(p?.sme?.enabled ?? false);
+  const [smeGroup, setSmeGroup] = useState(p?.sme?.group_name ?? "");
+  const [oncallEnabled, setOncallEnabled] = useState(
+    p?.oncall?.enabled ?? false
+  );
+  const [oncallSchedule, setOncallSchedule] = useState(
+    p?.oncall?.schedule ?? ""
+  );
+  const [oncallHandles, setOncallHandles] = useState(p?.oncall?.handles ?? "");
 
   const [docsCloud, setDocsCloud] = useState("");
   const [docsOnprem, setDocsOnprem] = useState("");
-  const [extraSources, setExtraSources] = useState<OnboardingSource[]>([]);
+  const [extraSources, setExtraSources] = useState<OnboardingSource[]>(
+    p ? prefillExtraSources(p.sources, p.channel.channel_name) : []
+  );
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
+  const [savedNote, setSavedNote] = useState<string | null>(null);
   const [mine, setMine] = useState<OnboardingRequestSnapshot[]>([]);
   const [statuses, setStatuses] = useState<
     Record<number, OnboardingStatusResponse>
   >({});
 
   useEffect(() => {
+    if (adminEdit) return; // edit mode is fully prefilled from the request
     fetch("/api/onboarding/default-prompt")
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => d?.system_prompt && setSystemPrompt(d.system_prompt))
       .catch(() => {});
     void refreshMine();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function refreshMine(): Promise<OnboardingRequestSnapshot[]> {
@@ -394,7 +430,7 @@ export function OnboardingForm() {
   // (and re-poll every 15s) so the requester can see work happening without
   // clicking anything.
   useEffect(() => {
-    if (tab !== "requests") return;
+    if (adminEdit || tab !== "requests") return;
     let active = true;
     const load = async () => {
       const list = await refreshMine();
@@ -435,41 +471,96 @@ export function OnboardingForm() {
     return s;
   }
 
+  // Assemble the request payload from form state, or null if a required field
+  // is missing (sets the error message).
+  function buildPayload(): object | null {
+    if (!teamName.trim()) {
+      setError("Enter a team name.");
+      return null;
+    }
+    if (!channel) {
+      setError("Validate the bot channel first.");
+      return null;
+    }
+    const sources = buildSources();
+    if (sources.length === 0) {
+      setError("Add at least one source to index.");
+      return null;
+    }
+    return {
+      team_name: teamName.trim(),
+      channel: { channel_id: channel.id, channel_name: channel.name },
+      // Response format is standardized to citations for every channel.
+      response_type: "citations",
+      respond_tag_only: false,
+      system_prompt: systemPrompt,
+      task_prompt: "",
+      sme: { enabled: smeEnabled, group_name: smeGroup },
+      oncall: {
+        enabled: oncallEnabled,
+        schedule: oncallSchedule,
+        handles: oncallHandles,
+      },
+      sources,
+    };
+  }
+
+  async function errDetail(res: Response, fallback: string): Promise<string> {
+    return (await res.json().catch(() => null))?.detail || fallback;
+  }
+
+  // Admin edit: PATCH the pending request's payload (without approving).
+  async function saveEdits(): Promise<boolean> {
+    if (!initialRequest) return false;
+    setError(null);
+    setSavedNote(null);
+    const payload = buildPayload();
+    if (!payload) return false;
+    const res = await fetch(`/api/admin/onboarding/${initialRequest.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      setError(await errDetail(res, `Couldn't save changes (${res.status}).`));
+      return false;
+    }
+    return true;
+  }
+
   async function submit() {
     setError(null);
     setSubmitted(false);
-    if (!teamName.trim()) return setError("Enter a team name.");
-    if (!channel) return setError("Validate the bot channel first.");
-    const sources = buildSources();
-    if (sources.length === 0)
-      return setError("Add at least one source to index.");
+    setSavedNote(null);
+    const payload = buildPayload();
+    if (!payload) return;
 
     setSubmitting(true);
     try {
+      // Admin edit mode: save the edits, then approve + provision.
+      if (adminEdit && initialRequest) {
+        if (!(await saveEdits())) return;
+        const approve = await fetch(
+          `/api/admin/onboarding/${initialRequest.id}/approve`,
+          { method: "POST" }
+        );
+        if (!approve.ok) {
+          setError(await errDetail(approve, `Saved, but approve failed.`));
+          return;
+        }
+        router.push("/admin/onboarding");
+        return;
+      }
+
+      // Requester create mode.
       const res = await fetch("/api/onboarding", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          team_name: teamName.trim(),
-          channel: { channel_id: channel.id, channel_name: channel.name },
-          // Response format is standardized to citations for every channel.
-          response_type: "citations",
-          respond_tag_only: false,
-          system_prompt: systemPrompt,
-          task_prompt: "",
-          sme: { enabled: smeEnabled, group_name: smeGroup },
-          oncall: {
-            enabled: oncallEnabled,
-            schedule: oncallSchedule,
-            handles: oncallHandles,
-          },
-          sources,
-        }),
+        body: JSON.stringify(payload),
       });
       if (!res.ok) {
         setError(
-          (await res.json().catch(() => null))?.detail ||
-            `Couldn't submit the request (${res.status}).`
+          await errDetail(res, `Couldn't submit the request (${res.status}).`)
         );
         return;
       }
@@ -479,7 +570,7 @@ export function OnboardingForm() {
       setSubmitted(true);
       await refreshMine();
     } catch {
-      setError("Something went wrong submitting the request.");
+      setError("Something went wrong — please try again.");
     } finally {
       setSubmitting(false);
     }
@@ -489,38 +580,50 @@ export function OnboardingForm() {
     <div className="mx-auto max-w-3xl px-4 py-10">
       <header className="mb-8">
         <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-accent">
-          Team onboarding
+          {adminEdit ? "Review onboarding request" : "Team onboarding"}
         </p>
         <h1 className="text-2xl font-semibold text-default">
           Onboarding Darwin to Slack Channel
         </h1>
-        <p className="mt-2 text-sm text-subtle">
-          Point Darwin at your team&apos;s knowledge and channel. An admin
-          approves the request, then Darwin scrapes your sources and wires up
-          the assistant. Every field is checked live before you submit.
-        </p>
+        {adminEdit ? (
+          <p className="mt-2 text-sm text-subtle">
+            Submitted by{" "}
+            <span className="font-medium text-default">
+              {initialRequest?.requester_email}
+            </span>
+            . Fix any gaps below, then Save &amp; approve to provision.
+          </p>
+        ) : (
+          <p className="mt-2 text-sm text-subtle">
+            Point Darwin at your team&apos;s knowledge and channel. An admin
+            approves the request, then Darwin scrapes your sources and wires up
+            the assistant. Every field is checked live before you submit.
+          </p>
+        )}
       </header>
 
-      <div className="mb-6 flex gap-1 border-b border-border">
-        {(["form", "requests"] as const).map((t) => (
-          <button
-            key={t}
-            type="button"
-            onClick={() => setTab(t)}
-            className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
-              tab === t
-                ? "border-accent text-default"
-                : "border-transparent text-subtle hover:text-default"
-            }`}
-          >
-            {t === "form"
-              ? "Submit a request"
-              : `My requests${mine.length ? ` (${mine.length})` : ""}`}
-          </button>
-        ))}
-      </div>
+      {!adminEdit && (
+        <div className="mb-6 flex gap-1 border-b border-border">
+          {(["form", "requests"] as const).map((t) => (
+            <button
+              key={t}
+              type="button"
+              onClick={() => setTab(t)}
+              className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
+                tab === t
+                  ? "border-accent text-default"
+                  : "border-transparent text-subtle hover:text-default"
+              }`}
+            >
+              {t === "form"
+                ? "Submit a request"
+                : `My requests${mine.length ? ` (${mine.length})` : ""}`}
+            </button>
+          ))}
+        </div>
+      )}
 
-      {tab === "form" && (
+      {(adminEdit || tab === "form") && (
         <>
           <Section step={1} title="Channel & assistant">
             <ValidatedField
@@ -702,24 +805,67 @@ export function OnboardingForm() {
               Request submitted — an admin will review it. Track it below.
             </p>
           )}
-          <button
-            onClick={submit}
-            disabled={submitting || !teamName.trim() || !channel}
-            title={
-              !channel
-                ? "Validate the bot channel first"
-                : !teamName.trim()
-                  ? "Enter a team name"
-                  : undefined
-            }
-            className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-inverted transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {submitting ? "Submitting…" : "Submit onboarding request"}
-          </button>
+          {savedNote && !error && (
+            <p className="mb-3 flex items-center gap-1.5 text-sm text-link">
+              <FiCheck className="h-4 w-4 shrink-0" />
+              {savedNote}
+            </p>
+          )}
+          <div className="flex items-center gap-3">
+            <button
+              onClick={submit}
+              disabled={submitting || !teamName.trim() || !channel}
+              title={
+                !channel
+                  ? "Validate the bot channel first"
+                  : !teamName.trim()
+                    ? "Enter a team name"
+                    : undefined
+              }
+              className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-inverted transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {submitting
+                ? adminEdit
+                  ? "Saving…"
+                  : "Submitting…"
+                : adminEdit
+                  ? "Save & approve"
+                  : "Submit onboarding request"}
+            </button>
+            {adminEdit && (
+              <button
+                type="button"
+                onClick={async () => {
+                  setSubmitting(true);
+                  try {
+                    if (await saveEdits())
+                      setSavedNote(
+                        "Changes saved. Still pending — approve when ready."
+                      );
+                  } finally {
+                    setSubmitting(false);
+                  }
+                }}
+                disabled={submitting || !teamName.trim() || !channel}
+                className="rounded-md border border-border-medium px-4 py-2 text-sm font-medium text-default hover:bg-hover-light disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Save changes
+              </button>
+            )}
+            {adminEdit && (
+              <button
+                type="button"
+                onClick={() => router.push("/admin/onboarding")}
+                className="text-sm text-subtle hover:text-default"
+              >
+                Cancel
+              </button>
+            )}
+          </div>
         </>
       )}
 
-      {tab === "requests" && (
+      {!adminEdit && tab === "requests" && (
         <div>
           <h2 className="mb-3 text-lg font-semibold text-default">
             Your requests
