@@ -14,6 +14,7 @@ from slack_sdk.errors import SlackApiError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from danswer.configs.app_configs import GITHUB_CONNECTOR_BASE_URL
 from danswer.configs.constants import DocumentSource
 from danswer.connectors.confluence.connector import extract_confluence_keys_from_url
 from danswer.connectors.web.connector import _uipath_product_prefix
@@ -200,6 +201,75 @@ def validate_confluence_url(url: str, db_session: Session) -> ValidationResult:
         valid=True,
         message=f"Space '{space}'",
         resolved={"wiki_base": wiki_base, "space": space, "is_cloud": is_cloud},
+    )
+
+
+_GITHUB_HOSTS = {"github.com", "www.github.com"}
+
+
+def _first_github_token(db_session: Session) -> str | None:
+    """Reuse an existing GitHub connector's token for the access check (the
+    requester never supplies one)."""
+    for cred in db_session.execute(select(Credential)).scalars():
+        tok = (cred.credential_json or {}).get("github_access_token")
+        if tok:
+            return tok
+    return None
+
+
+def validate_github_repo(url: str, db_session: Session) -> ValidationResult:
+    """Confirm a github.com repo URL is reachable with the stored GitHub token —
+    i.e. the credential that provisioning will reuse can actually scrape it.
+
+    The token is only ever sent to the GitHub API (github.com or the configured
+    enterprise base URL), never to the URL's host. Errors are reported generically
+    and logged by exception type only, so a token or raw API payload can't leak
+    into a message or the logs."""
+    raw = (url or "").strip()
+    if not raw:
+        return ValidationResult(valid=False, message="Enter a GitHub repo URL")
+    parsed = urlparse(raw)
+    host = (parsed.hostname or "").lower()
+    if host not in _GITHUB_HOSTS:
+        return ValidationResult(valid=False, message="Must be a github.com repo URL")
+    parts = [p for p in parsed.path.strip("/").split("/") if p]
+    if len(parts) < 2:
+        return ValidationResult(
+            valid=False, message="URL must be github.com/<owner>/<repo>"
+        )
+    owner, repo = parts[0], parts[1].removesuffix(".git")
+    full_name = f"{owner}/{repo}"
+
+    token = _first_github_token(db_session)
+    if token is None:
+        return ValidationResult(
+            valid=True,
+            message=f"{full_name} (access unverified — no GitHub credential on file)",
+            resolved={"repo_owner": owner, "repo_name": repo},
+        )
+    try:
+        from github import Github  # type: ignore[import-untyped]
+
+        client = (
+            Github(token, base_url=GITHUB_CONNECTOR_BASE_URL)
+            if GITHUB_CONNECTOR_BASE_URL
+            else Github(token)
+        )
+        client.get_repo(full_name)  # raises if the token can't see the repo
+    except Exception as e:
+        # Log the exception TYPE only — never str(e), which can echo the token
+        # or API payload.
+        logger.info(
+            "github repo access check failed for %s: %s", full_name, type(e).__name__
+        )
+        return ValidationResult(
+            valid=False,
+            message=f"Repo '{full_name}' not found or the GitHub app lacks access",
+        )
+    return ValidationResult(
+        valid=True,
+        message=full_name,
+        resolved={"repo_owner": owner, "repo_name": repo},
     )
 
 

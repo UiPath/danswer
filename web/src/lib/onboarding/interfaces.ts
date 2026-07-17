@@ -71,7 +71,7 @@ export interface OnboardingStatusResponse {
 }
 
 export type ValidateKind =
-  "slack_channel" | "slack_group" | "confluence" | "docs";
+  "slack_channel" | "slack_group" | "confluence" | "github" | "docs";
 
 export async function validateOnboardingField(
   kind: ValidateKind,

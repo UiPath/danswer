@@ -107,7 +107,7 @@ function SourceRow({
   const kindFor: Record<OnboardingSourceType, ValidateKind> = {
     web: "docs",
     confluence: "confluence",
-    github: "docs", // github URLs aren't live-validated; format-check only
+    github: "github", // live-validated: confirms the stored token can reach the repo
     slack: "slack_channel",
   };
   const [result, setResult] = useState<ValidationResult | null>(null);
@@ -135,7 +135,7 @@ function SourceRow({
             setResult(null);
           }}
           onBlur={async () => {
-            if (!source.value.trim() || source.type === "github") return;
+            if (!source.value.trim()) return;
             setResult(
               await validateOnboardingField(kindFor[source.type], source.value)
             );

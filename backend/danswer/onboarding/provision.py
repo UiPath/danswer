@@ -25,6 +25,8 @@ Payload contract (assembled + validated by the form):
                   "value": <url|repo-url|channel-name>, "label": str}, ... ]  # priority order
   }
 """
+import ipaddress
+import socket
 from urllib.parse import urlparse
 
 from sqlalchemy import select
@@ -52,6 +54,10 @@ from danswer.db.persona import get_persona_by_name
 from danswer.db.persona import upsert_persona
 from danswer.db.persona import upsert_prompt
 from danswer.db.slack_bot_config import insert_slack_bot_config
+from danswer.onboarding.validation import _allowed_confluence_hosts
+from danswer.onboarding.validation import validate_confluence_url
+from danswer.onboarding.validation import validate_github_repo
+from danswer.onboarding.validation import validate_slack_channel
 from danswer.server.documents.models import ConnectorBase
 from danswer.server.features.document_set.models import DocumentSetCreationRequest
 from danswer.utils.logger import setup_logger
@@ -97,6 +103,63 @@ def _parse_github_repo(url: str) -> tuple[str, str]:
     return parts[0], parts[1]
 
 
+# Hosts we accept for GitHub sources. The connector authenticates against the
+# GitHub API (not the URL host), but pinning the host keeps non-GitHub URLs out.
+_ALLOWED_GITHUB_HOSTS = {"github.com", "www.github.com"}
+
+
+def _assert_public_web_host(url: str) -> None:
+    """SSRF guard for web sources: require an http(s) URL whose host does not
+    resolve to a private / loopback / link-local / reserved address, so an
+    onboarding request can't point the crawler at internal infrastructure.
+
+    Fails closed: a URL we can't parse or resolve is rejected rather than
+    fetched. This is a provision-time check; it doesn't defend against DNS
+    rebinding at fetch time, but it closes the obvious internal-target vector."""
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"Web source URL must be http(s): {url}")
+    host = parsed.hostname
+    if not host:
+        raise ValueError(f"Web source URL has no host: {url}")
+    try:
+        addr_infos = socket.getaddrinfo(host, None)
+    except OSError as e:
+        raise ValueError(f"Could not resolve web source host '{host}': {e}")
+    for info in addr_infos:
+        ip = ipaddress.ip_address(info[4][0])
+        if (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_reserved
+            or ip.is_multicast
+            or ip.is_unspecified
+        ):
+            raise ValueError(
+                f"Web source host '{host}' resolves to a non-public address ({ip})"
+            )
+
+
+def _assert_source_accessible(source: dict, db_session: Session) -> None:
+    """Fail-fast at provision: confirm the reusable credential can actually reach
+    the source, so we never create a connector that would silently index nothing.
+    Reuses the same validators as the submit-time /validate endpoint. Web sources
+    are public (no credential) and are host-guarded in `_build_connector_base`."""
+    stype = source["type"]
+    value = source["value"]
+    if stype == "confluence":
+        result = validate_confluence_url(value, db_session)
+    elif stype == "github":
+        result = validate_github_repo(value, db_session)
+    elif stype == "slack":
+        result = validate_slack_channel(value)
+    else:
+        return
+    if not result.valid:
+        raise ValueError(f"{stype} source not accessible: {result.message}")
+
+
 def _build_connector_base(source: dict, db_session: Session) -> ConnectorBase:
     """One onboarding source -> a ConnectorBase (source-specific config)."""
     stype = source["type"]
@@ -104,6 +167,9 @@ def _build_connector_base(source: dict, db_session: Session) -> ConnectorBase:
     label = source.get("label") or value
 
     if stype == "web":
+        # SSRF guard: never let a submitted URL point the crawler at internal
+        # hosts (validation at submit time can be bypassed by a direct API call).
+        _assert_public_web_host(value)
         is_uipath_docs = urlparse(value).netloc == "docs.uipath.com"
         config: dict = {"base_url": value, "web_connector_type": "recursive"}
         if is_uipath_docs:
@@ -120,6 +186,18 @@ def _build_connector_base(source: dict, db_session: Session) -> ConnectorBase:
             disabled=False,
         )
     if stype == "confluence":
+        # Credential-leak / SSRF guard: provisioning creates a connector that
+        # will authenticate to this host with our stored Confluence token, so
+        # only allow a host an existing Confluence connector already uses. Re-run
+        # here (not just at submit) because provisioning is the point the
+        # credential is actually used, and submit-time validation can be skipped.
+        host = urlparse(value).netloc.lower()
+        allowed_hosts = _allowed_confluence_hosts(db_session)
+        if not allowed_hosts or host not in allowed_hosts:
+            raise ValueError(
+                f"Confluence host '{host}' is not allowed — it must match an "
+                f"existing Confluence connector ({sorted(allowed_hosts)})"
+            )
         return ConnectorBase(
             name=f"[onboarding] {label}",
             source=DocumentSource.CONFLUENCE,
@@ -130,6 +208,9 @@ def _build_connector_base(source: dict, db_session: Session) -> ConnectorBase:
             disabled=False,
         )
     if stype == "github":
+        gh_host = (urlparse(value).hostname or "").lower()
+        if gh_host not in _ALLOWED_GITHUB_HOSTS:
+            raise ValueError(f"GitHub source URL must be on github.com: {value}")
         owner, repo = _parse_github_repo(value)
         return ConnectorBase(
             name=f"[onboarding] {label}",
@@ -268,6 +349,8 @@ def provision_onboarding(
         index_targets: list[tuple[int, int]] = []  # (connector_id, credential_id)
         prioritized_sources: list[str] = []
         for source in payload["sources"]:
+            # Preflight: the reusable credential must be able to reach the source.
+            _assert_source_accessible(source, db_session)
             connector = create_connector(
                 _build_connector_base(source, db_session), db_session
             )

@@ -31,6 +31,7 @@ from danswer.db.onboarding import update_onboarding_status
 from danswer.onboarding.provision import provision_onboarding
 from danswer.onboarding.validation import validate_confluence_url
 from danswer.onboarding.validation import validate_docs_url
+from danswer.onboarding.validation import validate_github_repo
 from danswer.onboarding.validation import validate_slack_channel
 from danswer.onboarding.validation import validate_slack_group
 from danswer.onboarding.validation import ValidationResult
@@ -88,6 +89,8 @@ def validate_field(
         return validate_slack_group(request.value)
     if request.kind == "confluence":
         return validate_confluence_url(request.value, db_session)
+    if request.kind == "github":
+        return validate_github_repo(request.value, db_session)
     return validate_docs_url(request.value)
 
 

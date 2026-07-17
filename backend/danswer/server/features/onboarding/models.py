@@ -85,7 +85,7 @@ class OnboardingRequestSnapshot(BaseModel):
 
 
 class ValidateRequest(BaseModel):
-    kind: Literal["slack_channel", "slack_group", "confluence", "docs"]
+    kind: Literal["slack_channel", "slack_group", "confluence", "github", "docs"]
     value: str
 
 
