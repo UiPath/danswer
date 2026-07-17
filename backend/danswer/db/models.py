@@ -1716,3 +1716,71 @@ class ChatReferral(Base):
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+
+
+class OnboardingStatus(str, PyEnum):
+    """Lifecycle of a team's self-serve Darwin onboarding request."""
+
+    PENDING = "pending"  # submitted, awaiting admin approval
+    REJECTED = "rejected"  # admin declined
+    PROVISIONING = "provisioning"  # approved; creating connectors/persona/config
+    INDEXING = "indexing"  # resources created; sources scraping
+    COMPLETE = "complete"  # all sources indexed successfully
+    FAILED = "failed"  # provisioning or indexing failed
+
+
+class OnboardingRequest(Base):
+    """A self-serve request to onboard a team/channel onto Darwin. Anyone may
+    submit; only an admin may approve. On approval the provisioning orchestrator
+    (onboarding/provision.py) creates the connectors, document set, assistant, and
+    Slack bot config, then records their ids here so the requester can monitor the
+    per-source scrape status."""
+
+    __tablename__ = "onboarding_request"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    # Who submitted (denormalize email so it survives user deletion / is display-ready).
+    requester_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("user.id"), nullable=True
+    )
+    requester_email: Mapped[str] = mapped_column(String, nullable=False)
+    # Stored as the enum VALUE string (e.g. "pending"), NOT via SA Enum() — the
+    # repo's Enum(native_enum=False) stores the NAME (uppercase), which is a known
+    # footgun. Plain String of `.value` keeps it consistent with the migration.
+    status: Mapped[str] = mapped_column(
+        String, nullable=False, default=OnboardingStatus.PENDING.value
+    )
+    # The full validated form (channel, ordered sources, prompt, SME/oncall/jira
+    # options, docs cloud/onprem roots, etc.) — JSONB for flexibility.
+    payload: Mapped[dict] = mapped_column(postgresql.JSONB(), nullable=False)
+    # Admin who approved/rejected + optional reason.
+    approver_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("user.id"), nullable=True
+    )
+    decision_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Free-text error surfaced when status == FAILED.
+    error_msg: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Provisioned resource ids (populated on approval; drive the status monitor).
+    persona_id: Mapped[int | None] = mapped_column(
+        ForeignKey("persona.id"), nullable=True
+    )
+    document_set_id: Mapped[int | None] = mapped_column(
+        ForeignKey("document_set.id"), nullable=True
+    )
+    slack_bot_config_id: Mapped[int | None] = mapped_column(
+        ForeignKey("slack_bot_config.id"), nullable=True
+    )
+    # cc_pair ids created for this onboarding (list[int]); the monitor reads their
+    # indexing status. JSONB list rather than a join table — always used together.
+    cc_pair_ids: Mapped[list[int] | None] = mapped_column(
+        postgresql.JSONB(), nullable=True
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
