@@ -1422,7 +1422,9 @@ export function ChatPage({
                                   content={message.message}
                                   files={message.files}
                                   query={messageHistory[i]?.query || undefined}
-                                  personaName={assistantDisplayName(livePersona)}
+                                  personaName={assistantDisplayName(
+                                    livePersona
+                                  )}
                                   citedDocuments={getCitedDocumentsFromMessage(
                                     message
                                   )}
@@ -1532,7 +1534,9 @@ export function ChatPage({
                                 <AIMessage
                                   currentPersona={livePersona}
                                   messageId={message.messageId}
-                                  personaName={assistantDisplayName(livePersona)}
+                                  personaName={assistantDisplayName(
+                                    livePersona
+                                  )}
                                   content={
                                     <p className="text-red-700 text-sm my-auto">
                                       {message.message}
