@@ -55,6 +55,6 @@
     "eslint": "^8.48.0",
     "eslint-config-next": "^14.2.35",
     "prettier": "2.8.8",
-    "vitest": "^1.6.1"
+    "vitest": "^3.2.6"
   }
 }
