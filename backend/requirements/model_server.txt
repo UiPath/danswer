@@ -5,5 +5,5 @@ safetensors==0.4.2
 sentence-transformers==2.6.1
 tensorflow==2.15.0
 torch==2.0.1
-transformers==4.39.2
+transformers==5.5.0
 uvicorn==0.21.1
