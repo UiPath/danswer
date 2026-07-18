@@ -281,11 +281,24 @@ def test_still_indexing_does_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
 # --- finalize_onboarding: idempotent, crash-safe artifact creation ----------
 
 
+class _ToolQuery:
+    """Stub for db_session.query(Tool).filter(...).first() -> the SearchTool."""
+
+    def filter(self, *a: object, **k: object) -> "_ToolQuery":
+        return self
+
+    def first(self) -> object:
+        return SimpleNamespace(id=99, in_code_tool_id="SearchTool")
+
+
 class _FakeSession:
     """Records rollback so we can assert the read txn is dropped before begin()."""
 
     def __init__(self, order: list) -> None:
         self._order = order
+
+    def query(self, *a: object, **k: object) -> _ToolQuery:
+        return _ToolQuery()
 
     def rollback(self) -> None:
         self._order.append("rollback")
@@ -345,6 +358,7 @@ def _wire_finalize(
 
     def _persona(**kw: object) -> object:
         order.append("persona")
+        calls["persona_tool_ids"] = kw.get("tool_ids")
         if fail_on == "persona":
             raise RuntimeError("boom persona")
         return SimpleNamespace(id=202)
@@ -392,6 +406,9 @@ def test_finalize_creates_all_artifacts_in_order(
     assert req.slack_bot_config_id == 303
     assert req.status == OnboardingStatus.COMPLETE.value
     assert calls["notified"] == 1
+    # The assistant must get the SearchTool, else it has the doc set but can't
+    # actually search it.
+    assert calls["persona_tool_ids"] == [99]
 
 
 def test_finalize_drops_read_txn_before_document_set(

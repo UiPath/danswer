@@ -59,6 +59,7 @@ from danswer.db.models import OnboardingStatus
 from danswer.db.models import Prompt
 from danswer.db.models import RecencyBiasSetting
 from danswer.db.models import SlackBotResponseType
+from danswer.db.models import Tool
 from danswer.db.models import User
 from danswer.db.onboarding import list_onboarding_requests
 from danswer.db.onboarding import set_provisioned_ids
@@ -86,6 +87,11 @@ from danswer.utils.logger import setup_logger
 logger = setup_logger()
 
 # Onboarded sources scrape ahead of routine re-indexing (IndexAttempt priority 0-100).
+# in_code_tool_id of the built-in document SearchTool (Tool.in_code_tool_id ==
+# SearchTool.__name__). Kept as a literal to avoid importing the heavy search
+# pipeline into this module.
+_SEARCH_TOOL_IN_CODE_ID = "SearchTool"
+
 ONBOARDING_INDEXING_PRIORITY = 80
 DEFAULT_REFRESH_FREQ = 86400  # daily
 _MONTHLY_REFRESH_FREQ = 2592000  # 30 days
@@ -582,9 +588,24 @@ def finalize_onboarding(
         document_set_id = doc_set.id
         set_provisioned_ids(db_session, request, document_set_id=document_set_id)
 
-    # 2. Assistant (prompt + persona) tied to the document set.
+    # 2. Assistant (prompt + persona) tied to the document set. The SearchTool
+    # MUST be attached or the assistant has the document set but can't actually
+    # search it (upsert_persona only enables search when tool_ids includes it;
+    # the startup auto-add migration doesn't cover personas created later here).
     if persona_id is None:
         prompt = _build_prompt(payload, owner, db_session)
+        search_tool = (
+            db_session.query(Tool)
+            .filter(Tool.in_code_tool_id == _SEARCH_TOOL_IN_CODE_ID)
+            .first()
+        )
+        if search_tool is None:
+            logger.warning(
+                "onboarding %s: SearchTool not found — assistant will have the "
+                "document set but no search tool",
+                request.id,
+            )
+        tool_ids = [search_tool.id] if search_tool else None
         persona = upsert_persona(
             user=owner,
             name=team,
@@ -600,6 +621,7 @@ def finalize_onboarding(
             db_session=db_session,
             prompt_ids=[prompt.id],
             document_set_ids=[document_set_id],
+            tool_ids=tool_ids,
         )
         persona_id = persona.id
         set_provisioned_ids(db_session, request, persona_id=persona_id)
