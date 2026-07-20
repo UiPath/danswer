@@ -183,6 +183,9 @@ export interface OutSystemsConfig {
 
 export interface SharepointConfig {
   sites?: string[];
+  // "documents" (default): default library files only.
+  // "full": every document library + all modern site pages (.aspx).
+  scrape_scope?: string;
 }
 
 export interface TeamsConfig {
