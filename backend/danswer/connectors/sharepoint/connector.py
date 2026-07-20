@@ -558,6 +558,49 @@ class SharepointConnector(LoadConnector, PollConnector, IdConnector):
                 SiteData(url=None, folder=None, sites=sites, driveitems=[])
             ]
 
+    def _iter_driveitems(
+        self,
+        element: SiteData,
+        start: datetime | None = None,
+        end: datetime | None = None,
+    ) -> Generator[DriveItem, None, None]:
+        """Yield drive items one library at a time WITHOUT retaining them all.
+
+        The streaming counterpart to `_populate_sitedata_driveitems` (which keeps
+        every file for the whole site on `self.site_data[].driveitems` and is
+        still used by the id-only pruning path). During a full-scope *content*
+        crawl that retained list — plus the office365 object graph hanging off
+        each item — is the live heap the cyclic GC rescans on every pass, so its
+        cost grew with the number of docs processed (batches went 130s -> 220s ->
+        583s). Yielding per-library keeps only one library's file list alive at a
+        time, so GC scan cost stays bounded and flat."""
+        filter_str = ""
+        if start is not None and end is not None:
+            filter_str = (
+                f"last_modified_datetime ge {start.isoformat()} "
+                f"and last_modified_datetime le {end.isoformat()}"
+            )
+
+        if self.scrape_scope == SCOPE_FULL:
+            # Every document library on the site, not just the default drive.
+            for site in element.sites:
+                try:
+                    drives = sleep_and_retry(site.drives.get(), "site.drives.get")
+                except Exception:
+                    logger.exception("Failed to list drives for a site")
+                    drives = []
+                for drive in drives:
+                    # _drive_files returns one library's list; consuming it via
+                    # yield-from lets that local list be released before the next.
+                    yield from self._drive_files(drive, element.folder, filter_str)
+        else:
+            # documents mode: original behaviour (default document library).
+            sites: list[Site] = []
+            for site in element.sites:
+                sites.extend(sleep_and_retry(site.lists.get(), "site.lists.get"))
+            for site in sites:
+                yield from self._drive_files(site.drive, element.folder, filter_str)
+
     def _fetch_from_sharepoint(
         self, start: datetime | None = None, end: datetime | None = None
     ) -> GenerateDocumentsOutput:
@@ -565,12 +608,11 @@ class SharepointConnector(LoadConnector, PollConnector, IdConnector):
             raise ConnectorMissingCredentialError("Sharepoint")
 
         self._populate_sitedata_sites()
-        self._populate_sitedata_driveitems(start=start, end=end)
 
         # goes over all urls, converts them into Document objects and then yields them in batches
         doc_batch: list[Document] = []
         for element in self.site_data:
-            for driveitem in element.driveitems:
+            for driveitem in self._iter_driveitems(element, start=start, end=end):
                 logger.debug(f"Processing: {driveitem.web_url}")
                 try:
                     doc = _convert_driveitem_to_document(driveitem)

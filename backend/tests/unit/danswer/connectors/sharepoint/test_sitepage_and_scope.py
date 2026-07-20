@@ -232,6 +232,42 @@ def test_convert_driveitem_skips_non_bytes_content() -> None:
     assert _convert_driveitem_to_document(bad_item) is None  # type: ignore[arg-type]
 
 
+def test_iter_driveitems_streams_per_library_without_retaining() -> None:
+    """Full-scope content crawl must stream items one library at a time and NOT
+    stash them all on `self.site_data[].driveitems`. That retained list (plus the
+    office365 object graph hanging off it) was the live heap the cyclic GC
+    rescanned every pass, making batch time grow 130s -> 220s -> 583s."""
+    from types import SimpleNamespace
+
+    from danswer.connectors.sharepoint.connector import SiteData
+
+    conn = SharepointConnector(sites=[], scrape_scope=SCOPE_FULL)
+    drives = [SimpleNamespace(name="Documents"), SimpleNamespace(name="Onboarding")]
+    site = SimpleNamespace(
+        id="s1",
+        drives=SimpleNamespace(
+            get=lambda: SimpleNamespace(execute_query=lambda: drives)
+        ),
+    )
+    element = SiteData(url="u", folder=None, sites=[site], driveitems=[])
+
+    visited: list[str] = []
+
+    def fake_drive_files(drive: object, folder: object, filter_str: str) -> list:
+        visited.append(drive.name)  # type: ignore[attr-defined]
+        return [
+            SimpleNamespace(id=f"{drive.name}-a"),  # type: ignore[attr-defined]
+            SimpleNamespace(id=f"{drive.name}-b"),  # type: ignore[attr-defined]
+        ]
+
+    conn._drive_files = fake_drive_files  # type: ignore[method-assign]
+
+    ids = [d.id for d in conn._iter_driveitems(element)]
+    assert ids == ["Documents-a", "Documents-b", "Onboarding-a", "Onboarding-b"]
+    assert visited == ["Documents", "Onboarding"]  # each library visited once
+    assert element.driveitems == []  # nothing retained on the connector instance
+
+
 def test_is_invalid_request_detects_corrupt_canvas() -> None:
     class _Resp:
         def __init__(self, code: str | None) -> None:
