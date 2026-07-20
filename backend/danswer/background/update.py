@@ -38,6 +38,7 @@ from danswer.db.models import IndexAttempt
 from danswer.db.models import IndexingStatus
 from danswer.db.models import IndexModelStatus
 from danswer.db.swap_index import check_index_swap
+from danswer.onboarding.provision import finalize_ready_onboarding_requests
 from danswer.search.search_nlp_models import warm_up_encoders
 from danswer.utils.logger import setup_logger
 from danswer.utils.variable_functionality import global_version
@@ -569,6 +570,11 @@ def update_loop(delay: int = 10, num_workers: int = NUM_INDEXING_WORKERS) -> Non
         client_secondary = SimpleJobClient(n_workers=num_workers)
 
     existing_jobs: dict[int, Future | SimpleJob] = {}
+    # Onboarding requests are finalized (doc set + assistant + Slack config) once
+    # all their sources finish scraping. Sweep for ready ones about once a minute
+    # rather than every scheduler tick.
+    last_onboarding_sweep = 0.0
+    onboarding_sweep_interval = 60.0
 
     while True:
         start = time.time()
@@ -594,6 +600,17 @@ def update_loop(delay: int = 10, num_workers: int = NUM_INDEXING_WORKERS) -> Non
             )
         except Exception as e:
             logger.exception(f"Failed to run update due to {e}")
+
+        # Onboarding finalization sweep (~once a minute), isolated so a failure
+        # here never disrupts indexing scheduling.
+        if start - last_onboarding_sweep >= onboarding_sweep_interval:
+            last_onboarding_sweep = start
+            try:
+                with Session(get_sqlalchemy_engine()) as db_session:
+                    finalize_ready_onboarding_requests(db_session)
+            except Exception:
+                logger.exception("Onboarding finalization sweep failed")
+
         sleep_time = delay - (time.time() - start)
         if sleep_time > 0:
             time.sleep(sleep_time)

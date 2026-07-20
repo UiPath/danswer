@@ -49,7 +49,8 @@ import { DocumentSidebar } from "./documentSidebar/DocumentSidebar";
 import { DanswerInitializingLoader } from "@/components/DanswerInitializingLoader";
 import { FeedbackModal } from "./modal/FeedbackModal";
 import { ShareChatSessionModal } from "./modal/ShareChatSessionModal";
-import { FiArrowDown, FiShare2 } from "react-icons/fi";
+import { FiArrowDown, FiShare2, FiUserPlus } from "react-icons/fi";
+import Link from "next/link";
 import { ChatIntro } from "./ChatIntro";
 import { AIMessage, HumanMessage } from "./message/Messages";
 import { ThreeDots } from "react-loader-spinner";
@@ -1278,6 +1279,20 @@ export function ChatPage({
                         <div className="sticky top-0 left-80 z-10 w-full bg-background flex">
                           <div className="mt-2 flex w-full">
                             <div className="ml-auto mr-6 flex">
+                              <Link
+                                href="/onboarding"
+                                title="Onboard a team to Darwin"
+                                className={`
+                                    my-auto
+                                    p-2
+                                    rounded
+                                    cursor-pointer
+                                    hover:bg-hover-light
+                                  `}
+                              >
+                                <FiUserPlus size="18" />
+                              </Link>
+
                               {chatSessionIdRef.current !== null && (
                                 <div
                                   onClick={() => setSharingModalVisible(true)}
@@ -1407,7 +1422,9 @@ export function ChatPage({
                                   content={message.message}
                                   files={message.files}
                                   query={messageHistory[i]?.query || undefined}
-                                  personaName={assistantDisplayName(livePersona)}
+                                  personaName={assistantDisplayName(
+                                    livePersona
+                                  )}
                                   citedDocuments={getCitedDocumentsFromMessage(
                                     message
                                   )}
@@ -1517,7 +1534,9 @@ export function ChatPage({
                                 <AIMessage
                                   currentPersona={livePersona}
                                   messageId={message.messageId}
-                                  personaName={assistantDisplayName(livePersona)}
+                                  personaName={assistantDisplayName(
+                                    livePersona
+                                  )}
                                   content={
                                     <p className="text-red-700 text-sm my-auto">
                                       {message.message}

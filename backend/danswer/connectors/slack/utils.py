@@ -5,6 +5,7 @@ from collections.abc import Generator
 from functools import wraps
 from typing import Any
 from typing import cast
+from urllib.parse import urlparse
 
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
@@ -17,6 +18,23 @@ logger = setup_logger()
 
 # number of messages we request per page when fetching paginated slack messages
 _SLACK_LIMIT = 900
+
+# Mis-stored Slack workspace subdomains -> their correct URL subdomain.
+# Historically some connectors were configured with the workspace *display name*
+# ("Product") instead of the URL subdomain ("uipath-product"), so their stored
+# permalinks point at the dead host `product.slack.com`. Keys are matched case-
+# and whitespace-insensitively, so this covers both "Product" and "Product ".
+# This is an explicit allow-map on purpose: only listed subdomains are rewritten,
+# so genuinely different workspaces (uipath-customer-ops, uipath-marketing, ...)
+# and links already on a correct host are left untouched. Add an entry here if a
+# new mis-configured workspace surfaces.
+_SLACK_SUBDOMAIN_FIXES = {
+    "product": "uipath-product",
+}
+
+# Captures the subdomain in the `//<sub>.slack.com` portion of a permalink.
+# `[^/]*?` is non-greedy and tolerates a stray space ("Product .slack.com").
+_SLACK_HOST_RE = re.compile(r"(//)([^/]*?)(\.slack\.com)", re.IGNORECASE)
 
 
 def get_message_link(
@@ -32,6 +50,66 @@ def get_message_link(
         f"https://{workspace}.slack.com/archives/{channel_id}/p{message_ts_without_dot}"
         + (f"?thread_ts={thread_ts}" if thread_ts else "")
     )
+
+
+def normalize_slack_link(url: str) -> str:
+    """Rewrite a mis-stored Slack workspace subdomain to the canonical one.
+
+    Existing indexed docs carry links built from a mis-configured workspace
+    ("Product" -> dead `product.slack.com`). Retrieval reads every citation
+    link back through here, so chat / search / Slack-bot citations all resolve
+    to the real workspace without re-indexing or a data migration. Only the
+    subdomains in `_SLACK_SUBDOMAIN_FIXES` are rewritten; a link on the canonical
+    host, or on a genuinely different workspace, is returned unchanged."""
+    if not url or ".slack.com" not in url.lower():
+        return url
+
+    def _fix(match: "re.Match[str]") -> str:
+        subdomain = match.group(2).strip().lower()
+        canonical = _SLACK_SUBDOMAIN_FIXES.get(subdomain)
+        if canonical is not None:
+            return f"{match.group(1)}{canonical}{match.group(3)}"
+        return match.group(0)
+
+    return _SLACK_HOST_RE.sub(_fix, url, count=1)
+
+
+def resolve_workspace_subdomain(
+    client: WebClient, channel_id: str, message_ts: str, fallback: str
+) -> str:
+    """Ask Slack for the authoritative workspace subdomain of a channel.
+
+    `chat.getPermalink` returns the real permalink for a message, with the
+    correct `<sub>.slack.com` host even under Enterprise Grid (where a single
+    bot can see channels that live in different workspaces, each with its own
+    URL). We resolve this ONCE per channel and reuse it, so the connector no
+    longer depends on a hand-typed `workspace` config being right. Falls back to
+    `fallback` (the configured workspace) if the call fails."""
+    try:
+        # Same rate-limit + logging wrapping as every other Slack call in the
+        # connector, so a 429 retries (with Retry-After) instead of falling back.
+        resp = make_slack_api_rate_limited(
+            make_slack_api_call_logged(client.chat_getPermalink)
+        )(channel=channel_id, message_ts=message_ts)
+        permalink = cast(str, resp.get("permalink") or "")
+        host = urlparse(permalink).netloc.lower()
+        if host.endswith(".slack.com"):
+            subdomain = host[: -len(".slack.com")]
+            if subdomain:
+                return subdomain
+    except SlackApiError as e:
+        logger.warning(
+            "chat.getPermalink failed for channel %s (%s); "
+            "falling back to configured workspace '%s'",
+            channel_id,
+            e.response.get("error"),
+            fallback,
+        )
+    except Exception as e:
+        logger.warning(
+            "could not resolve workspace subdomain for channel %s: %s", channel_id, e
+        )
+    return fallback
 
 
 def make_slack_api_call_logged(

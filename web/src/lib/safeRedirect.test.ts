@@ -21,6 +21,9 @@ describe("getSafeNextPath", () => {
     it("drops any fragment", () => {
       expect(getSafeNextPath("/chat?x=1#frag")).toBe("/chat?x=1");
     });
+    it("/onboarding (allowlisted entry point)", () => {
+      expect(getSafeNextPath("/onboarding")).toBe("/onboarding");
+    });
   });
 
   describe("rejects open-redirect / off-origin attempts", () => {

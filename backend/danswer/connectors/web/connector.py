@@ -1,5 +1,6 @@
 import io
 import ipaddress
+import os
 import random
 import re
 import socket
@@ -161,7 +162,13 @@ def get_internal_links(
 
 def start_playwright() -> Tuple[Playwright, BrowserContext]:
     playwright = sync_playwright().start()
-    browser = playwright.chromium.launch(headless=True)
+    # Optionally launch an installed browser (e.g. system Chrome) instead of the
+    # bundled Chromium. Prod leaves this unset and uses the pinned Chromium in
+    # the Linux image; it exists only so local dev can fall back to a working
+    # browser when the pinned build is incompatible with the host OS (the
+    # chromium-1097 build for playwright 1.41.2 SIGSEGVs on recent macOS).
+    browser_channel = os.environ.get("WEB_CONNECTOR_BROWSER_CHANNEL") or None
+    browser = playwright.chromium.launch(headless=True, channel=browser_channel)
 
     context = browser.new_context(user_agent=DEFAULT_USER_AGENT)
 
@@ -314,7 +321,9 @@ def _uipath_product_prefix(path: str) -> str:
     return "/" + "/".join(segs[:cut])
 
 
-def get_uipath_docs_version_base_urls(base_url: str, max_versions: int = 2) -> list[str]:
+def get_uipath_docs_version_base_urls(
+    base_url: str, max_versions: int = 2
+) -> list[str]:
     """Expand a docs.uipath.com product URL to the base URLs of its latest N
     concrete versions.
 
