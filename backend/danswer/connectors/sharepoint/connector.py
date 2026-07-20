@@ -25,6 +25,7 @@ from office365.runtime.client_request_exception import (  # type: ignore
 from danswer.configs.app_configs import INDEX_BATCH_SIZE
 from danswer.configs.constants import DocumentSource
 from danswer.connectors.interfaces import GenerateDocumentsOutput
+from danswer.connectors.interfaces import IdConnector
 from danswer.connectors.interfaces import LoadConnector
 from danswer.connectors.interfaces import PollConnector
 from danswer.connectors.interfaces import SecondsSinceUnixEpoch
@@ -292,7 +293,7 @@ def _convert_sitepage_to_document(
     )
 
 
-class SharepointConnector(LoadConnector, PollConnector):
+class SharepointConnector(LoadConnector, PollConnector, IdConnector):
     def __init__(
         self,
         batch_size: int = INDEX_BATCH_SIZE,
@@ -383,6 +384,14 @@ class SharepointConnector(LoadConnector, PollConnector):
         list-level $expand=canvasLayout 400s (one corrupt page poisons the
         whole list response)."""
         base = f"{_GRAPH_BASE}/sites/{site_id}/pages/microsoft.graph.sitePage"
+        # Incremental poll (a time window is set): list page metadata cheaply and
+        # expand the canvas ONLY for pages that changed in the window, instead of
+        # downloading every page's canvas on every poll.
+        if start is not None or end is not None:
+            yield from self._fetch_site_pages_individually(base, start, end, set())
+            return
+        # Full load: one bulk list with canvas (fewest calls); fall back to
+        # per-page expansion if a corrupt page 400s the whole list.
         url: str | None = base
         params: dict[str, str] | None = {"$expand": "canvasLayout"}
         seen: set[str] = set()
@@ -609,6 +618,52 @@ class SharepointConnector(LoadConnector, PollConnector):
         start_datetime = datetime.utcfromtimestamp(start)
         end_datetime = datetime.utcfromtimestamp(end)
         return self._fetch_from_sharepoint(start=start_datetime, end=end_datetime)
+
+    def _fetch_site_page_ids(self, site_id: str) -> Generator[str, None, None]:
+        """List site-page ids only ($select=id, no canvas) — the cheap path for
+        deletion detection."""
+        url: str | None = (
+            f"{_GRAPH_BASE}/sites/{site_id}/pages/microsoft.graph.sitePage"
+        )
+        params: dict[str, str] | None = {"$select": "id"}
+        while url:
+            try:
+                data = self._graph_get(url, params)
+            except requests.HTTPError as e:
+                if e.response is not None and e.response.status_code == 404:
+                    return
+                raise
+            params = None
+            for page in data.get("value", []):
+                pid = page.get("id")
+                if pid:
+                    yield pid
+            url = data.get("@odata.nextLink")
+
+    def retrieve_all_source_ids(self) -> set[str]:
+        """Every current document id (drive items + site pages), fetched WITHOUT
+        downloading file/canvas content. The pruning job diffs this against the
+        indexed set and deletes what's gone — so removed files/pages are cleaned
+        up. Efficient: only metadata/ids, no content. Matches the ids emitted by
+        `_fetch_from_sharepoint` (driveitem.id, and 'sharepoint_page__<id>')."""
+        if self.graph_client is None:
+            raise ConnectorMissingCredentialError("Sharepoint")
+
+        self._populate_sitedata_sites()
+        self._populate_sitedata_driveitems()  # metadata only — no get_content()
+
+        ids: set[str] = set()
+        for element in self.site_data:
+            for driveitem in element.driveitems:
+                ids.add(driveitem.id)
+            if self.scrape_scope == SCOPE_FULL:
+                for site in element.sites:
+                    site_id = getattr(site, "id", None)
+                    if not site_id:
+                        continue
+                    for page_id in self._fetch_site_page_ids(site_id):
+                        ids.add(f"sharepoint_page__{page_id}")
+        return ids
 
 
 if __name__ == "__main__":

@@ -131,6 +131,81 @@ def test_backoff_honors_retry_after_then_falls_back() -> None:
         assert base / 2 <= w <= base
 
 
+def test_retrieve_all_source_ids_full_scope() -> None:
+    """Pruning hook returns drive-item ids + site-page ids (no content), matching
+    the ids _fetch_from_sharepoint emits, so deletions are detected."""
+    from types import SimpleNamespace
+
+    from danswer.connectors.sharepoint.connector import SiteData
+
+    conn = SharepointConnector(sites=[], scrape_scope=SCOPE_FULL)
+    conn.graph_client = object()  # type: ignore[assignment]
+    conn.site_data = [
+        SiteData(
+            url="https://x.sharepoint.com/sites/s",
+            folder=None,
+            sites=[SimpleNamespace(id="site1")],
+            driveitems=[SimpleNamespace(id="fileA"), SimpleNamespace(id="fileB")],
+        )
+    ]
+    # skip network: sites already populated, driveitems already set
+    conn._populate_sitedata_sites = lambda: None  # type: ignore[method-assign]
+    conn._populate_sitedata_driveitems = lambda start=None, end=None: None  # type: ignore[method-assign]
+    conn._fetch_site_page_ids = lambda site_id: iter(["p1", "p2"])  # type: ignore[method-assign]
+
+    ids = conn.retrieve_all_source_ids()
+    assert ids == {
+        "fileA",
+        "fileB",
+        "sharepoint_page__p1",
+        "sharepoint_page__p2",
+    }
+
+
+def test_retrieve_all_source_ids_documents_scope_skips_pages() -> None:
+    from types import SimpleNamespace
+
+    from danswer.connectors.sharepoint.connector import SiteData
+
+    conn = SharepointConnector(sites=[], scrape_scope=SCOPE_DOCUMENTS)
+    conn.graph_client = object()  # type: ignore[assignment]
+    conn.site_data = [
+        SiteData(
+            url=None,
+            folder=None,
+            sites=[SimpleNamespace(id="site1")],
+            driveitems=[SimpleNamespace(id="fileA")],
+        )
+    ]
+    conn._populate_sitedata_sites = lambda: None  # type: ignore[method-assign]
+    conn._populate_sitedata_driveitems = lambda start=None, end=None: None  # type: ignore[method-assign]
+
+    called = {"pages": False}
+
+    def _no_pages(site_id: str) -> object:
+        called["pages"] = True
+        return iter([])
+
+    conn._fetch_site_page_ids = _no_pages  # type: ignore[method-assign]
+    assert conn.retrieve_all_source_ids() == {"fileA"}
+    assert called["pages"] is False  # documents scope never lists pages
+
+
+def test_incremental_poll_routes_to_per_page_expansion() -> None:
+    """With a time window set, _fetch_site_pages must use the metadata-then-
+    expand-changed path (efficient), not the bulk canvas download."""
+    conn = SharepointConnector(sites=[], scrape_scope=SCOPE_FULL)
+    seen: dict[str, object] = {}
+
+    def _individually(base, start, end, skip):  # type: ignore[no-untyped-def]
+        seen["called"] = (start, end)
+        return iter([])
+
+    conn._fetch_site_pages_individually = _individually  # type: ignore[method-assign]
+    list(conn._fetch_site_pages("site1", start=datetime(2026, 1, 1), end=None))
+    assert seen.get("called") == (datetime(2026, 1, 1), None)
+
+
 def test_is_invalid_request_detects_corrupt_canvas() -> None:
     class _Resp:
         def __init__(self, code: str | None) -> None:
