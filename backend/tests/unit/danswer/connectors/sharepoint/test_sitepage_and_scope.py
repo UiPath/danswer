@@ -206,6 +206,32 @@ def test_incremental_poll_routes_to_per_page_expansion() -> None:
     assert seen.get("called") == (datetime(2026, 1, 1), None)
 
 
+def test_convert_driveitem_skips_non_bytes_content() -> None:
+    """A driveitem whose get_content().value is a dict (OneNote notebook, .aspx
+    surfaced in a library, or a metadata/JSON payload the API returns instead of
+    binary) must be skipped (return None), not crash io.BytesIO(dict) and abort
+    the whole run."""
+    from types import SimpleNamespace
+
+    from danswer.connectors.sharepoint.connector import (
+        _convert_driveitem_to_document,
+    )
+
+    class _Result:
+        def __init__(self, value: object) -> None:
+            self.value = value
+
+        def execute_query(self) -> "_Result":
+            return self
+
+    bad_item = SimpleNamespace(
+        name="notebook.one",
+        web_url="https://x.sharepoint.com/sites/s/notebook.one",
+        get_content=lambda: _Result({"error": "not a binary payload"}),
+    )
+    assert _convert_driveitem_to_document(bad_item) is None  # type: ignore[arg-type]
+
+
 def test_is_invalid_request_detects_corrupt_canvas() -> None:
     class _Resp:
         def __init__(self, code: str | None) -> None:

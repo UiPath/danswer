@@ -166,12 +166,27 @@ class SiteData:
 
 def _convert_driveitem_to_document(
     driveitem: DriveItem,
-) -> Document:
+) -> Document | None:
+    content = sleep_and_retry(
+        driveitem.get_content(), "driveitem.get_content"
+    ).value
+    if not isinstance(content, (bytes, bytearray)):
+        # Some SharePoint items (OneNote notebooks, .aspx pages surfaced inside a
+        # library, or items the Graph API declines to stream) return a JSON /
+        # metadata payload instead of binary bytes — `.value` is then a dict.
+        # There's nothing to extract, so skip the item rather than blowing up
+        # `io.BytesIO(dict)` and aborting the whole run.
+        logger.warning(
+            "Skipping driveitem '%s' (%s): get_content returned %s, not bytes.",
+            driveitem.name,
+            driveitem.web_url,
+            type(content).__name__,
+        )
+        return None
+
     file_text = extract_file_text(
         file_name=driveitem.name,
-        file=io.BytesIO(
-            sleep_and_retry(driveitem.get_content(), "driveitem.get_content").value
-        ),
+        file=io.BytesIO(content),
         break_on_unprocessable=False,
     )
 
@@ -557,7 +572,20 @@ class SharepointConnector(LoadConnector, PollConnector, IdConnector):
         for element in self.site_data:
             for driveitem in element.driveitems:
                 logger.debug(f"Processing: {driveitem.web_url}")
-                doc_batch.append(_convert_driveitem_to_document(driveitem))
+                try:
+                    doc = _convert_driveitem_to_document(driveitem)
+                except Exception:
+                    # One unreadable/oversized/odd item must not abort a run that
+                    # may have already indexed thousands of good docs. Mirror the
+                    # per-site resilience below.
+                    logger.exception(
+                        "Failed to convert driveitem '%s'; skipping.",
+                        getattr(driveitem, "web_url", driveitem),
+                    )
+                    continue
+                if doc is None:
+                    continue
+                doc_batch.append(doc)
 
                 if len(doc_batch) >= self.batch_size:
                     yield doc_batch
