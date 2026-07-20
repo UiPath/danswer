@@ -370,6 +370,8 @@ const MainSection = () => {
             }}
             credentialId={sharepointCredential.id}
             refreshFreq={10 * 60} // 10 minutes
+            pruneFreq={60 * 60 * 24 * 7} // default: Weekly
+            showPruneFreqSelector
           />
         </Card>
       ) : (

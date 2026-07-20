@@ -78,6 +78,16 @@ export const REFRESH_FREQ_OPTIONS: { value: number; label: string }[] = [
 // that cadence and the user can dial it down if they do.
 const DEFAULT_REFRESH_FREQ_SECS = 60 * 60 * 24; // Daily
 
+// Prune cadence: how often the connector checks the source for documents that
+// were DELETED and removes them from the index. "Off" (0) disables pruning.
+export const PRUNE_FREQ_OPTIONS: { value: number; label: string }[] = [
+  { value: 0, label: "Off (never prune)" },
+  { value: 60 * 60 * 24, label: "Daily" },
+  { value: 60 * 60 * 24 * 7, label: "Weekly" },
+  { value: 60 * 60 * 24 * 30, label: "Monthly (every 30 days)" },
+];
+const DEFAULT_PRUNE_FREQ_SECS = 60 * 60 * 24 * 7; // Weekly
+
 interface BaseProps<T extends Yup.AnyObject> {
   nameBuilder: (values: T) => string;
   ccPairNameBuilder?: (values: T) => string | null;
@@ -100,6 +110,10 @@ interface BaseProps<T extends Yup.AnyObject> {
   // auto-re-indexed (used by connectors whose credential is short-lived).
   refreshFreq?: number | null;
   pruneFreq?: number;
+  // When true, render a user-editable prune-frequency dropdown (defaults to
+  // `pruneFreq` or Weekly). When false/omitted, prune_freq is the fixed
+  // `pruneFreq` prop as before.
+  showPruneFreqSelector?: boolean;
   // If specified, then we will create an empty credential and associate
   // the connector with it. If credentialId is specified, then this will be ignored
   shouldCreateEmptyCredentialForConnector?: boolean;
@@ -123,6 +137,7 @@ export function ConnectorForm<T extends Yup.AnyObject>({
   initialValues,
   refreshFreq,
   pruneFreq,
+  showPruneFreqSelector,
   onSubmit,
   shouldCreateEmptyCredentialForConnector,
 }: ConnectorFormProps<T>): JSX.Element {
@@ -139,6 +154,12 @@ export function ConnectorForm<T extends Yup.AnyObject>({
   );
   const showRefreshFreqSelector =
     refreshFreq !== undefined && refreshFreq !== null;
+
+  // User-selectable prune frequency (deletion-detection cadence). Local state,
+  // kept out of Formik values so it never lands in connector_specific_config.
+  const [selectedPruneFreq, setSelectedPruneFreq] = useState<number>(
+    pruneFreq ?? DEFAULT_PRUNE_FREQ_SECS
+  );
 
   // only show this option for EE, since groups are not supported in CE
   const showNonPublicOption = usePaidEnterpriseFeaturesEnabled();
@@ -214,7 +235,9 @@ export function ConnectorForm<T extends Yup.AnyObject>({
               : refreshFreq === null
                 ? null
                 : refreshFreq || 0,
-            prune_freq: pruneFreq ?? null,
+            prune_freq: showPruneFreqSelector
+              ? selectedPruneFreq
+              : (pruneFreq ?? null),
             disabled: false,
           });
 
@@ -308,6 +331,30 @@ export function ConnectorForm<T extends Yup.AnyObject>({
                   className="h-9 rounded-md border border-border bg-background px-2 text-sm"
                 >
                   {REFRESH_FREQ_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+            {showPruneFreqSelector && (
+              <div className="mt-4">
+                <label className="block text-sm font-medium text-emphasis mb-1">
+                  Prune frequency
+                </label>
+                <p className="text-xs text-subtle mb-2">
+                  How often to check the source for documents that were deleted
+                  and remove them from the index.
+                </p>
+                <select
+                  value={selectedPruneFreq}
+                  onChange={(e) =>
+                    setSelectedPruneFreq(parseInt(e.target.value, 10))
+                  }
+                  className="h-9 rounded-md border border-border bg-background px-2 text-sm"
+                >
+                  {PRUNE_FREQ_OPTIONS.map((opt) => (
                     <option key={opt.value} value={opt.value}>
                       {opt.label}
                     </option>
