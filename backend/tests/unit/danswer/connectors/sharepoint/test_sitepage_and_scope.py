@@ -206,30 +206,40 @@ def test_incremental_poll_routes_to_per_page_expansion() -> None:
     assert seen.get("called") == (datetime(2026, 1, 1), None)
 
 
-def test_convert_driveitem_skips_non_bytes_content() -> None:
-    """A driveitem whose get_content().value is a dict (OneNote notebook, .aspx
-    surfaced in a library, or a metadata/JSON payload the API returns instead of
-    binary) must be skipped (return None), not crash io.BytesIO(dict) and abort
-    the whole run."""
+def test_convert_driveitem_builds_document_from_raw_bytes() -> None:
+    """Content is downloaded separately (raw Graph) and passed in as bytes; the
+    builder just extracts text and assembles the Document — no office365
+    get_content(), so no JSON-deserialization object blow-up."""
     from types import SimpleNamespace
 
     from danswer.connectors.sharepoint.connector import (
         _convert_driveitem_to_document,
     )
 
-    class _Result:
-        def __init__(self, value: object) -> None:
-            self.value = value
-
-        def execute_query(self) -> "_Result":
-            return self
-
-    bad_item = SimpleNamespace(
-        name="notebook.one",
-        web_url="https://x.sharepoint.com/sites/s/notebook.one",
-        get_content=lambda: _Result({"error": "not a binary payload"}),
+    item = SimpleNamespace(
+        id="itm1",
+        name="note.txt",
+        web_url="https://x.sharepoint.com/sites/s/note.txt",
+        last_modified_datetime=datetime(2026, 7, 10, 8, 0),
+        last_modified_by=SimpleNamespace(
+            user=SimpleNamespace(displayName="Alex", email="a@uipath.com")
+        ),
     )
-    assert _convert_driveitem_to_document(bad_item) is None  # type: ignore[arg-type]
+    doc = _convert_driveitem_to_document(item, b"hello sharepoint")  # type: ignore[arg-type]
+    assert doc.id == "itm1"
+    assert doc.semantic_identifier == "note.txt"
+    assert "hello sharepoint" in doc.sections[0].text
+    assert doc.primary_owners and doc.primary_owners[0].email == "a@uipath.com"
+
+
+def test_download_content_returns_none_when_ids_missing() -> None:
+    """No parent drive id / item id -> skip (return None) without any network
+    call, so the caller drops the item instead of erroring."""
+    from types import SimpleNamespace
+
+    conn = SharepointConnector(sites=[], scrape_scope=SCOPE_FULL)
+    item = SimpleNamespace(id=None, parent_reference=None, web_url="w")
+    assert conn._download_driveitem_content(item) is None  # type: ignore[arg-type]
 
 
 def test_iter_driveitems_streams_per_library_without_retaining() -> None:

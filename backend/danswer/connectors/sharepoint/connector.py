@@ -166,24 +166,16 @@ class SiteData:
 
 def _convert_driveitem_to_document(
     driveitem: DriveItem,
-) -> Document | None:
-    content = sleep_and_retry(
-        driveitem.get_content(), "driveitem.get_content"
-    ).value
-    if not isinstance(content, (bytes, bytearray)):
-        # Some SharePoint items (OneNote notebooks, .aspx pages surfaced inside a
-        # library, or items the Graph API declines to stream) return a JSON /
-        # metadata payload instead of binary bytes — `.value` is then a dict.
-        # There's nothing to extract, so skip the item rather than blowing up
-        # `io.BytesIO(dict)` and aborting the whole run.
-        logger.warning(
-            "Skipping driveitem '%s' (%s): get_content returned %s, not bytes.",
-            driveitem.name,
-            driveitem.web_url,
-            type(content).__name__,
-        )
-        return None
+    content: bytes,
+) -> Document:
+    """Build a Document from a drive item and its already-downloaded bytes.
 
+    Content is fetched separately via a raw Graph call (see
+    `SharepointConnector._download_driveitem_content`) rather than office365's
+    `get_content()`: that path deserializes structured file payloads (e.g. a big
+    `.json`) into huge retained object trees (measured: one file -> ~800k objects
+    that never freed, driving RSS to ~1.7GB) and raises JSONDecodeError on some
+    content. Raw bytes mean no parsing and no retained office365 object graph."""
     file_text = extract_file_text(
         file_name=driveitem.name,
         file=io.BytesIO(content),
@@ -387,6 +379,59 @@ class SharepointConnector(LoadConnector, PollConnector, IdConnector):
                     raise
                 time.sleep(min(2**attempt, 60))
         raise RuntimeError(f"Graph GET failed after retries: {url}")
+
+    def _download_driveitem_content(self, driveitem: DriveItem) -> bytes | None:
+        """Download a drive item's bytes via a RAW Graph call, bypassing the
+        office365 client. office365's get_content() deserializes structured
+        payloads into large retained object trees (measured ~800k objects for one
+        .json, RSS -> ~1.7GB) and chokes with JSONDecodeError on some files; raw
+        bytes avoid both. Returns None for items the API won't stream as binary
+        (folders, OneNote, non-downloadable) so the caller skips them."""
+        ref = getattr(driveitem, "parent_reference", None)
+        drive_id = getattr(ref, "drive_id", None) if ref is not None else None
+        item_id = getattr(driveitem, "id", None)
+        if not drive_id or not item_id:
+            logger.warning(
+                "Skipping driveitem '%s': missing drive/item id for download.",
+                getattr(driveitem, "web_url", driveitem),
+            )
+            return None
+
+        url = f"{_GRAPH_BASE}/drives/{drive_id}/items/{item_id}/content"
+        for attempt in range(_GRAPH_MAX_RETRIES + 1):
+            # MSAL-cached bearer token, re-acquired per attempt so a mid-run
+            # expiry/rotation is picked up; never held long-lived, never logged.
+            headers = {"Authorization": f"Bearer {self._get_access_token()}"}
+            try:
+                resp = requests.get(
+                    url,
+                    headers=headers,
+                    timeout=_GRAPH_TIMEOUT_SECONDS,
+                    allow_redirects=True,
+                )
+                if (
+                    resp.status_code in _GRAPH_RETRYABLE_STATUSES
+                    and attempt < _GRAPH_MAX_RETRIES
+                ):
+                    wait = _backoff_seconds(attempt, resp.headers.get("Retry-After"))
+                    logger.warning(
+                        "Graph content %s on attempt %s, retrying in %.1fs: %s",
+                        resp.status_code,
+                        attempt + 1,
+                        wait,
+                        driveitem.name,
+                    )
+                    time.sleep(wait)
+                    continue
+                if resp.status_code == 404:
+                    return None
+                resp.raise_for_status()
+                return resp.content
+            except _TRANSIENT_TRANSPORT_EXCEPTIONS:
+                if attempt >= _GRAPH_MAX_RETRIES:
+                    raise
+                time.sleep(min(2**attempt, 60))
+        return None
 
     def _fetch_site_pages(
         self,
@@ -615,7 +660,10 @@ class SharepointConnector(LoadConnector, PollConnector, IdConnector):
             for driveitem in self._iter_driveitems(element, start=start, end=end):
                 logger.debug(f"Processing: {driveitem.web_url}")
                 try:
-                    doc = _convert_driveitem_to_document(driveitem)
+                    content = self._download_driveitem_content(driveitem)
+                    if content is None:
+                        continue
+                    doc = _convert_driveitem_to_document(driveitem, content)
                 except Exception:
                     # One unreadable/oversized/odd item must not abort a run that
                     # may have already indexed thousands of good docs. Mirror the
@@ -624,8 +672,6 @@ class SharepointConnector(LoadConnector, PollConnector, IdConnector):
                         "Failed to convert driveitem '%s'; skipping.",
                         getattr(driveitem, "web_url", driveitem),
                     )
-                    continue
-                if doc is None:
                     continue
                 doc_batch.append(doc)
 
