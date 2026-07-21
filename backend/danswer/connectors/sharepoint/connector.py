@@ -380,15 +380,25 @@ class SharepointConnector(LoadConnector, PollConnector, IdConnector):
                 time.sleep(min(2**attempt, 60))
         raise RuntimeError(f"Graph GET failed after retries: {url}")
 
-    def _download_driveitem_content(self, driveitem: DriveItem) -> bytes | None:
+    def _download_driveitem_content(
+        self, driveitem: DriveItem, drive_id: str | None = None
+    ) -> bytes | None:
         """Download a drive item's bytes via a RAW Graph call, bypassing the
         office365 client. office365's get_content() deserializes structured
         payloads into large retained object trees (measured ~800k objects for one
         .json, RSS -> ~1.7GB) and chokes with JSONDecodeError on some files; raw
         bytes avoid both. Returns None for items the API won't stream as binary
-        (folders, OneNote, non-downloadable) so the caller skips them."""
-        ref = getattr(driveitem, "parent_reference", None)
-        drive_id = getattr(ref, "drive_id", None) if ref is not None else None
+        (folders, OneNote, non-downloadable) so the caller skips them.
+
+        `drive_id` is passed from the enumeration context (the drive we're
+        walking). We must NOT rely on `driveitem.parent_reference.drive_id`: a
+        `get_files().filter(...)` query — which every incremental/backfill poll
+        issues — returns items with `parentReference` UNPOPULATED, so that path
+        skipped every real file (0 docs indexed). Fall back to parentReference
+        only when no context drive_id is available."""
+        if not drive_id:
+            ref = getattr(driveitem, "parent_reference", None)
+            drive_id = getattr(ref, "drive_id", None) if ref is not None else None
         item_id = getattr(driveitem, "id", None)
         if not drive_id or not item_id:
             logger.warning(
@@ -608,22 +618,27 @@ class SharepointConnector(LoadConnector, PollConnector, IdConnector):
         element: SiteData,
         start: datetime | None = None,
         end: datetime | None = None,
-    ) -> Generator[DriveItem, None, None]:
-        """Yield drive items one library at a time WITHOUT retaining them all.
+    ) -> Generator[tuple[DriveItem, str | None], None, None]:
+        """Yield (drive item, drive_id) one library at a time WITHOUT retaining
+        them all. drive_id comes from the enumeration context (the drive being
+        walked) — the download MUST use it rather than
+        `driveitem.parent_reference.drive_id`, because a filtered get_files()
+        query returns items with `parentReference` unpopulated.
 
         The streaming counterpart to `_populate_sitedata_driveitems` (which keeps
         every file for the whole site on `self.site_data[].driveitems` and is
-        still used by the id-only pruning path). During a full-scope *content*
-        crawl that retained list — plus the office365 object graph hanging off
-        each item — is the live heap the cyclic GC rescans on every pass, so its
-        cost grew with the number of docs processed (batches went 130s -> 220s ->
-        583s). Yielding per-library keeps only one library's file list alive at a
-        time, so GC scan cost stays bounded and flat."""
+        still used by the id-only pruning path). Yielding per-library keeps only
+        one library's file list alive at a time, so GC scan cost stays bounded."""
         filter_str = ""
         if start is not None and end is not None:
+            # Naive-UTC (no offset) form — the shape Graph's OData $filter
+            # accepts; `start`/`end` arrive tz-aware from poll_source, so drop the
+            # tzinfo just for the filter string.
             filter_str = (
-                f"last_modified_datetime ge {start.isoformat()} "
-                f"and last_modified_datetime le {end.isoformat()}"
+                f"last_modified_datetime ge "
+                f"{start.replace(tzinfo=None).isoformat()} "
+                f"and last_modified_datetime le "
+                f"{end.replace(tzinfo=None).isoformat()}"
             )
 
         if self.scrape_scope == SCOPE_FULL:
@@ -635,16 +650,21 @@ class SharepointConnector(LoadConnector, PollConnector, IdConnector):
                     logger.exception("Failed to list drives for a site")
                     drives = []
                 for drive in drives:
-                    # _drive_files returns one library's list; consuming it via
-                    # yield-from lets that local list be released before the next.
-                    yield from self._drive_files(drive, element.folder, filter_str)
+                    drive_id = getattr(drive, "id", None)
+                    # _drive_files returns one library's list; consuming it here
+                    # lets that local list be released before the next drive.
+                    for item in self._drive_files(drive, element.folder, filter_str):
+                        yield item, drive_id
         else:
             # documents mode: original behaviour (default document library).
             sites: list[Site] = []
             for site in element.sites:
                 sites.extend(sleep_and_retry(site.lists.get(), "site.lists.get"))
             for site in sites:
-                yield from self._drive_files(site.drive, element.folder, filter_str)
+                drive = site.drive
+                drive_id = getattr(drive, "id", None)
+                for item in self._drive_files(drive, element.folder, filter_str):
+                    yield item, drive_id
 
     def _fetch_from_sharepoint(
         self, start: datetime | None = None, end: datetime | None = None
@@ -657,10 +677,12 @@ class SharepointConnector(LoadConnector, PollConnector, IdConnector):
         # goes over all urls, converts them into Document objects and then yields them in batches
         doc_batch: list[Document] = []
         for element in self.site_data:
-            for driveitem in self._iter_driveitems(element, start=start, end=end):
+            for driveitem, drive_id in self._iter_driveitems(
+                element, start=start, end=end
+            ):
                 logger.debug(f"Processing: {driveitem.web_url}")
                 try:
-                    content = self._download_driveitem_content(driveitem)
+                    content = self._download_driveitem_content(driveitem, drive_id)
                     if content is None:
                         continue
                     doc = _convert_driveitem_to_document(driveitem, content)
@@ -731,8 +753,11 @@ class SharepointConnector(LoadConnector, PollConnector, IdConnector):
     def poll_source(
         self, start: SecondsSinceUnixEpoch, end: SecondsSinceUnixEpoch
     ) -> GenerateDocumentsOutput:
-        start_datetime = datetime.utcfromtimestamp(start)
-        end_datetime = datetime.utcfromtimestamp(end)
+        # tz-AWARE (UTC). Naive datetimes here crashed site-page filtering with
+        # "can't compare offset-naive and offset-aware datetimes" (the page's
+        # parsed timestamp is tz-aware), which aborted the whole site-pages fetch.
+        start_datetime = datetime.fromtimestamp(start, tz=timezone.utc)
+        end_datetime = datetime.fromtimestamp(end, tz=timezone.utc)
         return self._fetch_from_sharepoint(start=start_datetime, end=end_datetime)
 
     def _fetch_site_page_ids(self, site_id: str) -> Generator[str, None, None]:

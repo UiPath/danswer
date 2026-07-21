@@ -233,13 +233,17 @@ def test_convert_driveitem_builds_document_from_raw_bytes() -> None:
 
 
 def test_download_content_returns_none_when_ids_missing() -> None:
-    """No parent drive id / item id -> skip (return None) without any network
-    call, so the caller drops the item instead of erroring."""
+    """No drive id (context or parentReference) / no item id -> skip (return None)
+    without any network call, so the caller drops the item instead of erroring."""
     from types import SimpleNamespace
 
     conn = SharepointConnector(sites=[], scrape_scope=SCOPE_FULL)
+    # no context drive_id, no parentReference, no id -> None
     item = SimpleNamespace(id=None, parent_reference=None, web_url="w")
     assert conn._download_driveitem_content(item) is None  # type: ignore[arg-type]
+    # a context drive_id is supplied but the item has no id -> still None
+    item2 = SimpleNamespace(id=None, parent_reference=None, web_url="w")
+    assert conn._download_driveitem_content(item2, "drv-1") is None  # type: ignore[arg-type]
 
 
 def test_iter_driveitems_streams_per_library_without_retaining() -> None:
@@ -252,7 +256,10 @@ def test_iter_driveitems_streams_per_library_without_retaining() -> None:
     from danswer.connectors.sharepoint.connector import SiteData
 
     conn = SharepointConnector(sites=[], scrape_scope=SCOPE_FULL)
-    drives = [SimpleNamespace(name="Documents"), SimpleNamespace(name="Onboarding")]
+    drives = [
+        SimpleNamespace(name="Documents", id="drv-Documents"),
+        SimpleNamespace(name="Onboarding", id="drv-Onboarding"),
+    ]
     site = SimpleNamespace(
         id="s1",
         drives=SimpleNamespace(
@@ -272,10 +279,39 @@ def test_iter_driveitems_streams_per_library_without_retaining() -> None:
 
     conn._drive_files = fake_drive_files  # type: ignore[method-assign]
 
-    ids = [d.id for d in conn._iter_driveitems(element)]
+    pairs = list(conn._iter_driveitems(element))
+    ids = [it.id for it, _ in pairs]
+    drive_ids = [did for _, did in pairs]
     assert ids == ["Documents-a", "Documents-b", "Onboarding-a", "Onboarding-b"]
+    # drive_id comes from the enumeration context, NOT item.parentReference
+    # (which a filtered get_files() leaves unpopulated) — this is what makes
+    # the raw content download work for filtered/backfill polls.
+    assert drive_ids == [
+        "drv-Documents",
+        "drv-Documents",
+        "drv-Onboarding",
+        "drv-Onboarding",
+    ]
     assert visited == ["Documents", "Onboarding"]  # each library visited once
     assert element.driveitems == []  # nothing retained on the connector instance
+
+
+def test_poll_source_passes_tz_aware_window() -> None:
+    """poll_source must hand _fetch_from_sharepoint tz-AWARE datetimes; naive
+    ones crashed site-page filtering (naive vs aware comparison) and aborted the
+    whole site-pages fetch."""
+    conn = SharepointConnector(sites=[], scrape_scope=SCOPE_FULL)
+    captured: dict[str, datetime] = {}
+
+    def _capture(start=None, end=None):  # type: ignore[no-untyped-def]
+        captured["start"] = start
+        captured["end"] = end
+        return iter([])
+
+    conn._fetch_from_sharepoint = _capture  # type: ignore[method-assign]
+    list(conn.poll_source(0.0, 1_800_000_000.0))
+    assert captured["start"].tzinfo is not None
+    assert captured["end"].tzinfo is not None
 
 
 def test_is_invalid_request_detects_corrupt_canvas() -> None:
