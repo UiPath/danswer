@@ -4,6 +4,7 @@ from datetime import datetime
 from datetime import timedelta
 from datetime import timezone
 
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from danswer.background.indexing.checkpointing import get_time_windows_for_index_attempt
@@ -36,6 +37,18 @@ from danswer.utils.logger import setup_logger
 from danswer.utils.variable_functionality import global_version
 
 logger = setup_logger()
+
+# The indexing session runs SERIALIZABLE (see _prepare_index_attempt). Under
+# concurrent indexing load a per-batch commit can abort with Postgres 40001
+# (serialization_failure) — e.g. the mid-run `connector.disabled` read racing
+# concurrent connector-table writes. These are transient; retry the batch.
+_SERIALIZATION_MAX_RETRIES = 5
+
+
+def _is_serialization_failure(exc: BaseException) -> bool:
+    """True for a Postgres serialization_failure (SQLSTATE 40001) surfaced
+    through SQLAlchemy's OperationalError wrapper."""
+    return getattr(getattr(exc, "orig", None), "pgcode", None) == "40001"
 
 
 def _get_document_generator(
@@ -168,45 +181,76 @@ def _run_indexing(
 
             all_connector_doc_ids: set[str] = set()
             for doc_batch in doc_batch_generator:
-                # Check if connector is disabled mid run and stop if so unless it's the secondary
-                # index being built. We want to populate it even for paused connectors
-                # Often paused connectors are sources that aren't updated frequently but the
-                # contents still need to be initially pulled.
-                db_session.refresh(db_connector)
-                if (
-                    db_connector.disabled
-                    and db_embedding_model.status != IndexModelStatus.FUTURE
-                ):
-                    # let the `except` block handle this
-                    raise RuntimeError("Connector was disabled mid run")
+                # Index one batch, retrying the whole unit on a transient
+                # serialization failure (Postgres 40001). Because the run holds a
+                # SERIALIZABLE connection, the per-batch commit can abort when a
+                # concurrent transaction conflicts on a row this batch touched
+                # (notably the mid-run `connector.disabled` read vs concurrent
+                # connector-table writes under load). Counters are applied ONLY
+                # after a successful commit, so a retry never double-counts; the
+                # indexing pipeline is idempotent (Vespa upsert by id), so
+                # re-running a rolled-back batch is safe.
+                batch_new_docs = 0
+                batch_chunks = 0
+                for ser_attempt in range(_SERIALIZATION_MAX_RETRIES + 1):
+                    try:
+                        # Check if connector is disabled mid run and stop if so unless it's the
+                        # secondary index being built. We want to populate it even for paused
+                        # connectors — often paused connectors are sources that aren't updated
+                        # frequently but the contents still need to be initially pulled.
+                        db_session.refresh(db_connector)
+                        if (
+                            db_connector.disabled
+                            and db_embedding_model.status != IndexModelStatus.FUTURE
+                        ):
+                            # let the `except` block handle this
+                            raise RuntimeError("Connector was disabled mid run")
 
-                db_session.refresh(index_attempt)
-                if index_attempt.status != IndexingStatus.IN_PROGRESS:
-                    # Likely due to user manually disabling it or model swap
-                    raise RuntimeError("Index Attempt was canceled")
+                        db_session.refresh(index_attempt)
+                        if index_attempt.status != IndexingStatus.IN_PROGRESS:
+                            # Likely due to user manually disabling it or model swap
+                            raise RuntimeError("Index Attempt was canceled")
 
-                logger.debug(
-                    f"Indexing batch of documents: {[doc.to_short_descriptor() for doc in doc_batch]}"
-                )
+                        logger.debug(
+                            f"Indexing batch of documents: {[doc.to_short_descriptor() for doc in doc_batch]}"
+                        )
 
-                new_docs, total_batch_chunks = indexing_pipeline(
-                    documents=doc_batch,
-                    index_attempt_metadata=IndexAttemptMetadata(
-                        connector_id=db_connector.id,
-                        credential_id=db_credential.id,
-                    ),
-                )
-                net_doc_change += new_docs
-                chunk_count += total_batch_chunks
+                        batch_new_docs, batch_chunks = indexing_pipeline(
+                            documents=doc_batch,
+                            index_attempt_metadata=IndexAttemptMetadata(
+                                connector_id=db_connector.id,
+                                credential_id=db_credential.id,
+                            ),
+                        )
+
+                        # commit transaction so that the `update` below begins
+                        # with a brand new transaction. Postgres uses the start
+                        # of the transactions when computing `NOW()`, so if we have
+                        # a long running transaction, the `time_updated` field will
+                        # be inaccurate
+                        db_session.commit()
+                        break
+                    except OperationalError as ser_exc:
+                        if _is_serialization_failure(ser_exc) and (
+                            ser_attempt < _SERIALIZATION_MAX_RETRIES
+                        ):
+                            db_session.rollback()
+                            wait = min(0.5 * (2**ser_attempt), 10.0)
+                            logger.warning(
+                                "Serialization conflict indexing batch "
+                                "(attempt %s/%s); retrying in %.1fs.",
+                                ser_attempt + 1,
+                                _SERIALIZATION_MAX_RETRIES + 1,
+                                wait,
+                            )
+                            time.sleep(wait)
+                            continue
+                        raise
+
+                net_doc_change += batch_new_docs
+                chunk_count += batch_chunks
                 document_count += len(doc_batch)
                 all_connector_doc_ids.update(doc.id for doc in doc_batch)
-
-                # commit transaction so that the `update` below begins
-                # with a brand new transaction. Postgres uses the start
-                # of the transactions when computing `NOW()`, so if we have
-                # a long running transaction, the `time_updated` field will
-                # be inaccurate
-                db_session.commit()
 
                 # This new value is updated every batch, so UI can refresh per batch update
                 update_docs_indexed(
