@@ -9,6 +9,8 @@ from sqlalchemy.orm import Session
 from danswer.background.indexing.checkpointing import get_time_windows_for_index_attempt
 from danswer.configs.app_configs import POLL_CONNECTOR_OFFSET
 from danswer.connectors.factory import instantiate_connector
+from danswer.connectors.interfaces import CheckpointedConnector
+from danswer.connectors.interfaces import CheckpointOutput
 from danswer.connectors.interfaces import GenerateDocumentsOutput
 from danswer.connectors.interfaces import LoadConnector
 from danswer.connectors.interfaces import PollConnector
@@ -19,11 +21,13 @@ from danswer.db.connector_credential_pair import get_last_successful_attempt_tim
 from danswer.db.connector_credential_pair import update_connector_credential_pair
 from danswer.db.engine import get_sqlalchemy_engine
 from danswer.db.index_attempt import get_index_attempt
+from danswer.db.index_attempt import get_latest_resume_checkpoint
 from danswer.db.index_attempt import mark_attempt_failed
 from danswer.db.index_attempt import mark_attempt_in_progress__no_commit
 from danswer.db.index_attempt import mark_attempt_succeeded
 from danswer.db.index_attempt import release_cc_pair_lock
 from danswer.db.index_attempt import try_acquire_cc_pair_lock
+from danswer.db.index_attempt import update_checkpoint__no_commit
 from danswer.db.index_attempt import update_docs_indexed
 from danswer.db.models import IndexAttempt
 from danswer.db.models import IndexingStatus
@@ -43,13 +47,14 @@ def _get_document_generator(
     attempt: IndexAttempt,
     start_time: datetime,
     end_time: datetime,
-) -> GenerateDocumentsOutput:
+) -> CheckpointOutput:
     """
     NOTE: `start_time` and `end_time` are only used for poll connectors
 
-    Returns an interator of document batches and whether the returned documents
-    are the complete list of existing documents of the connector. If the task
-    of type LOAD_STATE, the list will be considered complete and otherwise incomplete.
+    Yields ``(document_batch, checkpoint)`` tuples. For a CheckpointedConnector
+    the checkpoint is the connector's resume cursor (persisted per batch); for
+    every other connector it is always ``None`` and the batches come from the
+    existing load_from_state / poll_source paths unchanged.
     """
     task = attempt.connector.input_type
 
@@ -65,6 +70,34 @@ def _get_document_generator(
         logger.exception(f"Unable to instantiate connector due to {e}")
         disable_connector(attempt.connector.id, db_session)
         raise e
+
+    # Resumable path: a checkpointed connector reports its own resume cursor and
+    # is (re)started from the last persisted checkpoint. Everything else falls
+    # through to the unchanged load/poll paths, wrapped to yield a None
+    # checkpoint so the caller's loop is uniform.
+    if isinstance(runnable_connector, CheckpointedConnector) and task in (
+        InputType.LOAD_STATE,
+        InputType.POLL,
+    ):
+        resume_checkpoint = attempt.checkpoint or get_latest_resume_checkpoint(
+            db_session=db_session,
+            connector_id=attempt.connector_id,
+            credential_id=attempt.credential_id,
+            exclude_attempt_id=attempt.id,
+        )
+        if task == InputType.POLL:
+            start_ts, end_ts = start_time.timestamp(), end_time.timestamp()
+        else:
+            start_ts, end_ts = 0.0, datetime.now(timezone.utc).timestamp()
+        logger.info(
+            "Checkpointed load (resuming=%s) between %s and %s",
+            bool(resume_checkpoint),
+            start_time,
+            end_time,
+        )
+        return runnable_connector.load_from_checkpoint(
+            start_ts, end_ts, resume_checkpoint
+        )
 
     if task == InputType.LOAD_STATE:
         assert isinstance(runnable_connector, LoadConnector)
@@ -87,7 +120,8 @@ def _get_document_generator(
         # Event types cannot be handled by a background type
         raise RuntimeError(f"Invalid task type: {task}")
 
-    return doc_batch_generator
+    # Uniform (batch, checkpoint) shape; non-checkpointed connectors never resume.
+    return ((doc_batch, None) for doc_batch in doc_batch_generator)
 
 
 def _run_indexing(
@@ -167,7 +201,11 @@ def _run_indexing(
             )
 
             all_connector_doc_ids: set[str] = set()
-            for doc_batch in doc_batch_generator:
+            # Generator yields (batch, checkpoint). checkpoint is None for
+            # non-checkpointed connectors (unchanged behavior) and for mid-page
+            # batches; a non-None checkpoint is a resume-safe cursor persisted
+            # once this batch commits (see CheckpointedConnector).
+            for doc_batch, batch_checkpoint in doc_batch_generator:
                 # Check if connector is disabled mid run and stop if so unless it's the secondary
                 # index being built. We want to populate it even for paused connectors
                 # Often paused connectors are sources that aren't updated frequently but the
@@ -200,6 +238,13 @@ def _run_indexing(
                 chunk_count += total_batch_chunks
                 document_count += len(doc_batch)
                 all_connector_doc_ids.update(doc.id for doc in doc_batch)
+
+                # Persist the resume cursor in the SAME commit as this batch's
+                # docs. If a crash lands between the docs committing and here, the
+                # checkpoint is simply stale-by-one-batch and the resume re-does
+                # that batch (dedup-safe) — never skips.
+                if batch_checkpoint is not None:
+                    update_checkpoint__no_commit(index_attempt, batch_checkpoint)
 
                 # commit transaction so that the `update` below begins
                 # with a brand new transaction. Postgres uses the start

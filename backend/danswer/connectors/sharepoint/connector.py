@@ -1,5 +1,6 @@
 import html
 import io
+import json
 import os
 import random
 import re
@@ -24,6 +25,8 @@ from office365.runtime.client_request_exception import (  # type: ignore
 
 from danswer.configs.app_configs import INDEX_BATCH_SIZE
 from danswer.configs.constants import DocumentSource
+from danswer.connectors.interfaces import CheckpointedConnector
+from danswer.connectors.interfaces import CheckpointOutput
 from danswer.connectors.interfaces import GenerateDocumentsOutput
 from danswer.connectors.interfaces import IdConnector
 from danswer.connectors.interfaces import LoadConnector
@@ -199,6 +202,33 @@ def _convert_driveitem_to_document(
     return doc
 
 
+def _delta_item_to_document(item: dict[str, Any], content: bytes) -> Document:
+    """Build a Document from a Graph *delta* item (plain JSON, not an office365
+    object) + its downloaded bytes. Delta enumeration is the resumable, memory-
+    bounded path (see `load_from_checkpoint`)."""
+    name = item.get("name") or item.get("id") or ""
+    file_text = extract_file_text(
+        file_name=name,
+        file=io.BytesIO(content),
+        break_on_unprocessable=False,
+    )
+    user = ((item.get("lastModifiedBy") or {}).get("user")) or {}
+    owners = (
+        [BasicExpertInfo(display_name=user.get("displayName"), email=user.get("email"))]
+        if (user.get("email") or user.get("displayName"))
+        else []
+    )
+    return Document(
+        id=item["id"],
+        sections=[Section(link=item.get("webUrl"), text=file_text)],
+        source=DocumentSource.SHAREPOINT,
+        semantic_identifier=name,
+        doc_updated_at=_parse_graph_datetime(item.get("lastModifiedDateTime")),
+        primary_owners=owners,
+        metadata={},
+    )
+
+
 # --- site pages (.aspx modern pages) ---------------------------------------
 
 
@@ -300,7 +330,9 @@ def _convert_sitepage_to_document(
     )
 
 
-class SharepointConnector(LoadConnector, PollConnector, IdConnector):
+class SharepointConnector(
+    LoadConnector, PollConnector, IdConnector, CheckpointedConnector
+):
     def __init__(
         self,
         batch_size: int = INDEX_BATCH_SIZE,
@@ -406,7 +438,14 @@ class SharepointConnector(LoadConnector, PollConnector, IdConnector):
                 getattr(driveitem, "web_url", driveitem),
             )
             return None
+        return self._download_item_bytes(drive_id, item_id, driveitem.name)
 
+    def _download_item_bytes(
+        self, drive_id: str, item_id: str, label: str
+    ) -> bytes | None:
+        """Raw Graph content download for a drive item, by ids. Shared by the
+        office365-item path and the delta path (whose items are plain JSON, not
+        office365 objects). Returns None on 404."""
         url = f"{_GRAPH_BASE}/drives/{drive_id}/items/{item_id}/content"
         for attempt in range(_GRAPH_MAX_RETRIES + 1):
             # MSAL-cached bearer token, re-acquired per attempt so a mid-run
@@ -429,7 +468,7 @@ class SharepointConnector(LoadConnector, PollConnector, IdConnector):
                         resp.status_code,
                         attempt + 1,
                         wait,
-                        driveitem.name,
+                        label,
                     )
                     time.sleep(wait)
                     continue
@@ -759,6 +798,129 @@ class SharepointConnector(LoadConnector, PollConnector, IdConnector):
         start_datetime = datetime.fromtimestamp(start, tz=timezone.utc)
         end_datetime = datetime.fromtimestamp(end, tz=timezone.utc)
         return self._fetch_from_sharepoint(start=start_datetime, end=end_datetime)
+
+    # --- resumable, memory-bounded crawl (CheckpointedConnector) -----------
+
+    def _all_drive_ids(self) -> list[str]:
+        """Ordered, de-duped list of drive ids to crawl. Full scope = every
+        library on every site; documents scope = each site's default drive.
+        Cheap (metadata only) and deterministic, so it's a stable index space
+        for checkpoint resume."""
+        drive_ids: list[str] = []
+        for element in self.site_data:
+            if self.scrape_scope == SCOPE_FULL:
+                for site in element.sites:
+                    try:
+                        drives = sleep_and_retry(site.drives.get(), "site.drives.get")
+                    except Exception:
+                        logger.exception("Failed to list drives for a site")
+                        drives = []
+                    for drive in drives:
+                        did = getattr(drive, "id", None)
+                        if did:
+                            drive_ids.append(did)
+            else:
+                lists: list[Site] = []
+                for site in element.sites:
+                    lists.extend(sleep_and_retry(site.lists.get(), "site.lists.get"))
+                for lst in lists:
+                    did = getattr(getattr(lst, "drive", None), "id", None)
+                    if did:
+                        drive_ids.append(did)
+        return list(dict.fromkeys(drive_ids))  # preserve order, drop dups
+
+    def load_from_checkpoint(
+        self,
+        start: SecondsSinceUnixEpoch,
+        end: SecondsSinceUnixEpoch,
+        checkpoint: str | None,
+    ) -> CheckpointOutput:
+        """Resumable, memory-bounded crawl via Graph *delta* queries.
+
+        Enumerates each drive with `/drives/{id}/root/delta` — which streams
+        ~200 items/page (bounded memory) far faster than the recursive
+        `get_files` (~35s vs ~13min for this site) and returns a durable cursor.
+        The checkpoint is `{phase, drive_index, delta_url, ...}`: a batch that
+        finishes a delta page carries the NEXT page's cursor, so a run killed
+        mid-crawl resumes at the last completed page instead of restarting.
+        Mid-page batches yield checkpoint=None (not a clean resume point yet).
+        Deletions/folders are skipped here (pruning via IdConnector handles
+        removals). Site pages (full scope) run after all drives."""
+        if self.graph_client is None:
+            raise ConnectorMissingCredentialError("Sharepoint")
+        self._populate_sitedata_sites()
+
+        state = json.loads(checkpoint) if checkpoint else {}
+        phase = state.get("phase", "drives")
+        start_dt = datetime.fromtimestamp(start, tz=timezone.utc) if start else None
+        end_dt = datetime.fromtimestamp(end, tz=timezone.utc) if end else None
+
+        batch: list[Document] = []
+
+        if phase == "drives":
+            drive_ids = self._all_drive_ids()
+            di = int(state.get("drive_index", 0))
+            delta_url = state.get("delta_url")
+            while di < len(drive_ids):
+                drive_id = drive_ids[di]
+                url: str | None = (
+                    delta_url or f"{_GRAPH_BASE}/drives/{drive_id}/root/delta"
+                )
+                while url:
+                    data = self._graph_get(url)
+                    for item in data.get("value", []):
+                        if item.get("deleted") or not item.get("file"):
+                            continue  # folders / root / removals
+                        if not _site_page_in_time_window(item, start_dt, end_dt):
+                            continue
+                        content = self._download_item_bytes(
+                            drive_id, item["id"], item.get("name", "")
+                        )
+                        if content is None:
+                            continue
+                        try:
+                            batch.append(_delta_item_to_document(item, content))
+                        except Exception:
+                            logger.exception(
+                                "Failed to convert delta item %s; skipping.",
+                                item.get("webUrl"),
+                            )
+                            continue
+                        if len(batch) >= self.batch_size:
+                            yield batch, None  # mid-page: not a resume point
+                            batch = []
+                    next_url = data.get("@odata.nextLink")
+                    # page done -> emit remainder + a clean, resumable checkpoint
+                    yield batch, json.dumps(
+                        {"phase": "drives", "drive_index": di, "delta_url": next_url}
+                    )
+                    batch = []
+                    url = next_url
+                di += 1
+                delta_url = None
+            phase = "pages" if self.scrape_scope == SCOPE_FULL else "done"
+
+        if phase == "pages" and self.scrape_scope == SCOPE_FULL:
+            for element in self.site_data:
+                for site in element.sites:
+                    site_id = getattr(site, "id", None)
+                    if not site_id:
+                        continue
+                    site_name = getattr(site, "display_name", None) or getattr(
+                        site, "name", None
+                    )
+                    try:
+                        for page in self._fetch_site_pages(site_id, start_dt, end_dt):
+                            batch.append(_convert_sitepage_to_document(page, site_name))
+                            if len(batch) >= self.batch_size:
+                                yield batch, json.dumps({"phase": "pages"})
+                                batch = []
+                    except Exception:
+                        logger.exception(
+                            "Failed to fetch site pages for site %s", site_id
+                        )
+
+        yield batch, json.dumps({"phase": "done"})
 
     def _fetch_site_page_ids(self, site_id: str) -> Generator[str, None, None]:
         """List site-page ids only ($select=id, no canvas) — the cheap path for

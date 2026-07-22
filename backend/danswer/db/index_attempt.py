@@ -225,6 +225,41 @@ def update_docs_indexed(
     db_session.commit()
 
 
+def update_checkpoint__no_commit(
+    index_attempt: IndexAttempt, checkpoint: str | None
+) -> None:
+    """Stage a resumable-connector checkpoint on the attempt. Left uncommitted so
+    it lands in the SAME transaction as the batch it belongs to — the checkpoint
+    is only durable once that batch's docs are committed, which is exactly the
+    resume-safety invariant."""
+    index_attempt.checkpoint = checkpoint
+
+
+def get_latest_resume_checkpoint(
+    db_session: Session,
+    connector_id: int | None,
+    credential_id: int | None,
+    exclude_attempt_id: int,
+) -> str | None:
+    """Checkpoint a new attempt should resume from: the most recent FAILED
+    attempt's checkpoint for this cc-pair (a run killed mid-crawl), so a retry
+    continues from that Graph delta cursor instead of re-enumerating from
+    scratch. None if the last run finished cleanly or there's nothing to resume
+    (fresh full crawl)."""
+    if connector_id is None or credential_id is None:
+        return None
+    return db_session.scalar(
+        select(IndexAttempt.checkpoint)
+        .where(IndexAttempt.connector_id == connector_id)
+        .where(IndexAttempt.credential_id == credential_id)
+        .where(IndexAttempt.id != exclude_attempt_id)
+        .where(IndexAttempt.status == IndexingStatus.FAILED)
+        .where(IndexAttempt.checkpoint.isnot(None))
+        .order_by(desc(IndexAttempt.id))
+        .limit(1)
+    )
+
+
 def get_last_attempt(
     connector_id: int,
     credential_id: int,
