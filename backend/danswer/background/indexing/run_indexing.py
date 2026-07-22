@@ -11,7 +11,6 @@ from danswer.configs.app_configs import POLL_CONNECTOR_OFFSET
 from danswer.connectors.factory import instantiate_connector
 from danswer.connectors.interfaces import CheckpointedConnector
 from danswer.connectors.interfaces import CheckpointOutput
-from danswer.connectors.interfaces import GenerateDocumentsOutput
 from danswer.connectors.interfaces import LoadConnector
 from danswer.connectors.interfaces import PollConnector
 from danswer.connectors.models import IndexAttemptMetadata
