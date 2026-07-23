@@ -52,6 +52,12 @@ spec:
         # not a leak). This keeps RSS flat over long many-doc crawls.
         - name: MALLOC_TRIM_THRESHOLD_
           value: '0'
+        # Scratch dir for the SharePoint connector's streamed large-file
+        # downloads (e.g. big .pptx decks): the file is streamed here in chunks,
+        # its text extracted, then deleted — so a 150MB deck never sits in worker
+        # RAM. Backed by the emptyDir below (node-local, per-pod, ephemeral).
+        - name: SHAREPOINT_DOWNLOAD_DIR
+          value: /scratch/sp-downloads
         - name: POSTGRES_USER
           valueFrom:
             secretKeyRef:
@@ -67,11 +73,15 @@ spec:
             name: env-configmap
         - secretRef:
             name: danswer-secrets
+        volumeMounts:
+        - name: sp-scratch
+          mountPath: /scratch/sp-downloads
         # No PVCs — indexing reads File-connector uploads from PGFileStore
         # (Postgres large objects), not /home/file_connector_storage; the
-        # dynamic config store is Postgres-backed too. Connector temp files
-        # (if any) go to the container's /tmp. This also keeps each worker
-        # off the RWO dynamic-pvc, which can't multi-attach. See README.
+        # dynamic config store is Postgres-backed too. The only scratch need is
+        # the SharePoint large-file download dir below, and it's an emptyDir
+        # (per-pod, node-local) NOT a PVC: the 2 workers run on different nodes,
+        # so a single RWO PVC could not multi-attach. See README.
         resources:
           requests:
             cpu: "1"
@@ -79,3 +89,10 @@ spec:
           limits:
             cpu: '2'
             memory: 8Gi
+      volumes:
+      # Ephemeral node-local scratch for streamed connector downloads. Deleted
+      # with the pod; sizeLimit caps it well under available node disk (~80GB
+      # free) since only one file streams at a time (max 150MB) before deletion.
+      - name: sp-scratch
+        emptyDir:
+          sizeLimit: 2Gi
