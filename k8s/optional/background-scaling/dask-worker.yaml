@@ -44,6 +44,14 @@ spec:
           value: /app
         - name: CURRENT_PROCESS_IS_AN_INDEXING_JOB
           value: 'true'
+        # Return freed heap pages to the OS immediately. Indexing allocates large
+        # transient buffers per doc (file bytes, extracted text, chunks,
+        # embeddings); glibc otherwise retains the freed arenas as "unmanaged
+        # memory", climbing ~2MB/doc until the dask nanny SIGTERMs the worker
+        # (diagnosed: RSS climbs while the Python heap stays flat = fragmentation,
+        # not a leak). This keeps RSS flat over long many-doc crawls.
+        - name: MALLOC_TRIM_THRESHOLD_
+          value: '0'
         - name: POSTGRES_USER
           valueFrom:
             secretKeyRef:
