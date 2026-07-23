@@ -38,7 +38,7 @@ spec:
             sleep 2
           done
           echo "dask-scheduler reachable; starting worker"
-          exec dask worker tcp://dask-scheduler-service:8786 --nworkers=1 --nthreads=1 --memory-limit=4GB
+          exec dask worker tcp://dask-scheduler-service:8786 --nworkers=1 --nthreads=1 --memory-limit=8GB
         env:
         - name: PYTHONPATH
           value: /app
