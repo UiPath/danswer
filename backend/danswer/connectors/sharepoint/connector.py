@@ -4,6 +4,7 @@ import json
 import os
 import random
 import re
+import tempfile
 import time
 from collections.abc import Generator
 from dataclasses import dataclass
@@ -12,6 +13,7 @@ from datetime import datetime
 from datetime import timezone
 from email.utils import parsedate_to_datetime
 from typing import Any
+from typing import IO
 from typing import Optional
 
 import msal  # type: ignore
@@ -66,6 +68,99 @@ _TRANSIENT_TRANSPORT_EXCEPTIONS: tuple[type[BaseException], ...] = (
 )
 # office365 execute_query() retries on these (429 rate-limit, 503 transient).
 _QUERY_RETRYABLE_STATUSES = frozenset({429, 503})
+
+# --- file filtering: allow-list + per-type size caps ------------------------
+# Evaluated on delta METADATA, BEFORE any download, so junk never touches the
+# worker. This SharePoint site is 193GB of which ~95% is embedded video/audio,
+# installer archives, mailboxes and images with ~0 searchable text; a single
+# 1.9GB mp4 loaded for extraction blows the worker's memory limit. We index only
+# extensions extract_file_text can actually turn into text, and use an ALLOW-LIST
+# (not a block-list) so an unknown/new file type is skipped by default rather
+# than silently pulled in. Data/config/code plain-text (csv, tsv, json, xml,
+# yml, yaml, conf, log) is intentionally excluded — not documents. Spreadsheets
+# (.xlsx) are excluded too: dense cells serialize into enormous text that
+# explodes into thousands of chunks and stalls the indexing pipeline.
+
+
+def _default_allowed_extensions() -> frozenset[str]:
+    override = os.environ.get("SHAREPOINT_ALLOWED_EXTENSIONS")
+    if override:
+        return frozenset(
+            e.strip().lstrip(".").lower() for e in override.split(",") if e.strip()
+        )
+    return frozenset({"pdf", "docx", "pptx", "txt", "md", "mdx", "html", "eml"})
+
+
+_ALLOWED_EXTENSIONS = _default_allowed_extensions()
+# .pptx decks are almost entirely embedded media; the slide text is tiny. We
+# still index big decks (up to the large cap) but ALWAYS stream them to a scratch
+# file and read only the slide text from disk, so a 150MB deck never sits in
+# worker RAM. Everything else is small (default cap) and handled in memory.
+# (Legacy binary .ppt/.doc/.xls are excluded: python-pptx/-docx/openpyxl only
+# read the XML formats, so they'd download only to yield empty text.)
+_STREAM_TO_DISK_EXTENSIONS = frozenset({"pptx"})
+_LARGE_FILE_CAP_BYTES = int(
+    os.environ.get("SHAREPOINT_PPTX_MAX_BYTES", str(150 * 1024 * 1024))
+)
+_DEFAULT_FILE_CAP_BYTES = int(
+    os.environ.get("SHAREPOINT_FILE_MAX_BYTES", str(25 * 1024 * 1024))
+)
+# Scratch dir for streamed downloads (an emptyDir on the worker in prod). None
+# -> system tempdir, so local dev and tests need no config.
+_DOWNLOAD_DIR = os.environ.get("SHAREPOINT_DOWNLOAD_DIR") or None
+# Skip PowerPoint decks last modified before this date. The old QBR/enablement
+# decks (2019-2021) are large, low-value, and their extracted text explodes into
+# thousands of chunks that stall the pipeline. pptx-only; empty string disables.
+_PPTX_MIN_MODIFIED = os.environ.get("SHAREPOINT_PPTX_MIN_MODIFIED", "2025-01-01")
+
+
+def _parse_cutoff_date(raw: str) -> datetime | None:
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw).replace(tzinfo=timezone.utc)
+    except ValueError:
+        logger.warning("Invalid SHAREPOINT_PPTX_MIN_MODIFIED=%r; cutoff disabled", raw)
+        return None
+
+
+_PPTX_MIN_MODIFIED_DT = _parse_cutoff_date(_PPTX_MIN_MODIFIED)
+
+
+def _file_extension(name: str) -> str:
+    """Lowercase extension without the leading dot ('' if none)."""
+    return name.rsplit(".", 1)[-1].lower() if "." in name else ""
+
+
+def _size_cap_for(ext: str) -> int:
+    return (
+        _LARGE_FILE_CAP_BYTES
+        if ext in _STREAM_TO_DISK_EXTENSIONS
+        else _DEFAULT_FILE_CAP_BYTES
+    )
+
+
+def _index_decision(
+    name: str, size: int, modified: datetime | None = None
+) -> tuple[bool, str]:
+    """(should_index, skip_reason). Allow-list + per-type size cap + pptx age
+    cutoff, decided on metadata BEFORE any download."""
+    ext = _file_extension(name)
+    if ext not in _ALLOWED_EXTENSIONS:
+        return False, f"extension '.{ext or '(none)'}' not in allow-list"
+    # pptx-only age cutoff: old decks are huge and chunk-storm the pipeline.
+    if (
+        ext in _STREAM_TO_DISK_EXTENSIONS
+        and _PPTX_MIN_MODIFIED_DT is not None
+        and modified is not None
+        and modified < _PPTX_MIN_MODIFIED_DT
+    ):
+        return False, f"pptx modified {modified.date()} < {_PPTX_MIN_MODIFIED_DT.date()}"
+    cap = _size_cap_for(ext)
+    if size > cap:
+        mib = 1024 * 1024
+        return False, f"{size / mib:.0f}MB over {cap / mib:.0f}MB cap"
+    return True, ""
 
 
 def _parse_retry_after(value: str | None) -> float | None:
@@ -202,14 +297,16 @@ def _convert_driveitem_to_document(
     return doc
 
 
-def _delta_item_to_document(item: dict[str, Any], content: bytes) -> Document:
+def _delta_item_to_document(item: dict[str, Any], file: IO[Any]) -> Document:
     """Build a Document from a Graph *delta* item (plain JSON, not an office365
-    object) + its downloaded bytes. Delta enumeration is the resumable, memory-
-    bounded path (see `load_from_checkpoint`)."""
+    object) + a file-like of its content. Delta enumeration is the resumable,
+    memory-bounded path (see `load_from_checkpoint`). `file` is either an
+    in-memory BytesIO (small files) or an open on-disk handle (streamed large
+    files, e.g. .pptx) — extract_file_text reads it lazily either way."""
     name = item.get("name") or item.get("id") or ""
     file_text = extract_file_text(
         file_name=name,
-        file=io.BytesIO(content),
+        file=file,
         break_on_unprocessable=False,
     )
     user = ((item.get("lastModifiedBy") or {}).get("user")) or {}
@@ -481,6 +578,95 @@ class SharepointConnector(
                     raise
                 time.sleep(min(2**attempt, 60))
         return None
+
+    def _download_item_to_file(
+        self, drive_id: str, item_id: str, label: str, dest_path: str
+    ) -> str | None:
+        """Stream a drive item's bytes to `dest_path` in 1MB chunks — never
+        holding the whole file in memory. This is the memory-bounded path for
+        large files (e.g. a 150MB .pptx): the content lands on the worker's
+        scratch disk, then extraction reads only the slide-text zip members from
+        it. Same retry/backoff/token handling as `_download_item_bytes`; a retry
+        truncates and rewrites the file. Returns the path on success, None on
+        404."""
+        url = f"{_GRAPH_BASE}/drives/{drive_id}/items/{item_id}/content"
+        for attempt in range(_GRAPH_MAX_RETRIES + 1):
+            # MSAL-cached bearer token, re-acquired per attempt (mid-run rotation
+            # picked up); never held long-lived, never logged.
+            headers = {"Authorization": f"Bearer {self._get_access_token()}"}
+            try:
+                with requests.get(
+                    url,
+                    headers=headers,
+                    timeout=_GRAPH_TIMEOUT_SECONDS,
+                    allow_redirects=True,
+                    stream=True,
+                ) as resp:
+                    if (
+                        resp.status_code in _GRAPH_RETRYABLE_STATUSES
+                        and attempt < _GRAPH_MAX_RETRIES
+                    ):
+                        wait = _backoff_seconds(
+                            attempt, resp.headers.get("Retry-After")
+                        )
+                        logger.warning(
+                            "Graph content %s on attempt %s, retrying in %.1fs: %s",
+                            resp.status_code,
+                            attempt + 1,
+                            wait,
+                            label,
+                        )
+                        time.sleep(wait)
+                        continue
+                    if resp.status_code == 404:
+                        return None
+                    resp.raise_for_status()
+                    with open(dest_path, "wb") as fh:
+                        for chunk in resp.iter_content(chunk_size=1024 * 1024):
+                            if chunk:
+                                fh.write(chunk)
+                    return dest_path
+            except _TRANSIENT_TRANSPORT_EXCEPTIONS:
+                if attempt >= _GRAPH_MAX_RETRIES:
+                    raise
+                time.sleep(min(2**attempt, 60))
+        return None
+
+    def _build_delta_document(
+        self, drive_id: str, item: dict[str, Any]
+    ) -> Document | None:
+        """Download + convert one delta item. Stream-to-disk types (.pptx) are
+        streamed to a scratch file and read from disk so a big deck never sits in
+        worker RAM; everything else (small, capped at the default limit) is
+        fetched into memory. Returns None if the content can't be fetched (404 /
+        non-downloadable)."""
+        name = item.get("name", "")
+        item_id = item["id"]
+        if _file_extension(name) in _STREAM_TO_DISK_EXTENSIONS:
+            if _DOWNLOAD_DIR:
+                os.makedirs(_DOWNLOAD_DIR, exist_ok=True)
+            # Random temp name — NEVER derived from the untrusted item name (no
+            # path traversal); the real name goes to extract_file_text only for
+            # type detection. Removed in `finally` so downloaded bytes never
+            # linger on the scratch disk.
+            fd, path = tempfile.mkstemp(
+                prefix="sp_", suffix=".download", dir=_DOWNLOAD_DIR
+            )
+            os.close(fd)
+            try:
+                if self._download_item_to_file(drive_id, item_id, name, path) is None:
+                    return None
+                with open(path, "rb") as fh:
+                    return _delta_item_to_document(item, fh)
+            finally:
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+        content = self._download_item_bytes(drive_id, item_id, name)
+        if content is None:
+            return None
+        return _delta_item_to_document(item, io.BytesIO(content))
 
     def _fetch_site_pages(
         self,
@@ -868,28 +1054,52 @@ class SharepointConnector(
                 )
                 while url:
                     data = self._graph_get(url)
+                    page_indexed = page_skipped = 0
                     for item in data.get("value", []):
                         if item.get("deleted") or not item.get("file"):
                             continue  # folders / root / removals
                         if not _site_page_in_time_window(item, start_dt, end_dt):
                             continue
-                        content = self._download_item_bytes(
-                            drive_id, item["id"], item.get("name", "")
+                        name = item.get("name", "")
+                        # Allow-list + size cap + pptx age cutoff on metadata,
+                        # BEFORE download, so media/archives/oversized/old files
+                        # never touch the worker.
+                        should_index, skip_reason = _index_decision(
+                            name,
+                            int(item.get("size", 0) or 0),
+                            _parse_graph_datetime(item.get("lastModifiedDateTime")),
                         )
-                        if content is None:
+                        if not should_index:
+                            page_skipped += 1
+                            logger.debug(
+                                "Skipping %s: %s",
+                                item.get("webUrl") or name,
+                                skip_reason,
+                            )
                             continue
                         try:
-                            batch.append(_delta_item_to_document(item, content))
+                            doc = self._build_delta_document(drive_id, item)
                         except Exception:
                             logger.exception(
-                                "Failed to convert delta item %s; skipping.",
+                                "Failed to fetch/convert delta item %s; skipping.",
                                 item.get("webUrl"),
                             )
                             continue
+                        if doc is None:
+                            continue
+                        batch.append(doc)
+                        page_indexed += 1
                         if len(batch) >= self.batch_size:
                             yield batch, None  # mid-page: not a resume point
                             batch = []
                     next_url = data.get("@odata.nextLink")
+                    if page_indexed or page_skipped:
+                        logger.info(
+                            "drive[%d] delta page: indexed=%d skipped=%d",
+                            di,
+                            page_indexed,
+                            page_skipped,
+                        )
                     # page done -> emit remainder + a clean, resumable checkpoint
                     yield batch, json.dumps(
                         {"phase": "drives", "drive_index": di, "delta_url": next_url}
