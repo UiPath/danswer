@@ -525,8 +525,14 @@ instantly, zero server round-trip in the UI), PUT in the background, revert the
 overlay + toast on failure. **No `router.refresh()`, no `reload()`.**
 
 **Rules:**
+- Settings writes are **field-level `PATCH /admin/settings`** (merges only the
+  keys you send over the stored settings), NOT a whole-object `PUT`. A whole-object
+  PUT sends every field, so a client saving one control with a **stale snapshot
+  silently clobbers other fields** — including server-set values the UI never
+  loaded (this wiped the assistant-router rulebook twice: a toggle PUT with an
+  empty `assistant_router_rules_prompt`). Send only what changed.
 - Do NOT call `router.refresh()` or `window.location.reload()` after a settings
-  PUT — both shake the page. Reflect the change with local optimistic state
+  write — both shake the page. Reflect the change with local optimistic state
   instead; the persisted value loads fresh on the next real navigation.
 - The instant optimistic flip *is* the feedback (fixes the "no feedback → user
   re-clicks" problem too). Add a success/error toast for persistence result.

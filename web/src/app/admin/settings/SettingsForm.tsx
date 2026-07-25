@@ -151,15 +151,15 @@ export function SettingsForm() {
     // background. Revert the optimistic edit on failure.
     setPending((prev) => ({ ...prev, ...newValues }));
 
+    // PATCH only the changed field(s) — a whole-object PUT would clobber other
+    // fields (incl. server-set values like the router rulebook) from a stale
+    // client snapshot. See AGENTS.md "### 13. Admin → Settings".
     const response = await fetch("/api/admin/settings", {
-      method: "PUT",
+      method: "PATCH",
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        ...settings,
-        ...newValues,
-      }),
+      body: JSON.stringify(newValues),
     });
     if (response.ok) {
       setPopup({ message: "Settings saved", type: "success" });
