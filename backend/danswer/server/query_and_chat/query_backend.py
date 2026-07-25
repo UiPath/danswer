@@ -9,8 +9,6 @@ from danswer.auth.api_key import validate_api_key
 from danswer.auth.schemas import UserRole
 from danswer.auth.users import current_admin_user
 from danswer.auth.users import current_user
-from danswer.configs.chat_configs import ASSISTANT_ROUTER_LLM_MODEL
-from danswer.configs.chat_configs import ASSISTANT_ROUTER_LLM_VENDOR
 from danswer.configs.chat_configs import AUTO_SEARCH_DEFAULT_LLM_MODEL
 from danswer.configs.chat_configs import AUTO_SEARCH_DEFAULT_LLM_VENDOR
 from danswer.configs.chat_configs import AUTO_SEARCH_SOURCE_TAB_ENABLED
@@ -21,19 +19,14 @@ from danswer.configs.chat_configs import AUTO_SEARCH_UNION_LLM_VENDOR
 from danswer.configs.chat_configs import AUTO_SEARCH_UNION_PERSONA_ID
 from danswer.configs.constants import DocumentSource
 from danswer.configs.constants import MessageType
-from danswer.db.constants import SLACK_BOT_PERSONA_PREFIX
 from danswer.db.embedding_model import get_current_db_embedding_model
 from danswer.db.engine import get_session
 from danswer.db.models import Persona
 from danswer.db.models import User
 from danswer.db.persona import get_persona_by_id
-from danswer.db.persona_cache import get_personas_for_user_cached
 from danswer.db.tag import get_tags_by_value_prefix_for_source_types
 from danswer.document_index.factory import get_default_document_index
 from danswer.document_index.vespa.index import VespaIndex
-from danswer.llm.factory import get_default_llms
-from danswer.llm.factory import get_llm
-from danswer.llm.interfaces import LLM
 from danswer.llm.override_models import LLMOverride
 from danswer.one_shot_answer.answer_question import get_search_answer
 from danswer.one_shot_answer.answer_question import stream_search_answer
@@ -47,13 +40,12 @@ from danswer.search.models import SearchDoc
 from danswer.search.preprocessing.access_filters import build_access_filters_for_user
 from danswer.search.preprocessing.danswer_helper import recommend_search_flow
 from danswer.search.utils import chunks_or_sections_to_search_docs
-from danswer.secondary_llm_flows.assistant_router import build_router_catalog
-from danswer.secondary_llm_flows.assistant_router import keyword_route
 from danswer.secondary_llm_flows.query_validation import get_query_answerability
 from danswer.secondary_llm_flows.query_validation import stream_query_answerability
-from danswer.secondary_llm_flows.slack_knn_router import build_channel_persona_map
-from danswer.secondary_llm_flows.slack_knn_router import knn_route
-from danswer.secondary_llm_flows.slack_knn_router import retrieve_slack_neighbors
+from danswer.secondary_llm_flows.search_routing import build_router_catalog_for_user
+from danswer.secondary_llm_flows.search_routing import DEFAULT_SEARCH_PERSONA_ID
+from danswer.secondary_llm_flows.search_routing import get_router_llm
+from danswer.secondary_llm_flows.search_routing import resolve_search_persona
 from danswer.server.middleware.request_rate_limit import (
     check_message_request_rate_limit,
 )
@@ -215,11 +207,6 @@ def get_answer_with_quote(
     return StreamingResponse(packets, media_type="application/json")
 
 
-# All-source default persona ("Darwin", id 0) — the router's fail-open fallback
-# when no assistant clearly fits the question.
-DEFAULT_SEARCH_PERSONA_ID = 0
-
-
 def _auto_search_allowed(rollout: AutoSearchRollout, user: User | None) -> bool:
     """Trusted-side rollout gate for the auto-routed Search tab. OFF blocks
     everyone; EVERYONE allows all; ADMIN_ONLY allows admins (and the no-auth
@@ -232,43 +219,6 @@ def _auto_search_allowed(rollout: AutoSearchRollout, user: User | None) -> bool:
     if user is None:
         return True
     return user.role == UserRole.ADMIN
-
-
-def _get_router_llm() -> LLM:
-    """The LLM used for assistant routing. When ASSISTANT_ROUTER_LLM_VENDOR +
-    ASSISTANT_ROUTER_LLM_MODEL are set (e.g. awsbedrock + Claude Sonnet), route
-    with that model for sharper selection; otherwise use the default fast LLM."""
-    if ASSISTANT_ROUTER_LLM_VENDOR and ASSISTANT_ROUTER_LLM_MODEL:
-        return get_llm(
-            provider=ASSISTANT_ROUTER_LLM_VENDOR, model=ASSISTANT_ROUTER_LLM_MODEL
-        )
-    _, fast_llm = get_default_llms()
-    return fast_llm
-
-
-def _get_router_catalog(user: User | None, db_session: Session) -> list:
-    """Build the router catalog from the user's accessible assistants.
-
-    Uses the Redis-backed persona cache (get_personas_for_user_cached), which is
-    ACL-filtered AND write-through invalidated on EVERY persona mutation (see
-    invalidate_personas_all() calls in db/persona.py) — so the catalog bursts and
-    repopulates whenever an admin updates an assistant, cross-worker, not just on
-    a TTL. When PERSONA_CACHE_ENABLED is false it falls back to a direct DB read.
-    We then drop the default ('Darwin', the fallback), Slack-bot, and hidden
-    personas — none are routing targets."""
-    snapshots = get_personas_for_user_cached(
-        user_id=user.id if user else None, db_session=db_session
-    )
-    routable = [
-        snapshot
-        for snapshot in snapshots
-        if snapshot.is_visible
-        and not snapshot.default_persona
-        and not snapshot.name.startswith(SLACK_BOT_PERSONA_PREFIX)
-        # Admin opt-out: exclude assistants flagged out of auto-routing.
-        and snapshot.is_router_candidate
-    ]
-    return build_router_catalog(routable)
 
 
 @basic_router.post("/auto-search")
@@ -311,41 +261,17 @@ def auto_search(
         target_persona_id = auto_search_request.persona_id
         routed_confidence = 1.0
     else:
-        # Auto-route. Catalog = the user's accessible, VISIBLE, non-Slack
-        # assistants via the Redis persona cache (busted on every assistant
-        # mutation). Fail-open: any LLM/availability issue -> all-source fallback.
-        catalog = _get_router_catalog(user, db_session)
-        target_persona_id = DEFAULT_SEARCH_PERSONA_ID
-        # 1) Deterministic keyword override (no LLM call) — additive: only fires
-        #    when a configured keyword matches; otherwise falls through.
-        kw = keyword_route(question, catalog)
-        if kw is not None and kw.persona_id is not None:
-            target_persona_id = kw.persona_id
-            routed_confidence = kw.confidence
-        else:
-            # 2) kNN-over-Slack fallback (replaces the LLM routing-instructions
-            #    logic): nearest-neighbor over past slack help-channel questions,
-            #    labeled channel -> persona, weighted vote + an LLM tiebreak on the
-            #    low-confidence cases. Self-maintaining; no routing_instructions.
-            #    The vote ranking populates ranks 2..N (the recommendations).
-            try:
-                neighbors = retrieve_slack_neighbors(question, db_session)
-                channel_map = build_channel_persona_map(db_session)
-                route = knn_route(
-                    question,
-                    neighbors,
-                    channel_map,
-                    catalog,
-                    _get_router_llm(),
-                    top_n=AUTO_SEARCH_TOP_N,
-                )
-                if route.persona_id is not None:
-                    target_persona_id = route.persona_id
-                routed_confidence = route.confidence
-                ranked_ids = route.ranked_ids
-                route_ambiguous = route.ambiguous
-            except Exception as e:
-                logger.warning("Auto-search routing unavailable, using fallback: %s", e)
+        # Auto-route via the shared resolver (identical decision to the Slack
+        # bot's Search mode). Catalog = the user's accessible, VISIBLE, non-Slack
+        # assistants; fail-open to the all-source default inside the resolver.
+        catalog = build_router_catalog_for_user(user, db_session)
+        resolution = resolve_search_persona(
+            question, catalog, get_router_llm(), db_session, top_n=AUTO_SEARCH_TOP_N
+        )
+        target_persona_id = resolution.persona_id
+        routed_confidence = resolution.confidence
+        ranked_ids = resolution.ranked_ids
+        route_ambiguous = resolution.ambiguous
 
     def _resolve(pid: int) -> Persona | None:
         """ACL-checked persona fetch; None if inaccessible/missing."""
