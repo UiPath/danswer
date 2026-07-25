@@ -18,8 +18,6 @@ export interface Settings {
   // AutoSearchRollout). The Search tab + endpoint are gated by this; the
   // backend enforces it independently of the UI.
   auto_search_rollout?: "off" | "admin_only" | "everyone";
-  // Enable the semantic intent pre-route (LLM phrase matcher). Default off.
-  auto_search_intent_enabled?: boolean;
   // Show two answers side by side (single top-1 vs union of top matches) for
   // AI-router picks on the Search tab. Default on.
   auto_search_compare_enabled?: boolean;

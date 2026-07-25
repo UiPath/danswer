@@ -4,7 +4,7 @@ import { Label, SubLabel } from "@/components/admin/connectors/Field";
 import { usePopup } from "@/components/admin/connectors/Popup";
 import { Title } from "@tremor/react";
 import { Settings } from "./interfaces";
-import { useRouter } from "next/navigation";
+import { Modal } from "@/components/Modal";
 import { DefaultDropdown, Option } from "@/components/Dropdown";
 import { useContext } from "react";
 import { SettingsContext } from "@/components/settings/SettingsProvider";
@@ -102,7 +102,6 @@ function IntegerInput({
 }
 
 export function SettingsForm() {
-  const router = useRouter();
   const combinedSettings = useContext(SettingsContext);
   const [chatRetention, setChatRetention] = useState("");
   const { popup, setPopup } = usePopup();
@@ -126,11 +125,18 @@ export function SettingsForm() {
       );
     }
   }, [combinedSettings?.settings.assistant_router_rules_prompt]);
+  const [rulesModalOpen, setRulesModalOpen] = useState(false);
+  // Optimistic overlay of in-flight local edits over the persisted settings.
+  const [pending, setPending] = useState<Partial<Settings>>({});
 
   if (!combinedSettings) {
     return null;
   }
-  const settings = combinedSettings.settings;
+  // Render from persisted settings + optimistic edits, so a toggle flips
+  // INSTANTLY with no server re-render. router.refresh()/window.location.reload()
+  // both visibly "shake" the page on every change — we avoid both. See AGENTS.md
+  // "### 13. Admin → Settings".
+  const settings = { ...combinedSettings.settings, ...pending } as Settings;
 
   async function updateSettingField(
     updateRequests: { fieldName: keyof Settings; newValue: any }[]
@@ -139,6 +145,11 @@ export function SettingsForm() {
     updateRequests.forEach(({ fieldName, newValue }) => {
       newValues[fieldName] = newValue;
     });
+
+    // Optimistic: reflect the change locally so the control updates INSTANTLY
+    // (no router.refresh()/reload() -> no page "shake"), then persist in the
+    // background. Revert the optimistic edit on failure.
+    setPending((prev) => ({ ...prev, ...newValues }));
 
     const response = await fetch("/api/admin/settings", {
       method: "PUT",
@@ -151,10 +162,20 @@ export function SettingsForm() {
       }),
     });
     if (response.ok) {
-      router.refresh();
+      setPopup({ message: "Settings saved", type: "success" });
     } else {
+      setPending((prev) => {
+        const reverted = { ...prev };
+        updateRequests.forEach(({ fieldName }) => {
+          delete reverted[fieldName];
+        });
+        return reverted;
+      });
       const errorMsg = (await response.json()).detail;
-      alert(`Failed to update settings. ${errorMsg}`);
+      setPopup({
+        message: `Failed to update settings. ${errorMsg}`,
+        type: "error",
+      });
     }
   }
 
@@ -195,15 +216,12 @@ export function SettingsForm() {
   }
 
   function handleSaveRouterRules() {
+    // Optimistic save (updateSettingField reflects it instantly + toasts the
+    // result); close the dialog immediately.
     updateSettingField([
       { fieldName: "assistant_router_rules_prompt", newValue: routerRules },
-    ])
-      .then(() => {
-        setPopup({ message: "Routing rules saved!", type: "success" });
-      })
-      .catch(() => {
-        setPopup({ message: "Failed to save routing rules.", type: "error" });
-      });
+    ]);
+    setRulesModalOpen(false);
   }
 
   return (
@@ -279,24 +297,6 @@ export function SettingsForm() {
       />
 
       <Checkbox
-        label="Enable semantic intent routing?"
-        sublabel={`If set, the auto-routed Search tab adds a semantic step (an LLM
-        matches the question against each assistant's routing "intent phrases")
-        between keyword routing and the AI router. Off by default — keyword and AI
-        routing are unaffected. Enable only after populating assistants' intent
-        phrases.`}
-        checked={settings.auto_search_intent_enabled ?? false}
-        onChange={(e) => {
-          updateSettingField([
-            {
-              fieldName: "auto_search_intent_enabled",
-              newValue: e.target.checked,
-            },
-          ]);
-        }}
-      />
-
-      <Checkbox
         label="Show side-by-side compare answers?"
         sublabel={`If set, the auto-routed Search tab shows two answers side by side
         for questions the AI router picks: the single top assistant's answer, and a
@@ -333,28 +333,78 @@ export function SettingsForm() {
         }}
       />
 
-      <label className="flex flex-col text-sm mb-4">
+      <div className="mb-6">
         <Label>Global routing rules</Label>
         <SubLabel>
-          One rule per line — e.g. &quot;Anything about Automation Suite →
-          Automation Suite&quot; or &quot;Who is the owner or product manager of a
-          product → Ownership&quot;. Only used when the toggle above is on.
+          Natural-language rules mapping questions to assistants (one per line).
+          Only used when the toggle above is on. The rulebook can be long, so
+          it&apos;s edited in a dialog.
         </SubLabel>
-        <textarea
-          className="mt-1 p-2 border rounded w-full min-h-[120px] font-mono text-xs"
-          value={routerRules}
-          onChange={(e) => setRouterRules(e.target.value)}
-          placeholder={
-            "Anything about Automation Suite -> Automation Suite\n" +
-            "Who is the owner or product manager of a product -> Ownership"
-          }
-        />
-        <div className="mt-2">
-          <Button onClick={handleSaveRouterRules} color="green" size="xs">
-            Save rules
+        <div className="mt-2 flex items-center gap-3">
+          <Button
+            onClick={() => setRulesModalOpen(true)}
+            color="green"
+            size="xs"
+          >
+            Edit rules
           </Button>
+          <span className="text-xs text-subtle">
+            {(settings.assistant_router_rules_prompt ?? "").trim()
+              ? `${
+                  (settings.assistant_router_rules_prompt ?? "")
+                    .split("\n")
+                    .filter((line) => line.trim()).length
+                } rule(s) configured`
+              : "No rules configured"}
+          </span>
         </div>
-      </label>
+      </div>
+
+      {rulesModalOpen && (
+        <Modal
+          title="Global routing rules"
+          width="w-3/6 xl:w-[800px]"
+          onOutsideClick={() => {
+            setRouterRules(settings.assistant_router_rules_prompt ?? "");
+            setRulesModalOpen(false);
+          }}
+        >
+          <div className="flex flex-col text-sm">
+            <SubLabel>
+              One rule per line — e.g. &quot;Anything about Automation Suite →
+              Automation Suite&quot; or &quot;Who is the owner or product manager
+              of a product → Ownership&quot;. An LLM applies these between keyword
+              routing and the AI router: a matching rule overrides the AI router
+              (never a hard keyword match), and anything unmatched falls through
+              to the AI router.
+            </SubLabel>
+            <textarea
+              className="mt-2 p-2 border rounded w-full min-h-[320px] font-mono text-xs"
+              value={routerRules}
+              onChange={(e) => setRouterRules(e.target.value)}
+              placeholder={
+                "Anything about Automation Suite -> Automation Suite\n" +
+                "Who is the owner or product manager of a product -> Ownership"
+              }
+            />
+            <div className="mt-4 flex gap-3 justify-end">
+              <Button
+                onClick={() => {
+                  setRouterRules(settings.assistant_router_rules_prompt ?? "");
+                  setRulesModalOpen(false);
+                }}
+                color="blue"
+                size="xs"
+              >
+                Cancel
+              </Button>
+              <Button onClick={handleSaveRouterRules} color="green" size="xs">
+                Save rules
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
 
       <Selector
         label="Auto-Search (assistant routing) rollout"
