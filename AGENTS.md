@@ -506,6 +506,41 @@ prod push uses the `~/.zshrc` ACR_USERNAME/ACR_PASSWORD admin creds.)
 
 ---
 
+### 13. Admin → Settings controls: use OPTIMISTIC local state — never re-render from the server on a toggle
+
+`SettingsForm.tsx::updateSettingField` PUTs the whole `Settings` object to
+`/api/admin/settings`. The **read-back** is the trap. Both server-driven refresh
+approaches make the whole page visibly **"shake"/flash on every toggle**:
+
+- `window.location.reload()` — obvious full-page reload (worst).
+- `router.refresh()` — a soft re-fetch, but it still re-renders the root
+  `layout.tsx` (which re-reads the module-level `cachedSettings` in
+  `web/src/components/settings/lib.ts` via `no-store`), and that reflow reads as a
+  flash/jump on each change.
+
+**The fix (current):** render from an **optimistic overlay** —
+`settings = { ...combinedSettings.settings, ...pending }`, where `pending` is a
+`useState<Partial<Settings>>`. On change: `setPending(...)` (control flips
+instantly, zero server round-trip in the UI), PUT in the background, revert the
+overlay + toast on failure. **No `router.refresh()`, no `reload()`.**
+
+**Rules:**
+- Do NOT call `router.refresh()` or `window.location.reload()` after a settings
+  PUT — both shake the page. Reflect the change with local optimistic state
+  instead; the persisted value loads fresh on the next real navigation.
+- The instant optimistic flip *is* the feedback (fixes the "no feedback → user
+  re-clicks" problem too). Add a success/error toast for persistence result.
+- Don't confuse "no feedback" with "broken." Before assuming a toggle doesn't
+  persist, check the backend (`load_settings()` server-side) — the PUT usually
+  worked. **Verify a toggle STICKS** (round-trips); `PUT 200` ≠ "works in the UI"
+  — same class as the Slack channel-config whitelist (a new field silently not
+  surfacing).
+- New `Settings` fields are default-on-absence: they take the model default until
+  first persisted, so a fresh deploy ships them at their default with no
+  migration.
+
+---
+
 ## Common workflows
 
 ### Add a new connector
