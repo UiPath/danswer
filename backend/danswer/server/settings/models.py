@@ -40,6 +40,16 @@ class Settings(BaseModel):
     # instruction router). Default False — OFF — so it stays dark until an admin
     # enables it in Admin → Settings; keyword + instruction routing are unaffected.
     auto_search_intent_enabled: bool = False
+    # Global admin routing rulebook: a natural-language set of rules, evaluated by
+    # the router LLM BETWEEN the deterministic keyword route and the kNN fallback.
+    # When a rule clearly maps a question to an assistant, it overrides the kNN
+    # (but never a hard keyword match, which runs first). Fail-open: no match ->
+    # fall through to kNN. Gated by `assistant_router_rules_enabled` (default OFF,
+    # so it ships dark); edit the flag + prompt in Admin → Settings, no redeploy.
+    # Applies to BOTH the web Search tab and the Slack bot's Search mode (shared
+    # resolver). Keep the rulebook small + authoritative — kNN handles the tail.
+    assistant_router_rules_enabled: bool = False
+    assistant_router_rules_prompt: str = ""
     # Side-by-side compare on the Search tab: alongside the single top-1 answer,
     # also answer over the UNION of the router's top-N assistants' document sets
     # (answered by AUTO_SEARCH_UNION_LLM_*, default Sonnet). Only runs on LLM-router

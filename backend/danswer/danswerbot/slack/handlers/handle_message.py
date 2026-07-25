@@ -82,6 +82,7 @@ from danswer.secondary_llm_flows.search_routing import build_router_catalog_for_
 from danswer.secondary_llm_flows.search_routing import DEFAULT_SEARCH_PERSONA_ID
 from danswer.secondary_llm_flows.search_routing import get_router_llm
 from danswer.secondary_llm_flows.search_routing import resolve_search_persona
+from danswer.server.settings.store import load_settings
 from danswer.utils.logger import setup_logger
 
 logger_base = setup_logger()
@@ -244,8 +245,17 @@ def _route_search_persona(
                 # Conservative: no routing for an unresolved sender.
                 return None, []
             catalog = build_router_catalog_for_user(acl_user, db_session)
+            settings = load_settings()
             resolution = resolve_search_persona(
-                query, catalog, get_router_llm(), db_session
+                query,
+                catalog,
+                get_router_llm(),
+                db_session,
+                rules_prompt=(
+                    settings.assistant_router_rules_prompt
+                    if settings.assistant_router_rules_enabled
+                    else None
+                ),
             )
             # Map the router's ranked ids -> display names for the footer, dropping
             # whoever actually answered (the top pick / the default).

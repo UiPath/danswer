@@ -266,7 +266,16 @@ def auto_search(
         # assistants; fail-open to the all-source default inside the resolver.
         catalog = build_router_catalog_for_user(user, db_session)
         resolution = resolve_search_persona(
-            question, catalog, get_router_llm(), db_session, top_n=AUTO_SEARCH_TOP_N
+            question,
+            catalog,
+            get_router_llm(),
+            db_session,
+            top_n=AUTO_SEARCH_TOP_N,
+            rules_prompt=(
+                settings.assistant_router_rules_prompt
+                if settings.assistant_router_rules_enabled
+                else None
+            ),
         )
         target_persona_id = resolution.persona_id
         routed_confidence = resolution.confidence
