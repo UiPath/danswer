@@ -534,6 +534,14 @@ overlay + toast on failure. **No `router.refresh()`, no `reload()`.**
 - Do NOT call `router.refresh()` or `window.location.reload()` after a settings
   write — both shake the page. Reflect the change with local optimistic state
   instead; the persisted value loads fresh on the next real navigation.
+- Do NOT memoize the server-side settings read in a **module-level variable**
+  (`web/src/components/settings/lib.ts::getCombinedSettings`). Module state in the
+  Next server is shared across **all requests/users** in the process, so a cache
+  there serves **stale settings to everyone until the pod restarts** — it hid a
+  rule set directly in the store *even in a fresh browser*, and `RootLayout` fed
+  that stale value into `SettingsContext`. `getCombinedSettings` must fetch fresh
+  (`fetchSettingsSS`, `no-store`) every call; use React `cache()` for
+  per-*request* dedup if needed, never module scope.
 - The instant optimistic flip *is* the feedback (fixes the "no feedback → user
   re-clicks" problem too). Add a success/error toast for persistence result.
 - Don't confuse "no feedback" with "broken." Before assuming a toggle doesn't

@@ -38,15 +38,13 @@ export interface CombinedSettings {
   customAnalyticsScript: string | null;
 }
 
-let cachedSettings: CombinedSettings;
-
-export async function getCombinedSettings({
-  forceRetrieval,
-}: {
+export async function getCombinedSettings(_opts?: {
   forceRetrieval?: boolean;
 }): Promise<CombinedSettings> {
-  if (!cachedSettings || forceRetrieval) {
-    cachedSettings = await fetchSettingsSS();
-  }
-  return cachedSettings;
+  // Always fetch fresh. A module-level cache here is shared across ALL requests
+  // in the Next server process, so it serves STALE settings to every user until
+  // the pod restarts — it hid a freshly-set routing rule and made settings
+  // toggles look like they reverted. fetchSettingsSS is `no-store`, so the
+  // per-request cost is one cheap internal call. See AGENTS.md "### 13".
+  return await fetchSettingsSS();
 }
