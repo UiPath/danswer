@@ -116,6 +116,17 @@ export function SettingsForm() {
     }
   }, [combinedSettings?.settings.maximum_chat_retention_days]);
 
+  const [routerRules, setRouterRules] = useState("");
+  useEffect(() => {
+    if (
+      combinedSettings?.settings.assistant_router_rules_prompt !== undefined
+    ) {
+      setRouterRules(
+        combinedSettings.settings.assistant_router_rules_prompt || ""
+      );
+    }
+  }, [combinedSettings?.settings.assistant_router_rules_prompt]);
+
   if (!combinedSettings) {
     return null;
   }
@@ -181,6 +192,18 @@ export function SettingsForm() {
         type: "success",
       });
     });
+  }
+
+  function handleSaveRouterRules() {
+    updateSettingField([
+      { fieldName: "assistant_router_rules_prompt", newValue: routerRules },
+    ])
+      .then(() => {
+        setPopup({ message: "Routing rules saved!", type: "success" });
+      })
+      .catch(() => {
+        setPopup({ message: "Failed to save routing rules.", type: "error" });
+      });
   }
 
   return (
@@ -291,6 +314,47 @@ export function SettingsForm() {
           ]);
         }}
       />
+
+      <Checkbox
+        label="Enable global routing rules?"
+        sublabel={`If set, an LLM applies your natural-language routing rules
+        (below) BETWEEN keyword routing and the AI (kNN) router — overriding the
+        AI router when a rule clearly applies, but never a hard keyword match.
+        Applies to both the Search tab and the Slack bot. Off by default. Keep the
+        rulebook small and authoritative; the AI router handles everything else.`}
+        checked={settings.assistant_router_rules_enabled ?? false}
+        onChange={(e) => {
+          updateSettingField([
+            {
+              fieldName: "assistant_router_rules_enabled",
+              newValue: e.target.checked,
+            },
+          ]);
+        }}
+      />
+
+      <label className="flex flex-col text-sm mb-4">
+        <Label>Global routing rules</Label>
+        <SubLabel>
+          One rule per line — e.g. &quot;Anything about Automation Suite →
+          Automation Suite&quot; or &quot;Who is the owner or product manager of a
+          product → Ownership&quot;. Only used when the toggle above is on.
+        </SubLabel>
+        <textarea
+          className="mt-1 p-2 border rounded w-full min-h-[120px] font-mono text-xs"
+          value={routerRules}
+          onChange={(e) => setRouterRules(e.target.value)}
+          placeholder={
+            "Anything about Automation Suite -> Automation Suite\n" +
+            "Who is the owner or product manager of a product -> Ownership"
+          }
+        />
+        <div className="mt-2">
+          <Button onClick={handleSaveRouterRules} color="green" size="xs">
+            Save rules
+          </Button>
+        </div>
+      </label>
 
       <Selector
         label="Auto-Search (assistant routing) rollout"

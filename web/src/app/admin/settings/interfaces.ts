@@ -23,6 +23,11 @@ export interface Settings {
   // Show two answers side by side (single top-1 vs union of top matches) for
   // AI-router picks on the Search tab. Default on.
   auto_search_compare_enabled?: boolean;
+  // Global admin routing rulebook (mirrors backend). When enabled, an LLM applies
+  // these natural-language rules BETWEEN the keyword route and the kNN fallback,
+  // overriding kNN (never a hard keyword). Applies to the web Search tab + Slack.
+  assistant_router_rules_enabled?: boolean;
+  assistant_router_rules_prompt?: string;
 }
 
 export interface EnterpriseSettings {
