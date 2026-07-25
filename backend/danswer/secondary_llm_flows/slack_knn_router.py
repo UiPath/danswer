@@ -120,7 +120,14 @@ def retrieve_slack_neighbors(
             json={
                 "yql": yql,
                 "input.query(query_embedding)": str(embedding),
-                "ranking.profile": f"hybrid_search{len(embedding)}",
+                # PURE VECTOR: rank purely by embedding closeness of the question
+                # against each slack chunk-0 doc. The hybrid profile's global-phase
+                # blends in BM25 weighted by query(alpha) (default 0) — but this
+                # request sends no keyword terms, so hybrid collapsed every hit to
+                # a flat 0.5 relevance and destroyed the kNN ordering. semantic_search
+                # is first-phase closeness(field, embeddings) only, needs no extra
+                # query inputs, and gives real, varied similarity scores.
+                "ranking.profile": f"semantic_search{len(embedding)}",
                 "hits": top_k,
                 "timeout": _VESPA_TIMEOUT,
             },
