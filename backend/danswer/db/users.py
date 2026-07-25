@@ -49,3 +49,12 @@ def add_slack_persona_for_user(
     user_slack_persona.persona = persona
 
     db_session.commit()
+
+
+def clear_user_slack_persona(db_session: Session, sender_id: str) -> None:
+    """Remove a user's sticky Slack assistant so the bot reverts to the default
+    Search experience. No-op if none was set."""
+    existing = fetch_user_slack_persona(db_session=db_session, sender_id=sender_id)
+    if existing is not None:
+        db_session.delete(existing)
+        db_session.commit()
