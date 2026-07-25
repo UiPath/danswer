@@ -36,10 +36,6 @@ class Settings(BaseModel):
     # feature ships dark-to-users on deploy; an admin flips it to EVERYONE in
     # Admin -> Settings when ready. See AutoSearchRollout.
     auto_search_rollout: AutoSearchRollout = AutoSearchRollout.ADMIN_ONLY
-    # Semantic intent pre-route (the LLM phrase router between keyword and the LLM
-    # instruction router). Default False — OFF — so it stays dark until an admin
-    # enables it in Admin → Settings; keyword + instruction routing are unaffected.
-    auto_search_intent_enabled: bool = False
     # Global admin routing rulebook: a natural-language set of rules, evaluated by
     # the router LLM BETWEEN the deterministic keyword route and the kNN fallback.
     # When a rule clearly maps a question to an assistant, it overrides the kNN
