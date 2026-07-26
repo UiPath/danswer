@@ -23,8 +23,8 @@ from danswer.llm.interfaces import LLM
 from danswer.llm.utils import message_to_string
 from danswer.secondary_llm_flows.assistant_router import build_router_catalog
 from danswer.secondary_llm_flows.assistant_router import keyword_route
-from danswer.secondary_llm_flows.assistant_router import RouteResult
 from danswer.secondary_llm_flows.assistant_router import RouterCatalogEntry
+from danswer.secondary_llm_flows.assistant_router import RouteResult
 from danswer.secondary_llm_flows.slack_knn_router import build_channel_persona_map
 from danswer.secondary_llm_flows.slack_knn_router import knn_route
 from danswer.secondary_llm_flows.slack_knn_router import retrieve_slack_neighbors
@@ -159,7 +159,8 @@ def resolve_search_persona(
     Settings flag) runs BETWEEN keyword and kNN: an LLM applies the rules and, on
     a clear match, overrides the kNN. It never overrides a hard keyword match.
 
-    Fail-OPEN: any error -> the all-source default persona (DEFAULT_SEARCH_PERSONA_ID)."""
+    Fail-OPEN: any error -> the all-source default persona (DEFAULT_SEARCH_PERSONA_ID).
+    """
 
     def _routed(pid: int, conf: float) -> RouteResolution:
         return RouteResolution(

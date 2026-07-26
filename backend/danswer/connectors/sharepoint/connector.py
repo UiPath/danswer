@@ -155,7 +155,10 @@ def _index_decision(
         and modified is not None
         and modified < _PPTX_MIN_MODIFIED_DT
     ):
-        return False, f"pptx modified {modified.date()} < {_PPTX_MIN_MODIFIED_DT.date()}"
+        return (
+            False,
+            f"pptx modified {modified.date()} < {_PPTX_MIN_MODIFIED_DT.date()}",
+        )
     cap = _size_cap_for(ext)
     if size > cap:
         mib = 1024 * 1024

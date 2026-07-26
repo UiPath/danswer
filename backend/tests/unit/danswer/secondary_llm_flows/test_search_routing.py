@@ -4,6 +4,7 @@ primitives (keyword_route, knn_route) are stubbed; we assert the orchestration:
 keyword override wins first, kNN is the fallback, and everything fails OPEN to the
 all-source default."""
 from danswer.secondary_llm_flows import search_routing as sr
+from danswer.secondary_llm_flows.assistant_router import RouterCatalogEntry
 from danswer.secondary_llm_flows.assistant_router import RouteResult
 
 _DB = object()
@@ -27,7 +28,9 @@ def test_keyword_route_wins_and_skips_knn(monkeypatch) -> None:
     )
     knn_calls: list = []
     monkeypatch.setattr(sr, "knn_route", lambda *a, **k: knn_calls.append(1))
-    monkeypatch.setattr(sr, "retrieve_slack_neighbors", lambda q, db: knn_calls.append(1))
+    monkeypatch.setattr(
+        sr, "retrieve_slack_neighbors", lambda q, db: knn_calls.append(1)
+    )
 
     res = sr.resolve_search_persona("reset orchestrator robot", _CATALOG, _LLM, _DB)
 
@@ -42,7 +45,9 @@ def test_knn_fallback_routes_and_ranks(monkeypatch) -> None:
     _no_keyword(monkeypatch)
     _stub_knn(
         monkeypatch,
-        RouteResult(persona_id=12, confidence=0.8, ranked_ids=[12, 5, 9], ambiguous=True),
+        RouteResult(
+            persona_id=12, confidence=0.8, ranked_ids=[12, 5, 9], ambiguous=True
+        ),
     )
 
     res = sr.resolve_search_persona("how do I configure X", _CATALOG, _LLM, _DB)
@@ -80,8 +85,6 @@ def test_knn_exception_fails_open(monkeypatch) -> None:
 
 
 # --- global admin rulebook stage (between keyword and kNN) -------------------
-from danswer.secondary_llm_flows.assistant_router import RouterCatalogEntry  # noqa: E402
-
 _CAT = [
     RouterCatalogEntry(persona_id=122, name="Fantastic", keywords=[]),
     RouterCatalogEntry(persona_id=315, name="Ownership", keywords=[]),
@@ -100,7 +103,9 @@ class _FakeLLM:
 
 def test_global_rule_route_matches_named_assistant(monkeypatch) -> None:
     monkeypatch.setattr(sr, "message_to_string", lambda x: x)
-    r = sr.global_rule_route("who owns pepsico", _CAT, _FakeLLM("Ownership"), "owner Qs -> Ownership")
+    r = sr.global_rule_route(
+        "who owns pepsico", _CAT, _FakeLLM("Ownership"), "owner Qs -> Ownership"
+    )
     assert r is not None and r.persona_id == 315 and r.confidence == 1.0
 
 
@@ -132,20 +137,34 @@ def test_global_rule_route_llm_exception_fails_open(monkeypatch) -> None:
 
 
 def test_keyword_beats_rule(monkeypatch) -> None:
-    monkeypatch.setattr(sr, "keyword_route", lambda q, c: RouteResult(persona_id=7, confidence=1.0))
+    monkeypatch.setattr(
+        sr, "keyword_route", lambda q, c: RouteResult(persona_id=7, confidence=1.0)
+    )
     rule_calls: list = []
     monkeypatch.setattr(sr, "global_rule_route", lambda *a, **k: rule_calls.append(1))
     res = sr.resolve_search_persona("q", _CAT, object(), object(), rules_prompt="rules")
-    assert res.persona_id == 7 and rule_calls == []  # keyword wins; rule never consulted
+    assert (
+        res.persona_id == 7 and rule_calls == []
+    )  # keyword wins; rule never consulted
 
 
 def test_rule_runs_between_keyword_and_knn(monkeypatch) -> None:
     monkeypatch.setattr(sr, "keyword_route", lambda q, c: None)
-    monkeypatch.setattr(sr, "global_rule_route", lambda q, c, llm, rules: RouteResult(persona_id=315, confidence=1.0))
+    monkeypatch.setattr(
+        sr,
+        "global_rule_route",
+        lambda q, c, llm, rules: RouteResult(persona_id=315, confidence=1.0),
+    )
     knn_calls: list = []
-    monkeypatch.setattr(sr, "retrieve_slack_neighbors", lambda q, db: knn_calls.append(1))
-    res = sr.resolve_search_persona("who owns X", _CAT, object(), object(), rules_prompt="owner -> Ownership")
-    assert res.persona_id == 315 and res.routed is True and knn_calls == []  # rule overrides kNN
+    monkeypatch.setattr(
+        sr, "retrieve_slack_neighbors", lambda q, db: knn_calls.append(1)
+    )
+    res = sr.resolve_search_persona(
+        "who owns X", _CAT, object(), object(), rules_prompt="owner -> Ownership"
+    )
+    assert (
+        res.persona_id == 315 and res.routed is True and knn_calls == []
+    )  # rule overrides kNN
 
 
 def test_rule_skipped_when_flag_off_no_prompt(monkeypatch) -> None:
@@ -154,16 +173,28 @@ def test_rule_skipped_when_flag_off_no_prompt(monkeypatch) -> None:
     monkeypatch.setattr(sr, "global_rule_route", lambda *a, **k: rule_calls.append(1))
     monkeypatch.setattr(sr, "retrieve_slack_neighbors", lambda q, db: [])
     monkeypatch.setattr(sr, "build_channel_persona_map", lambda db: {})
-    monkeypatch.setattr(sr, "knn_route", lambda *a, **k: RouteResult(persona_id=5, confidence=0.7, ranked_ids=[5]))
+    monkeypatch.setattr(
+        sr,
+        "knn_route",
+        lambda *a, **k: RouteResult(persona_id=5, confidence=0.7, ranked_ids=[5]),
+    )
     res = sr.resolve_search_persona("q", _CAT, object(), object(), rules_prompt=None)
-    assert res.persona_id == 5 and rule_calls == []  # no prompt -> rule stage skipped -> kNN
+    assert (
+        res.persona_id == 5 and rule_calls == []
+    )  # no prompt -> rule stage skipped -> kNN
 
 
 def test_rule_miss_falls_through_to_knn(monkeypatch) -> None:
     monkeypatch.setattr(sr, "keyword_route", lambda q, c: None)
-    monkeypatch.setattr(sr, "global_rule_route", lambda *a, **k: None)  # rule didn't match
+    monkeypatch.setattr(
+        sr, "global_rule_route", lambda *a, **k: None
+    )  # rule didn't match
     monkeypatch.setattr(sr, "retrieve_slack_neighbors", lambda q, db: [])
     monkeypatch.setattr(sr, "build_channel_persona_map", lambda db: {})
-    monkeypatch.setattr(sr, "knn_route", lambda *a, **k: RouteResult(persona_id=5, confidence=0.7, ranked_ids=[5]))
+    monkeypatch.setattr(
+        sr,
+        "knn_route",
+        lambda *a, **k: RouteResult(persona_id=5, confidence=0.7, ranked_ids=[5]),
+    )
     res = sr.resolve_search_persona("q", _CAT, object(), object(), rules_prompt="rules")
     assert res.persona_id == 5

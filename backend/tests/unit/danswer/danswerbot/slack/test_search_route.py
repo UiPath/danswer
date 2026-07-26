@@ -51,7 +51,9 @@ def test_unresolved_sender_never_routes(monkeypatch) -> None:
     _patch_db(monkeypatch)
     monkeypatch.setattr(hm, "get_user_by_email", lambda email, db_session: None)
     resolve_calls: list = []
-    monkeypatch.setattr(hm, "resolve_search_persona", lambda *a, **k: resolve_calls.append(1))
+    monkeypatch.setattr(
+        hm, "resolve_search_persona", lambda *a, **k: resolve_calls.append(1)
+    )
 
     persona, recs = hm._route_search_persona("q", sender_id="U1", client=_FakeClient())
 
@@ -83,7 +85,9 @@ def test_routes_to_assistant_when_resolver_picks_one(monkeypatch) -> None:
         ),
     )
     monkeypatch.setattr(
-        hm, "get_persona_with_docset_and_prompts", lambda persona_id, db_session: routed_persona
+        hm,
+        "get_persona_with_docset_and_prompts",
+        lambda persona_id, db_session: routed_persona,
     )
 
     persona, recs = hm._route_search_persona(
@@ -104,7 +108,9 @@ def test_default_route_returns_none(monkeypatch) -> None:
         ),
     )
 
-    persona, recs = hm._route_search_persona("vague", sender_id="U1", client=_FakeClient())
+    persona, recs = hm._route_search_persona(
+        "vague", sender_id="U1", client=_FakeClient()
+    )
 
     assert persona is None  # not routed -> keep all-source default
 
@@ -137,12 +143,18 @@ def test_recommendations_mapped_and_exclude_answerer(monkeypatch) -> None:
         hm,
         "resolve_search_persona",
         lambda *a, **k: RouteResolution(
-            persona_id=12, confidence=0.8, ranked_ids=[12, 5, 9], ambiguous=False, routed=True
+            persona_id=12,
+            confidence=0.8,
+            ranked_ids=[12, 5, 9],
+            ambiguous=False,
+            routed=True,
         ),
     )
     routed_persona = object()
     monkeypatch.setattr(
-        hm, "get_persona_with_docset_and_prompts", lambda persona_id, db_session: routed_persona
+        hm,
+        "get_persona_with_docset_and_prompts",
+        lambda persona_id, db_session: routed_persona,
     )
 
     persona, recs = hm._route_search_persona("q", sender_id="U1", client=_FakeClient())

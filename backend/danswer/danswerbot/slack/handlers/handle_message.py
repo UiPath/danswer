@@ -234,9 +234,7 @@ def _route_search_persona(
                         .get("email")
                     )
                     if email:
-                        acl_user = get_user_by_email(
-                            email=email, db_session=db_session
-                        )
+                        acl_user = get_user_by_email(email=email, db_session=db_session)
             except Exception:
                 logger_base.warning(
                     "search route: could not resolve Slack sender for ACL"
@@ -281,9 +279,7 @@ def _route_search_persona(
         return None, []
 
 
-def _build_search_footer_block(
-    answered_by: str, recommendations: list[str]
-) -> list:
+def _build_search_footer_block(answered_by: str, recommendations: list[str]) -> list:
     """A small context footer for Search-mode answers: which assistant answered +
     the router's next-best assistants the user can switch to."""
     parts = [f":mag: Answered by *{answered_by}*"]

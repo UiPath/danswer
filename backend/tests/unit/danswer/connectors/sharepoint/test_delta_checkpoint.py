@@ -9,15 +9,12 @@ import os
 from datetime import datetime
 from datetime import timezone
 
-import pytest
-
 from danswer.connectors.sharepoint import connector as sp
 from danswer.connectors.sharepoint.connector import _DEFAULT_FILE_CAP_BYTES
 from danswer.connectors.sharepoint.connector import _delta_item_to_document
 from danswer.connectors.sharepoint.connector import _index_decision
 from danswer.connectors.sharepoint.connector import _LARGE_FILE_CAP_BYTES
 from danswer.connectors.sharepoint.connector import SCOPE_DOCUMENTS
-from danswer.connectors.sharepoint.connector import SCOPE_FULL
 from danswer.connectors.sharepoint.connector import SharepointConnector
 
 
@@ -117,7 +114,9 @@ def test_load_from_checkpoint_mid_page_batches_have_no_checkpoint() -> None:
     conn = SharepointConnector(sites=[], scrape_scope=SCOPE_DOCUMENTS)
     conn.batch_size = 1
     pages = {
-        "BASE": {"value": [_file("a", "a.txt"), _file("b", "b.txt")]},  # 1 page, 2 files
+        "BASE": {
+            "value": [_file("a", "a.txt"), _file("b", "b.txt")]
+        },  # 1 page, 2 files
     }
     _stub_drives_only(conn, pages)
 
@@ -213,7 +212,10 @@ def test_load_from_checkpoint_skips_disallowed_and_oversized(monkeypatch) -> Non
             "value": [
                 _file("ok", "ok.txt"),
                 _file("vid", "movie.mp4"),  # disallowed ext -> skip
-                {**_file("big", "big.pdf"), "size": _DEFAULT_FILE_CAP_BYTES + 1},  # skip
+                {
+                    **_file("big", "big.pdf"),
+                    "size": _DEFAULT_FILE_CAP_BYTES + 1,
+                },  # skip
                 _file("deck", "deck.pptx"),  # allowed (pptx disk path)
             ]
         },
@@ -235,13 +237,16 @@ def test_load_from_checkpoint_skips_disallowed_and_oversized(monkeypatch) -> Non
     monkeypatch.setattr(
         sp,
         "_delta_item_to_document",
-        lambda item, file: (file.read(), sp.Document(
-            id=item["id"],
-            sections=[sp.Section(link=item.get("webUrl"), text="x")],
-            source=sp.DocumentSource.SHAREPOINT,
-            semantic_identifier=item.get("name"),
-            metadata={},
-        ))[1],
+        lambda item, file: (
+            file.read(),
+            sp.Document(
+                id=item["id"],
+                sections=[sp.Section(link=item.get("webUrl"), text="x")],
+                source=sp.DocumentSource.SHAREPOINT,
+                semantic_identifier=item.get("name"),
+                metadata={},
+            ),
+        )[1],
     )
 
     out = list(conn.load_from_checkpoint(0.0, 9_000_000_000.0, None))
