@@ -1803,3 +1803,64 @@ class OnboardingRequest(Base):
         server_default=func.now(),
         onupdate=func.now(),
     )
+
+
+class AnswerTrace(Base):
+    """Operator-facing provenance for a single answer (chat or search): the
+    branch-level pipeline decisions that produced it. One row per answer.
+
+    Filterable dimensions are promoted to columns; the ordered per-stage detail
+    lives in `events` (JSONB). Events reference doc/chunk IDENTIFIERS, never chunk
+    content, and record deterministic decisions actually taken — no reconstructed
+    or LLM-narrated reasoning. Written on-by-default; pruned by retention
+    (default 14 days). See danswer/answer_trace/ and DEEP_RAG.md.
+    """
+
+    __tablename__ = "answer_trace"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # universal handle returned to the client; works for chat AND search
+    trace_uuid: Mapped[UUID] = mapped_column(
+        postgresql.UUID(as_uuid=True), unique=True, index=True, nullable=False
+    )
+    # nullable: the search surface has no chat_message
+    chat_message_id: Mapped[int | None] = mapped_column(
+        ForeignKey("chat_message.id", ondelete="CASCADE"), unique=True, nullable=True
+    )
+    chat_session_id: Mapped[int | None] = mapped_column(
+        Integer, index=True, nullable=True
+    )
+    user_id: Mapped[UUID | None] = mapped_column(
+        postgresql.UUID(as_uuid=True), index=True, nullable=True
+    )
+    surface: Mapped[str] = mapped_column(String, nullable=False)
+    persona_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), index=True
+    )
+
+    query: Mapped[str] = mapped_column(Text, nullable=False)
+    rephrased_query: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    route_stage: Mapped[str | None] = mapped_column(String, nullable=True)
+    route_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    retrieved_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    reranked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    cited_source_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    deep_rag_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    deep_rag_escalated: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    sub_question_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    model: Mapped[str | None] = mapped_column(String, nullable=True)
+    total_duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    trace_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    events: Mapped[list] = mapped_column(
+        postgresql.JSONB(), nullable=False, default=list
+    )

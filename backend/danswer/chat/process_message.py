@@ -5,6 +5,10 @@ from typing import cast
 
 from sqlalchemy.orm import Session
 
+from danswer.answer_trace.tracer import finalize_and_persist
+from danswer.answer_trace.tracer import record_deep_rag
+from danswer.answer_trace.tracer import set_fields
+from danswer.answer_trace.tracer import start_trace
 from danswer.chat.chat_utils import create_chat_chain
 from danswer.chat.models import CitationInfo
 from danswer.chat.models import CustomToolResponse
@@ -253,6 +257,15 @@ def stream_chat_message_objects(
             )
         else:
             persona = chat_session.persona
+
+        # Begin answer-trace (no-op when tracing disabled). Persisted at the end.
+        start_trace(
+            surface="chat",
+            query=message_text,
+            persona_id=persona.id if persona else None,
+            chat_session_id=chat_session_id,
+            user_id=user.id if user else None,
+        )
 
         prompt_id = new_msg_req.prompt_id
         if prompt_id is None and persona.prompts:
@@ -571,6 +584,12 @@ def stream_chat_message_objects(
                 db_session=db_session,
                 history=deep_history,
             )
+            record_deep_rag(
+                escalated=deep_result.escalated,
+                coverage=deep_result.coverage,
+                sub_questions=deep_result.sub_questions,
+                source=deep_result.source,
+            )
             yield DanswerAnswerPiece(answer_piece=deep_result.answer)
             gen_ai_response_message = partial_response(
                 message=deep_result.answer,
@@ -582,6 +601,7 @@ def stream_chat_message_objects(
                 error=None,
                 tool_calls=[],
             )
+            finalize_and_persist(db_session, chat_message_id=gen_ai_response_message.id)
             db_session.commit()
             yield translate_db_message_to_chat_message_detail(gen_ai_response_message)
             return
@@ -735,6 +755,19 @@ def stream_chat_message_objects(
             if tool_result
             else [],
         )
+        set_fields(
+            rephrased_query=(
+                qa_docs_response.rephrased_query if qa_docs_response else None
+            ),
+            retrieved_count=(
+                len(qa_docs_response.top_documents) if qa_docs_response else None
+            ),
+            cited_source_count=(
+                len(reference_db_search_docs) if reference_db_search_docs else 0
+            ),
+            reranked=bool(RERANK_ENABLED and new_msg_req.use_reranking),
+        )
+        finalize_and_persist(db_session, chat_message_id=gen_ai_response_message.id)
         db_session.commit()  # actually save user / assistant message
 
         msg_detail_response = translate_db_message_to_chat_message_detail(
