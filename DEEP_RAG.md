@@ -99,6 +99,39 @@ Measured on 40 Automation Suite / Orchestrator questions (see
 - Deep RAG is 2 extra LLM calls + 3–4× retrievals per escalated question; it only
   runs when both flags are on, so simple/default traffic is unaffected.
 
+## Synthesis approach: holistic one-pass vs map-reduce (MEASURED)
+
+We use **holistic one-pass synthesis** — retrieve per sub-question, then feed *all*
+raw chunks (grouped by sub-question) into a single synthesis call. Upstream instead
+uses **map-reduce**: answer each sub-question in isolation, drop the raw chunks, and
+compose from the intermediate sub-answers. We tested which is better rather than
+argue it (harnesses + full results: `synthesis-ab-eval.md`,
+`synthesis-multirun-eval.md`; decomposition + retrieval held constant, blind judge
+temp 0, order counterbalanced).
+
+**Result — holistic wins, decisively and stably:**
+- **Completeness**: holistic **4.6** vs map-reduce **2.8** (1–5), tiny variance
+  (±0.4) across every run. Composing from compressed sub-answers loses real detail.
+- **Head-to-head**: holistic **10 / 5** over map-reduce.
+- **Cross-attribution** (stating entity X has a property that belongs only to Y):
+  holistic **47%** vs map-reduce **33%** over 15 runs each — **within noise**
+  (overlapping CIs), and map-reduce is *not* clean. Both mis-attribute ~30–50% on
+  hard composite questions; it's a property of the question/corpus/model, **not** the
+  synthesis architecture.
+
+**Methodology lesson (important):** a single-run A/B showed holistic 57% vs
+map-reduce 14% cross-attribution and nearly triggered a "fix." Multi-run collapsed
+that to 47% vs 33% (indistinguishable) — the gap was run-to-run non-determinism. The
+same question flipped its cross-attribution flag across identical runs. **Do not act
+on single-run judge flags for this pipeline; estimate rates over ≥5 runs.**
+
+**Decisions:** keep holistic; do **not** adopt map-reduce or an attribution
+"guardrail" (a guardrail prompt fixed only 1/3 and is moot given no real difference).
+If cross-attribution ever needs reducing, the lever is *upstream of synthesis*
+(retrieval quality / reranker / per-claim verification), not the synthesis structure.
+The low sub-question cap (3) keeps chunks within one context window, which is what
+makes one-pass synthesis viable.
+
 ## Future work
 
 - Rich citations + doc-reference UI for the deep path (map synthesized `[n]` to
@@ -106,18 +139,6 @@ Measured on 40 Automation Suite / Orchestrator questions (see
 - History-aware *first-pass retrieval* — Phase 6 threads history into the prompts,
   but single-shot retrieval still queries the raw message; rephrasing the follow-up
   before the first retrieval would close the residual.
-- **Per-sub-question answering + quality-check (map-reduce)** — upstream answers each
-  sub-question in isolation (`generate_sub_answer`), drops weak ones
-  (`check_sub_answer`), then composes from those sub-answers, discarding the raw
-  chunks. We instead keep **all raw chunks** and synthesize holistically in one pass.
-  Deliberate trade-off: ours preserves fidelity and cross-sub-question reasoning and
-  is cheaper — better for our workload (comparative questions, ≤3 sub-questions,
-  moderate chunk counts). Upstream's map-reduce wins on **scale** (compression keeps
-  the reduce step within the context window as sub-questions/chunks grow) and
-  **noise-robustness** (the per-sub quality gate drops garbage retrievals instead of
-  letting them pollute one big prompt). Reach for it only if we raise the
-  sub-question cap or target sprawling multi-dimensional questions; the low cap is
-  what keeps our one-pass synthesis in the regime where it's the better choice.
 - Optional per-doc LLM verification / query expansion (upstream `verify_documents`,
   `expand_queries`) if retrieval noise proves to be the bottleneck.
 - Tool/action calling ("B") — structured lookups (e.g. ownership system-of-record)
