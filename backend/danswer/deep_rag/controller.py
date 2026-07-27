@@ -183,12 +183,20 @@ def deep_rag_answer(
     llm: LLM,
     max_subquestions: int = DEFAULT_MAX_SUBQUESTIONS,
     history: str = "",
+    force: bool = False,
 ) -> DeepRagResult:
-    """Verdict-gated multi-hop orchestration. Pure: retrieval + LLM are injected."""
+    """Multi-hop orchestration. Pure: retrieval + LLM are injected.
+
+    `force=False` (adaptive): single-shot first, escalate only if the coverage
+    verdict is `partial`. `force=True`: always escalate regardless of the verdict —
+    the per-question manual override. Even when forced the compare-guard still keeps
+    single-shot if the deep answer isn't substantially better, so forcing can't
+    produce a worse answer, only extra work.
+    """
     answer, coverage, missing = single_shot(query, retrieve, llm, history=history)
 
-    if coverage != "partial":
-        # complete (or unknown) -> single-shot is enough; no escalation.
+    if coverage != "partial" and not force:
+        # complete (or unknown) + not forced -> single-shot is enough; no escalation.
         return DeepRagResult(
             answer=answer, escalated=False, source="single_shot", coverage=coverage
         )
@@ -255,13 +263,20 @@ def run_deep_rag(
     db_session: Session,
     max_subquestions: int = DEFAULT_MAX_SUBQUESTIONS,
     history: str = "",
+    force: bool = False,
 ) -> DeepRagResult:
     """Entry point: wire the real LLM + ACL-scoped retriever into the deep_rag loop.
 
     `history` is the serialized prior conversation (empty for the first turn), so
-    follow-up questions decompose/answer in context."""
+    follow-up questions decompose/answer in context. `force=True` always escalates
+    (the manual per-question override); `force=False` is verdict-gated."""
     llm, fast_llm = get_llms_for_persona(persona)
     retrieve = _persona_retriever(user, persona, llm, fast_llm, db_session)
     return deep_rag_answer(
-        query, retrieve, llm, max_subquestions=max_subquestions, history=history
+        query,
+        retrieve,
+        llm,
+        max_subquestions=max_subquestions,
+        history=history,
+        force=force,
     )

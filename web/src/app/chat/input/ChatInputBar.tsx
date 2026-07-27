@@ -492,7 +492,7 @@ export function ChatInputBar({
                   <button
                     type="button"
                     onClick={() => setDeepRag(!deepRag)}
-                    title="Escalate to multi-step retrieval (decompose → retrieve per sub-question → synthesize) when a single-shot answer is incomplete. Only available for assistants with Deep RAG enabled."
+                    title="Force multi-step retrieval for this question (decompose → retrieve per sub-question → synthesize), regardless of whether a single-shot answer would suffice. Only available for assistants with Deep RAG enabled."
                     className={`flex-none text-sm rounded px-2 py-1 ${
                       deepRag ? "bg-hover text-emphasis" : "text-subtle"
                     }`}

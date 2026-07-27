@@ -11,10 +11,14 @@ chat path is exactly as before.
 |---|---|---|
 | off | (n/a) | current single-shot; toggle not shown |
 | on | off (default) | current single-shot |
-| on | on | Deep RAG: single-shot **+ verdict-gated escalation + compare-guard** |
+| on | on | Deep RAG **forced**: single-shot + always-escalate (decompose → synthesize) + compare-guard |
 
-"On" means *escalation is allowed* — a simple question that single-shot fully
-answers still won't decompose. Only a `partial` self-verdict escalates.
+The chat toggle is a **manual per-question override**: when on it FORCES the deep path
+regardless of the single-shot coverage verdict (`force=True`). The compare-guard still
+keeps single-shot if the deep answer isn't substantially better, so forcing can't
+produce a *worse* answer — only extra work. The verdict-gated *adaptive* mode
+(`force=False`: escalate only on a `partial` verdict) is retained in the controller for
+a future "deep-by-default per assistant" setting; it is not what the manual toggle does.
 
 ## Flow (`backend/danswer/deep_rag/controller.py`)
 

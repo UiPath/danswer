@@ -88,6 +88,15 @@ def test_complete_verdict_does_not_escalate() -> None:
     assert llm.called_decompose() is False  # never entered the deep path
 
 
+def test_force_escalates_even_when_complete() -> None:
+    # the manual per-question override: escalate regardless of a "complete" verdict
+    llm = _ScriptedLLM(verdict=_complete("A is X"), comparison="yes")
+    res = deep_rag_answer("q", _retrieve, cast(LLM, llm), force=True)
+    assert res.escalated is True
+    assert res.source == "multi_hop"
+    assert llm.called_decompose() is True
+
+
 def test_partial_escalates_and_keeps_refined_when_better() -> None:
     llm = _ScriptedLLM(verdict=_partial(), comparison="yes")
     res = deep_rag_answer("compare A and B", _retrieve, cast(LLM, llm))

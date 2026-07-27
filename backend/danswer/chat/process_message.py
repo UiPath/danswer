@@ -587,6 +587,10 @@ def stream_chat_message_objects(
                 persona=persona,
                 db_session=db_session,
                 history=deep_history,
+                # The chat toggle is a manual per-question override: force the deep
+                # path regardless of the single-shot verdict (compare-guard still
+                # keeps single-shot if the deep answer isn't better).
+                force=True,
             )
             record_deep_rag(
                 escalated=deep_result.escalated,
