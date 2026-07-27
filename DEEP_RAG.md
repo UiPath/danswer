@@ -90,8 +90,12 @@ Measured on 40 Automation Suite / Orchestrator questions (see
 ## Beta limitations
 
 - The synthesized answer streams as a **single piece** (not token-by-token).
-- Citations appear as **`[n]` text**; the rich doc-reference/citation UI is not
-  wired yet (`reference_docs=None`, `citations=None` on persist).
+- **Documents + citations ARE surfaced.** The deep-rag chat branch persists the
+  retrieved sections as search docs, yields a `QADocsResponse` (so the sources panel
+  shows and the UI does NOT render "the AI decided this query didn't need a search"),
+  and maps each `[n]` marker → its cited section's `document_id` → saved doc, so
+  citations resolve. `cited_source_count` on the badge is the count of **distinct
+  cited documents** (not a citation-marker proxy).
 - No token-usage/tool-call metadata for the deep path.
 - **Conversation history IS threaded** (Phase 6) into the single-shot verdict and the
   decomposition prompts, so multi-turn follow-ups resolve in context (mirrors
@@ -151,8 +155,6 @@ makes one-pass synthesis viable.
 
 ## Future work
 
-- Rich citations + doc-reference UI for the deep path (map synthesized `[n]` to
-  reference docs like the normal `Answer` flow).
 - History-aware *first-pass retrieval* — Phase 6 threads history into the prompts,
   but single-shot retrieval still queries the raw message; rephrasing the follow-up
   before the first retrieval would close the residual.

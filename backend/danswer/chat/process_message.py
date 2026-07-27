@@ -567,11 +567,9 @@ def stream_chat_message_objects(
             llm.config.model_provider, llm.config.model_name
         )
 
-        # Deep RAG (beta): if the assistant enables it AND this chat request opts in,
-        # answer via the verdict-gated multi-hop controller instead of the normal
-        # Answer/tool loop, then persist like a normal assistant message and return.
-        # Beta scope: the synthesized answer is streamed as a single piece; the rich
-        # doc-reference/citation UI is not wired yet (citations appear as [n] text).
+        # Deep RAG: when the chat request opts in, answer via the multi-hop controller
+        # instead of the normal Answer/tool loop, surface the retrieved documents +
+        # map citations, then persist like a normal assistant message and return.
         # Per-question override: the chat toggle runs Deep RAG regardless of the
         # assistant's deep_rag_enabled (that flag now sets the toggle's DEFAULT /
         # gradual-rollout, it no longer gates execution). See DEEP_RAG.md.
@@ -601,14 +599,55 @@ def stream_chat_message_objects(
                 sub_questions=deep_result.sub_questions,
                 source=deep_result.source,
             )
+            # Surface the retrieved documents so the UI shows sources (not "the AI
+            # decided this query didn't need a search") and citations resolve —
+            # mirrors the normal search-tool doc handling.
+            deep_server_docs = chunks_or_sections_to_search_docs(deep_result.sections)
+            deep_reference_db_docs = [
+                create_db_search_doc(server_search_doc=doc, db_session=db_session)
+                for doc in deep_server_docs
+            ]
+            yield QADocsResponse(
+                rephrased_query=final_msg.message,
+                top_documents=[
+                    translate_db_search_doc_to_server_search_doc(d)
+                    for d in deep_reference_db_docs
+                ],
+                predicted_flow=None,
+                predicted_search=None,
+                applied_source_filters=None,
+                applied_time_cutoff=None,
+                recency_bias_multiplier=1.0,
+            )
+
+            # Map the answer's [n] markers -> saved doc ids (via each cited section's
+            # document_id; multiple [n] may share a doc).
+            docid_to_dbid: dict[str, int] = {}
+            for dbdoc in deep_reference_db_docs:
+                docid_to_dbid.setdefault(dbdoc.document_id, dbdoc.id)
+            deep_citations: dict[int, int] = {}
+            for marker in re.findall(r"\[(\d+)\]", deep_result.answer):
+                idx = int(marker)
+                if 1 <= idx <= len(deep_result.sections):
+                    cited_doc_id = getattr(
+                        deep_result.sections[idx - 1], "document_id", None
+                    )
+                    saved_id = (
+                        docid_to_dbid.get(cited_doc_id)
+                        if cited_doc_id is not None
+                        else None
+                    )
+                    if saved_id is not None:
+                        deep_citations[idx] = saved_id
+
             yield DanswerAnswerPiece(answer_piece=deep_result.answer)
             gen_ai_response_message = partial_response(
                 message=deep_result.answer,
-                rephrased_query=None,
-                reference_docs=None,
+                rephrased_query=final_msg.message,
+                reference_docs=deep_reference_db_docs,
                 files=None,
                 token_count=len(llm_tokenizer_encode_func(deep_result.answer)),
-                citations=None,
+                citations=deep_citations or None,
                 error=None,
                 tool_calls=[],
             )
@@ -617,9 +656,7 @@ def stream_chat_message_objects(
             )
             db_session.commit()
             yield AnswerTraceInfo(
-                cited_source_count=len(
-                    set(re.findall(r"\[(\d+)\]", deep_result.answer))
-                ),
+                cited_source_count=len(set(deep_citations.values())),
                 deep_rag_escalated=deep_result.escalated,
                 sub_question_count=len(deep_result.sub_questions),
                 trace_uuid=str(deep_trace_uuid) if deep_trace_uuid else None,

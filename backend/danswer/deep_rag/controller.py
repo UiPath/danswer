@@ -62,6 +62,9 @@ class DeepRagResult:
     coverage: str  # single-shot verdict: "complete" | "partial" | "?"
     sub_questions: list[str] = field(default_factory=list)
     num_sections: int = 0
+    # Ordered sections behind the final answer's [n] citation markers, so the caller
+    # can surface documents + map citations. Index i corresponds to marker [i+1].
+    sections: list[Any] = field(default_factory=list)
 
 
 def _invoke(llm: LLM, prompt: str) -> str:
@@ -101,8 +104,10 @@ def _format_context(sections: list[Any], start: int = 1) -> str:
 
 def single_shot(
     query: str, retrieve: RetrieveFn, llm: LLM, history: str = ""
-) -> tuple[str, str, list[str]]:
-    """Answer from one retrieval and self-report coverage. Returns (answer, coverage, missing)."""
+) -> tuple[str, str, list[str], list[Any]]:
+    """Answer from one retrieval and self-report coverage.
+    Returns (answer, coverage, missing, sections). `sections` is the ordered
+    retrieval behind the answer's [n] markers."""
     sections = retrieve(query, _SINGLE_SHOT_K)
     prompt = SINGLE_SHOT_VERDICT_PROMPT.format(
         context=_format_context(sections),
@@ -117,10 +122,11 @@ def single_shot(
             str(parsed.get("answer", "")),
             coverage if coverage in ("complete", "partial") else "?",
             [str(m) for m in (parsed.get("missing") or [])],
+            sections,
         )
     except Exception:
         # Unparseable verdict -> treat the raw text as the answer, coverage unknown.
-        return raw, "?", []
+        return raw, "?", [], sections
 
 
 def decompose(
@@ -144,9 +150,12 @@ def decompose(
 
 def multi_hop(
     query: str, sub_questions: list[str], retrieve: RetrieveFn, llm: LLM
-) -> tuple[str, int]:
-    """Retrieve per sub-question (deduped) and synthesize. Returns (answer, n_sections)."""
+) -> tuple[str, list[Any]]:
+    """Retrieve per sub-question (deduped) and synthesize.
+    Returns (answer, ordered_sections) where ordered_sections[i] is the section
+    numbered [i+1] in the synthesis context (so the caller can map citations)."""
     seen: set[tuple[Any, Any]] = set()
+    ordered: list[Any] = []
     blocks: list[str] = []
     n = 1
     for sq in sub_questions:
@@ -157,9 +166,10 @@ def multi_hop(
                 seen.add(key)
                 kept.append(s)
         blocks.append(f"### Sub-question: {sq}\n{_format_context(kept, n)}")
+        ordered.extend(kept)
         n += len(kept)
     prompt = SYNTHESIS_PROMPT.format(question=query, context="\n\n".join(blocks))
-    return _invoke(llm, prompt), len(seen)
+    return _invoke(llm, prompt), ordered
 
 
 def refined_is_better(query: str, initial: str, refined: str, llm: LLM) -> bool:
@@ -193,12 +203,19 @@ def deep_rag_answer(
     single-shot if the deep answer isn't substantially better, so forcing can't
     produce a worse answer, only extra work.
     """
-    answer, coverage, missing = single_shot(query, retrieve, llm, history=history)
+    answer, coverage, missing, ss_sections = single_shot(
+        query, retrieve, llm, history=history
+    )
 
     if coverage != "partial" and not force:
         # complete (or unknown) + not forced -> single-shot is enough; no escalation.
         return DeepRagResult(
-            answer=answer, escalated=False, source="single_shot", coverage=coverage
+            answer=answer,
+            escalated=False,
+            source="single_shot",
+            coverage=coverage,
+            sections=ss_sections,
+            num_sections=len(ss_sections),
         )
 
     # Escalate. Fail-open: any error below returns the single-shot answer.
@@ -206,7 +223,7 @@ def deep_rag_answer(
         sub_questions = decompose(
             query, missing, llm, max_subquestions, history=history
         )
-        refined, n_sections = multi_hop(query, sub_questions, retrieve, llm)
+        refined, mh_sections = multi_hop(query, sub_questions, retrieve, llm)
         if refined_is_better(query, answer, refined, llm):
             return DeepRagResult(
                 answer=refined,
@@ -214,21 +231,29 @@ def deep_rag_answer(
                 source="multi_hop",
                 coverage=coverage,
                 sub_questions=sub_questions,
-                num_sections=n_sections,
+                num_sections=len(mh_sections),
+                sections=mh_sections,
             )
-        # deeper answer wasn't substantially better -> fall back to single-shot.
+        # deeper answer wasn't substantially better -> fall back to single-shot
+        # (so the [n] markers map to the single-shot sections, not the multi-hop ones).
         return DeepRagResult(
             answer=answer,
             escalated=True,
             source="single_shot",
             coverage=coverage,
             sub_questions=sub_questions,
-            num_sections=n_sections,
+            num_sections=len(ss_sections),
+            sections=ss_sections,
         )
     except Exception:
         logger.exception("deep_rag escalation failed; falling back to single-shot")
         return DeepRagResult(
-            answer=answer, escalated=True, source="single_shot", coverage=coverage
+            answer=answer,
+            escalated=True,
+            source="single_shot",
+            coverage=coverage,
+            sections=ss_sections,
+            num_sections=len(ss_sections),
         )
 
 
