@@ -115,23 +115,33 @@ FROM answer_trace WHERE chat_session_id = 5541 ORDER BY created_at;
 
 ## Retention
 
-`prune_old_traces(db_session, days=14)` deletes rows older than N days. Run it from the
-periodic cleanup job (not yet scheduled — see Future work).
+`prune_old_traces(db_session, days=14)` deletes rows older than N days. Scheduled as
+the `prune_answer_traces_task` celery-beat task, daily at 08:15 UTC (15 min after the
+main retention sweep). `ANSWER_TRACE_RETENTION_DAYS` overrides the window.
 
 ## End-user badge (projection, not the trace)
 
-The chat/search UI shows a two-field projection of the same data:
+The chat UI shows a two-field projection of the same data:
 `Answered from {cited_source_count} sources`, plus `· deep-searched {sub_question_count}
 angles` **only when `deep_rag_escalated` is true** (report what happened, not the toggle
-state). Exposing these three fields to the client is the one net-new bit the badge needs;
-it's a trivial read once the trace exists.
+state). Implemented: the backend streams an `AnswerTraceInfo` packet; the web captures
+it in the chat stream dispatch and renders the badge in `AIMessage`. Deep-path
+`cited_source_count` is derived from distinct `[n]` markers in the answer (proxy until
+citations map to doc ids — see Future work).
+
+## Instrumented branch points
+
+- **chat**: deep-rag stages (`single_shot`/`decompose`/`compare_guard`), `retrieve`
+  (candidates, rephrased query, predicted flow), `relevance_filter` (kept indices),
+  plus promoted `cited_source_count`/`retrieved_count`/`reranked`.
+- **search**: the routing decision (`route` event + `route_stage`/`route_confidence`),
+  persisted with `chat_message_id` null.
 
 ## Future work
 
-- Schedule `prune_old_traces` in the periodic cleanup (celery beat).
-- Expose `cited_source_count` + `deep_rag_escalated` + `sub_question_count` to the client
-  for the badge.
-- Instrument the remaining branch points (routing on search, retrieve/rerank/relevance)
-  — currently only deep-rag stages + cited/retrieved counts are captured on the chat path.
-- Deep-rag `cited_source_count` (parse `[n]` citations in the synthesized answer back to
-  doc ids) — ties to the deep-rag rich-citation future work.
+- A distinct `rerank` event with before/after ordering (only the `reranked` bool is
+  captured today; the GPU reranker is disabled cluster-wide anyway).
+- Deep-rag `cited_source_count` from real citation→doc-id mapping (today it's a proxy:
+  distinct `[n]` markers) — ties to the deep-rag rich-citation future work.
+- Per-thread retrieval internals (contextvars don't cross `SearchPipeline`'s worker
+  threads) if that depth is ever needed.

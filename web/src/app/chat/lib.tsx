@@ -14,6 +14,7 @@ import {
   useRef,
 } from "react";
 import {
+  AnswerTraceInfoPacket,
   BackendMessage,
   ChatSession,
   DocumentsResponse,
@@ -78,6 +79,7 @@ export type PacketType =
   | AnswerPiecePacket
   | DocumentsResponse
   | ImageGenerationDisplay
+  | AnswerTraceInfoPacket
   | StreamingError;
 
 export async function* sendMessage({

@@ -5,6 +5,10 @@ from fastapi import Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
+from danswer.answer_trace.tracer import event as trace_event
+from danswer.answer_trace.tracer import finalize_and_persist as trace_finalize
+from danswer.answer_trace.tracer import set_fields as trace_set_fields
+from danswer.answer_trace.tracer import start_trace
 from danswer.auth.api_key import validate_api_key
 from danswer.auth.schemas import UserRole
 from danswer.auth.users import current_admin_user
@@ -281,6 +285,31 @@ def auto_search(
         routed_confidence = resolution.confidence
         ranked_ids = resolution.ranked_ids
         route_ambiguous = resolution.ambiguous
+
+    # answer-trace: record the search routing decision (no-op when tracing off;
+    # search has no chat_message so chat_message_id stays null).
+    start_trace(
+        surface="search",
+        query=question,
+        persona_id=target_persona_id,
+        user_id=user.id if user else None,
+    )
+    trace_set_fields(
+        route_stage=(
+            "mention" if auto_search_request.persona_id is not None else "auto"
+        ),
+        route_confidence=routed_confidence,
+    )
+    trace_event(
+        "route",
+        {
+            "persona_id": target_persona_id,
+            "confidence": routed_confidence,
+            "ambiguous": route_ambiguous,
+        },
+    )
+    trace_finalize(db_session)
+    db_session.commit()
 
     def _resolve(pid: int) -> Persona | None:
         """ACL-checked persona fetch; None if inaccessible/missing."""

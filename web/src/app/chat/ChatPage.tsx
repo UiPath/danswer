@@ -2,6 +2,7 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import {
+  AnswerTraceInfoPacket,
   BackendChatSession,
   BackendMessage,
   ChatFileType,
@@ -774,6 +775,7 @@ export function ChatPage({
     let error: string | null = null;
     let finalMessage: BackendMessage | null = null;
     let toolCalls: ToolCallMetadata[] = [];
+    let answerTrace: AnswerTraceInfoPacket | null = null;
 
     try {
       const lastSuccessfulMessageId =
@@ -876,6 +878,8 @@ export function ChatPage({
               error = (packet as StreamingError).error;
             } else if (Object.hasOwn(packet, "message_id")) {
               finalMessage = packet as BackendMessage;
+            } else if (Object.hasOwn(packet, "deep_rag_escalated")) {
+              answerTrace = packet as AnswerTraceInfoPacket;
             }
 
             const newUserMessageId =
@@ -902,6 +906,7 @@ export function ChatPage({
                 documents:
                   finalMessage?.context_docs?.top_documents || documents,
                 citations: finalMessage?.citations || {},
+                answerTrace: answerTrace,
                 files: finalMessage?.files || aiMessageImages || [],
                 toolCalls: finalMessage?.tool_calls || toolCalls,
                 parentMessageId: newUserMessageId,
@@ -1434,6 +1439,7 @@ export function ChatPage({
                                   citedDocuments={getCitedDocumentsFromMessage(
                                     message
                                   )}
+                                  answerTrace={message.answerTrace}
                                   toolCall={
                                     message.toolCalls && message.toolCalls[0]
                                   }

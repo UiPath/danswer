@@ -1,3 +1,4 @@
+import re
 from collections.abc import Callable
 from collections.abc import Iterator
 from functools import partial
@@ -5,11 +6,13 @@ from typing import cast
 
 from sqlalchemy.orm import Session
 
+from danswer.answer_trace.tracer import event
 from danswer.answer_trace.tracer import finalize_and_persist
 from danswer.answer_trace.tracer import record_deep_rag
 from danswer.answer_trace.tracer import set_fields
 from danswer.answer_trace.tracer import start_trace
 from danswer.chat.chat_utils import create_chat_chain
+from danswer.chat.models import AnswerTraceInfo
 from danswer.chat.models import CitationInfo
 from danswer.chat.models import CustomToolResponse
 from danswer.chat.models import DanswerAnswerPiece
@@ -207,6 +210,7 @@ ChatPacket = (
     | CitationInfo
     | ImageGenerationDisplay
     | CustomToolResponse
+    | AnswerTraceInfo
 )
 ChatPacketStream = Iterator[ChatPacket]
 
@@ -601,8 +605,18 @@ def stream_chat_message_objects(
                 error=None,
                 tool_calls=[],
             )
-            finalize_and_persist(db_session, chat_message_id=gen_ai_response_message.id)
+            deep_trace_uuid = finalize_and_persist(
+                db_session, chat_message_id=gen_ai_response_message.id
+            )
             db_session.commit()
+            yield AnswerTraceInfo(
+                cited_source_count=len(
+                    set(re.findall(r"\[(\d+)\]", deep_result.answer))
+                ),
+                deep_rag_escalated=deep_result.escalated,
+                sub_question_count=len(deep_result.sub_questions),
+                trace_uuid=str(deep_trace_uuid) if deep_trace_uuid else None,
+            )
             yield translate_db_message_to_chat_message_detail(gen_ai_response_message)
             return
 
@@ -662,6 +676,14 @@ def stream_chat_message_objects(
                         else False,
                     )
                     yield qa_docs_response
+                    event(
+                        "retrieve",
+                        {
+                            "candidates": len(qa_docs_response.top_documents),
+                            "rephrased_query": qa_docs_response.rephrased_query,
+                            "predicted_flow": str(qa_docs_response.predicted_flow),
+                        },
+                    )
                 elif packet.id == SECTION_RELEVANCE_LIST_ID:
                     chunk_indices = packet.response
 
@@ -674,6 +696,10 @@ def stream_chat_message_objects(
 
                     yield LLMRelevanceFilterResponse(
                         relevant_chunk_indices=chunk_indices
+                    )
+                    event(
+                        "relevance_filter",
+                        {"relevant_chunk_indices": chunk_indices},
                     )
                 elif packet.id == IMAGE_GENERATION_RESPONSE_ID:
                     img_generation_response = cast(
@@ -767,9 +793,19 @@ def stream_chat_message_objects(
             ),
             reranked=bool(RERANK_ENABLED and new_msg_req.use_reranking),
         )
-        finalize_and_persist(db_session, chat_message_id=gen_ai_response_message.id)
+        trace_uuid = finalize_and_persist(
+            db_session, chat_message_id=gen_ai_response_message.id
+        )
         db_session.commit()  # actually save user / assistant message
 
+        yield AnswerTraceInfo(
+            cited_source_count=(
+                len(reference_db_search_docs) if reference_db_search_docs else 0
+            ),
+            deep_rag_escalated=False,
+            sub_question_count=0,
+            trace_uuid=str(trace_uuid) if trace_uuid else None,
+        )
         msg_detail_response = translate_db_message_to_chat_message_detail(
             gen_ai_response_message
         )

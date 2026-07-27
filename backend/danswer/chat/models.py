@@ -106,6 +106,17 @@ class ImageGenerationDisplay(BaseModel):
     file_ids: list[str]
 
 
+class AnswerTraceInfo(BaseModel):
+    """Compact per-answer provenance surfaced to the client for the end-user badge
+    ('Answered from N sources · deep-searched K angles'). A projection of the
+    answer_trace row; `sub_question_count` is only meaningful when escalated."""
+
+    cited_source_count: int
+    deep_rag_escalated: bool
+    sub_question_count: int
+    trace_uuid: str | None = None  # operator handle; None when tracing is disabled
+
+
 class CustomToolResponse(BaseModel):
     response: dict
     tool_name: str
