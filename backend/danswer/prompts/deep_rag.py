@@ -36,8 +36,7 @@ Important:
 user for more information. Take the information from the user as given.
 
 Output ONLY the sub-questions, one per line, with no numbering or extra text.
-{missing_hint}
-Here is the initial question:
+{missing_hint}{history}Here is the initial question:
 {sep}
 {question}
 {sep}
@@ -93,7 +92,7 @@ sub-topics still needing evidence (empty list if complete).
 Context:
 {context}
 
-Question: {question}
+{history}Question: {question}
 JSON:"""
 
 # Ours: synthesize the final answer from the per-sub-question grouped context.

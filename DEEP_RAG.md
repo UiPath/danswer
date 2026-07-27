@@ -76,11 +76,12 @@ Measured on 40 Automation Suite / Orchestrator questions (see
 - Citations appear as **`[n]` text**; the rich doc-reference/citation UI is not
   wired yet (`reference_docs=None`, `citations=None` on persist).
 - No token-usage/tool-call metadata for the deep path.
-- **Conversation history is not used.** `run_deep_rag` sees only the current message,
-  so single-shot retrieval and decomposition ignore prior turns. Multi-turn
-  follow-ups ("what about the 2024.10 version?") may decompose/retrieve on the
-  fragment alone. Upstream conditions its decomposition on `{{history}}`; threading
-  history in is the top follow-up (see Future work).
+- **Conversation history IS threaded** (Phase 6) into the single-shot verdict and the
+  decomposition prompts, so multi-turn follow-ups resolve in context (mirrors
+  upstream). Residual: the *single-shot retrieval* still queries the raw message —
+  a history-aware query rephrase before the first retrieval is a possible refinement
+  (see Future work). The escalation path is fully history-aware because the
+  decomposition (which drives sub-question retrieval) sees the history.
 
 ## Enable / test
 
@@ -100,15 +101,23 @@ Measured on 40 Automation Suite / Orchestrator questions (see
 
 ## Future work
 
-- **Thread conversation history** into single-shot retrieval + decomposition so
-  multi-turn follow-ups work (closes the history limitation above; upstream passes
-  `{{history}}` to its decomposition prompt).
 - Rich citations + doc-reference UI for the deep path (map synthesized `[n]` to
   reference docs like the normal `Answer` flow).
-- **Per-sub-question answering + quality-check** — upstream generates an answer per
-  sub-question (`generate_sub_answer`) and drops weak ones (`check_sub_answer`), then
-  composes; we synthesize directly from grouped chunks. A quality lever at higher
-  LLM cost.
+- History-aware *first-pass retrieval* — Phase 6 threads history into the prompts,
+  but single-shot retrieval still queries the raw message; rephrasing the follow-up
+  before the first retrieval would close the residual.
+- **Per-sub-question answering + quality-check (map-reduce)** — upstream answers each
+  sub-question in isolation (`generate_sub_answer`), drops weak ones
+  (`check_sub_answer`), then composes from those sub-answers, discarding the raw
+  chunks. We instead keep **all raw chunks** and synthesize holistically in one pass.
+  Deliberate trade-off: ours preserves fidelity and cross-sub-question reasoning and
+  is cheaper — better for our workload (comparative questions, ≤3 sub-questions,
+  moderate chunk counts). Upstream's map-reduce wins on **scale** (compression keeps
+  the reduce step within the context window as sub-questions/chunks grow) and
+  **noise-robustness** (the per-sub quality gate drops garbage retrievals instead of
+  letting them pollute one big prompt). Reach for it only if we raise the
+  sub-question cap or target sprawling multi-dimensional questions; the low cap is
+  what keeps our one-pass synthesis in the regime where it's the better choice.
 - Optional per-doc LLM verification / query expansion (upstream `verify_documents`,
   `expand_queries`) if retrieval noise proves to be the bottleneck.
 - Tool/action calling ("B") — structured lookups (e.g. ownership system-of-record)

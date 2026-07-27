@@ -132,3 +132,19 @@ def test_decompose_falls_back_to_question_when_empty() -> None:
     llm = _ScriptedLLM(verdict=_partial(), subqs="no question marks here")
     subqs = decompose("original q", [], cast(LLM, llm), max_subquestions=3)
     assert subqs == ["original q"]
+
+
+def test_history_threaded_into_single_shot_and_decomposition() -> None:
+    llm = _ScriptedLLM(verdict=_partial())
+    deep_rag_answer(
+        "q", _retrieve, cast(LLM, llm), history="User: earlier about pepsico"
+    )
+    # the history must reach BOTH the single-shot verdict prompt and the decompose prompt
+    assert any("earlier about pepsico" in c and "coverage" in c for c in llm.calls)
+    assert any("earlier about pepsico" in c and "no more than" in c for c in llm.calls)
+
+
+def test_empty_history_renders_no_block() -> None:
+    llm = _ScriptedLLM(verdict=_complete("A"))
+    deep_rag_answer("q", _retrieve, cast(LLM, llm), history="")
+    assert not any("Conversation so far" in c for c in llm.calls)

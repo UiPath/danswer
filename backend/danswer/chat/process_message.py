@@ -556,11 +556,20 @@ def stream_chat_message_objects(
         # Beta scope: the synthesized answer is streamed as a single piece; the rich
         # doc-reference/citation UI is not wired yet (citations appear as [n] text).
         if persona.deep_rag_enabled and new_msg_req.deep_rag:
+            # Serialize prior turns so follow-up questions decompose/answer in
+            # context (keep the most recent ~4k chars). Mirrors upstream's
+            # history-aware decomposition.
+            deep_history = "\n".join(
+                f"{'User' if m.message_type == MessageType.USER else 'Assistant'}: "
+                f"{m.message}"
+                for m in history_msgs
+            )[-4000:]
             deep_result = run_deep_rag(
                 query=final_msg.message,
                 user=user,
                 persona=persona,
                 db_session=db_session,
+                history=deep_history,
             )
             yield DanswerAnswerPiece(answer_piece=deep_result.answer)
             gen_ai_response_message = partial_response(

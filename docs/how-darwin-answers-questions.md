@@ -347,8 +347,10 @@ flowchart TB
 - **Compare-guard**: the deeper answer is kept only if it's substantially better,
   so escalating a question that didn't need it can't produce a *worse* answer.
 - **Fail-open**: any error in the deep path returns the single-shot answer.
-- **Beta**: the answer streams as one piece, citations are `[n]` text, and the path
-  does not yet use conversation history (multi-turn follow-ups may misfire).
+- **Multi-turn**: conversation history is threaded into the verdict and
+  decomposition, so follow-ups resolve in context.
+- **Beta**: the answer streams as one piece and citations are `[n]` text (no rich
+  doc-reference UI yet).
 
 Full design, eval results, and upstream-comparison: [`DEEP_RAG.md`](../DEEP_RAG.md).
 

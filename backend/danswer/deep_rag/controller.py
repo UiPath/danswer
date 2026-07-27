@@ -74,6 +74,18 @@ def _parse_json(text: str) -> dict[str, Any]:
     return json.loads(match.group(0) if match else stripped)
 
 
+def _history_block(history: str) -> str:
+    """Render the conversation history for the prompts, or "" when there is none.
+    Threaded into single-shot and decomposition so follow-up questions resolve in
+    context (mirrors upstream's history-aware decomposition)."""
+    if not history or not history.strip():
+        return ""
+    return (
+        "Conversation so far (for context; the current question may be a follow-up "
+        "that depends on it):\n" + history.strip() + "\n\n"
+    )
+
+
 def _format_context(sections: list[Any], start: int = 1) -> str:
     lines = []
     for i, s in enumerate(sections, start):
@@ -88,12 +100,14 @@ def _format_context(sections: list[Any], start: int = 1) -> str:
 
 
 def single_shot(
-    query: str, retrieve: RetrieveFn, llm: LLM
+    query: str, retrieve: RetrieveFn, llm: LLM, history: str = ""
 ) -> tuple[str, str, list[str]]:
     """Answer from one retrieval and self-report coverage. Returns (answer, coverage, missing)."""
     sections = retrieve(query, _SINGLE_SHOT_K)
     prompt = SINGLE_SHOT_VERDICT_PROMPT.format(
-        context=_format_context(sections), question=query
+        context=_format_context(sections),
+        question=query,
+        history=_history_block(history),
     )
     raw = _invoke(llm, prompt)
     try:
@@ -110,14 +124,17 @@ def single_shot(
 
 
 def decompose(
-    query: str, missing: list[str], llm: LLM, max_subquestions: int
+    query: str, missing: list[str], llm: LLM, max_subquestions: int, history: str = ""
 ) -> list[str]:
     """Break the question into <= max_subquestions sub-questions, seeded by `missing`."""
     hint = ""
     if missing:
         hint = "The initial retrieval did not cover: " + "; ".join(missing) + "\n"
     prompt = DECOMPOSITION_PROMPT.format(
-        max_subq=max_subquestions, missing_hint=hint, question=query
+        max_subq=max_subquestions,
+        missing_hint=hint,
+        history=_history_block(history),
+        question=query,
     )
     lines = _invoke(llm, prompt).splitlines()
     subqs = [re.sub(r"^[0-9.\-)\s]+", "", ln).strip() for ln in lines]
@@ -165,9 +182,10 @@ def deep_rag_answer(
     retrieve: RetrieveFn,
     llm: LLM,
     max_subquestions: int = DEFAULT_MAX_SUBQUESTIONS,
+    history: str = "",
 ) -> DeepRagResult:
     """Verdict-gated multi-hop orchestration. Pure: retrieval + LLM are injected."""
-    answer, coverage, missing = single_shot(query, retrieve, llm)
+    answer, coverage, missing = single_shot(query, retrieve, llm, history=history)
 
     if coverage != "partial":
         # complete (or unknown) -> single-shot is enough; no escalation.
@@ -177,7 +195,9 @@ def deep_rag_answer(
 
     # Escalate. Fail-open: any error below returns the single-shot answer.
     try:
-        sub_questions = decompose(query, missing, llm, max_subquestions)
+        sub_questions = decompose(
+            query, missing, llm, max_subquestions, history=history
+        )
         refined, n_sections = multi_hop(query, sub_questions, retrieve, llm)
         if refined_is_better(query, answer, refined, llm):
             return DeepRagResult(
@@ -234,8 +254,14 @@ def run_deep_rag(
     persona: Persona,
     db_session: Session,
     max_subquestions: int = DEFAULT_MAX_SUBQUESTIONS,
+    history: str = "",
 ) -> DeepRagResult:
-    """Entry point: wire the real LLM + ACL-scoped retriever into the deep_rag loop."""
+    """Entry point: wire the real LLM + ACL-scoped retriever into the deep_rag loop.
+
+    `history` is the serialized prior conversation (empty for the first turn), so
+    follow-up questions decompose/answer in context."""
     llm, fast_llm = get_llms_for_persona(persona)
     retrieve = _persona_retriever(user, persona, llm, fast_llm, db_session)
-    return deep_rag_answer(query, retrieve, llm, max_subquestions=max_subquestions)
+    return deep_rag_answer(
+        query, retrieve, llm, max_subquestions=max_subquestions, history=history
+    )
