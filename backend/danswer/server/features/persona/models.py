@@ -34,6 +34,8 @@ class CreatePersonaRequest(BaseModel):
     # Per-assistant cross-encoder reranking opt-in (beta). Defaults False so
     # older clients that omit it keep current behavior.
     rerank_enabled: bool = False
+    # Per-assistant Deep RAG opt-in. Defaults False so older clients keep behavior.
+    deep_rag_enabled: bool = False
     prompt_ids: list[int]
     document_set_ids: list[int]
     # e.g. ID of SearchTool or ImageGenerationTool or <USER_DEFINED_TOOL>
@@ -61,6 +63,7 @@ class PersonaSnapshot(BaseModel):
     llm_relevance_filter: bool
     llm_filter_extraction: bool
     rerank_enabled: bool
+    deep_rag_enabled: bool = False
     llm_model_provider_override: str | None
     llm_model_version_override: str | None
     starter_messages: list[StarterMessage] | None
@@ -101,6 +104,7 @@ class PersonaSnapshot(BaseModel):
             llm_relevance_filter=persona.llm_relevance_filter,
             llm_filter_extraction=persona.llm_filter_extraction,
             rerank_enabled=persona.rerank_enabled,
+            deep_rag_enabled=persona.deep_rag_enabled,
             llm_model_provider_override=persona.llm_model_provider_override,
             llm_model_version_override=persona.llm_model_version_override,
             starter_messages=persona.starter_messages,

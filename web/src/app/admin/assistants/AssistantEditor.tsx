@@ -324,6 +324,7 @@ export function AssistantEditor({
     include_citations: existingPersona?.prompts[0]?.include_citations ?? true,
     llm_relevance_filter: existingPersona?.llm_relevance_filter ?? false,
     rerank_enabled: existingPersona?.rerank_enabled ?? false,
+    deep_rag_enabled: existingPersona?.deep_rag_enabled ?? false,
     llm_model_provider_override:
       existingPersona?.llm_model_provider_override ?? null,
     llm_model_version_override:
@@ -360,6 +361,7 @@ export function AssistantEditor({
             include_citations: Yup.boolean().required(),
             llm_relevance_filter: Yup.boolean().required(),
             rerank_enabled: Yup.boolean().required(),
+            deep_rag_enabled: Yup.boolean().required(),
             llm_model_version_override: Yup.string().nullable(),
             llm_model_provider_override: Yup.string().nullable(),
             starter_messages: Yup.array().of(
@@ -819,6 +821,14 @@ export function AssistantEditor({
                                       }
                                     />
                                   )}
+
+                                  <BooleanFormField
+                                    name="deep_rag_enabled"
+                                    label="Deep RAG (beta)"
+                                    subtext={
+                                      "If enabled, this assistant may escalate a question to a multi-step retrieval loop (decompose → retrieve per sub-question → synthesize) when a single-shot answer is judged incomplete. Only takes effect when the chat request also turns Deep RAG on; otherwise this setting is ignored."
+                                    }
+                                  />
 
                                   <BooleanFormField
                                     name="include_citations"

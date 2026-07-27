@@ -1067,6 +1067,13 @@ class Persona(Base):
     rerank_enabled: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="false"
     )
+    # Per-assistant opt-in for feature-gated Deep RAG (verdict-gated multi-hop).
+    # Only takes effect when the chat request also sets the deep_rag override; see
+    # danswer/deep_rag/controller.py. Default off so existing assistants are
+    # unchanged until piloted.
+    deep_rag_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false"
+    )
     # Allows the Persona to specify a different LLM version than is controlled
     # globablly via env variables. For flexibility, validity is not currently enforced
     # NOTE: only is applied on the actual response generation - is not used for things like
