@@ -375,6 +375,9 @@ export function ChatPage({
   // master switch. Reset per page load — "default off" is intentional.
   const [useReranking, setUseReranking] = useState(false);
   const [useRelevanceFilter, setUseRelevanceFilter] = useState(false);
+  // Deep RAG override, default off; only takes effect when the active assistant
+  // has deep_rag_enabled. Reset per page load.
+  const [deepRag, setDeepRag] = useState(false);
 
   // uploaded files
   const [currentMessageFiles, setCurrentMessageFiles] = useState<
@@ -398,10 +401,10 @@ export function ChatPage({
           (persona) => persona.id === existingChatSessionPersonaId
         )
       : defaultSelectedPersonaId !== undefined
-        ? filteredAssistants.find(
-            (persona) => persona.id === defaultSelectedPersonaId
-          )
-        : undefined
+      ? filteredAssistants.find(
+          (persona) => persona.id === defaultSelectedPersonaId
+        )
+      : undefined
   );
   const livePersona =
     selectedPersona || filteredAssistants[0] || availablePersonas[0];
@@ -813,6 +816,7 @@ export function ChatPage({
         useExistingUserMessage: isSeededChat,
         useReranking: useReranking,
         useRelevanceFilter: useRelevanceFilter,
+        deepRag: deepRag,
       });
       const updateFn = (messages: Message[]) => {
         const replacementsMap = finalMessage
@@ -1010,7 +1014,9 @@ export function ChatPage({
       // a blank session with no explanation of why.
       setPopup({
         message:
-          `Started a new chat with "${assistantDisplayName(persona)}", as each chat is bound to a single assistant.` +
+          `Started a new chat with "${assistantDisplayName(
+            persona
+          )}", as each chat is bound to a single assistant.` +
           (hadFiles ? " Please re-upload any files you'd attached." : ""),
         type: "success",
       });
@@ -1678,6 +1684,8 @@ export function ChatPage({
                           setUseReranking={setUseReranking}
                           useRelevanceFilter={useRelevanceFilter}
                           setUseRelevanceFilter={setUseRelevanceFilter}
+                          deepRag={deepRag}
+                          setDeepRag={setDeepRag}
                           selectedAssistant={livePersona}
                           files={currentMessageFiles}
                           setFiles={setCurrentMessageFiles}

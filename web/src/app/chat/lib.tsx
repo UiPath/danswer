@@ -98,6 +98,7 @@ export async function* sendMessage({
   alternateAssistantId,
   useReranking,
   useRelevanceFilter,
+  deepRag,
 }: {
   message: string;
   fileDescriptors: FileDescriptor[];
@@ -123,6 +124,9 @@ export async function* sendMessage({
   // LLM_RELEVANCE_FILTER_ENABLED).
   useReranking?: boolean;
   useRelevanceFilter?: boolean;
+  // Per-conversation Deep RAG override (default off); only takes effect when the
+  // active assistant has deep_rag_enabled.
+  deepRag?: boolean;
 }) {
   const documentsAreSelected =
     selectedDocumentIds && selectedDocumentIds.length > 0;
@@ -170,6 +174,7 @@ export async function* sendMessage({
       use_existing_user_message: useExistingUserMessage,
       use_reranking: useReranking ?? false,
       use_relevance_filter: useRelevanceFilter ?? false,
+      deep_rag: deepRag ?? false,
     }),
   });
   if (!sendMessageResponse.ok) {

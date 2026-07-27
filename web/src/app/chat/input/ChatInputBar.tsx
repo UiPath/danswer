@@ -47,6 +47,8 @@ export function ChatInputBar({
   setUseReranking,
   useRelevanceFilter,
   setUseRelevanceFilter,
+  deepRag,
+  setDeepRag,
   onSetSelectedAssistant,
   selectedAssistant,
   files,
@@ -71,6 +73,8 @@ export function ChatInputBar({
   setUseReranking: (value: boolean) => void;
   useRelevanceFilter: boolean;
   setUseRelevanceFilter: (value: boolean) => void;
+  deepRag: boolean;
+  setDeepRag: (value: boolean) => void;
   selectedAssistant: Persona;
   alternativeAssistant: Persona | null;
   files: FileDescriptor[];
@@ -479,6 +483,23 @@ export function ChatInputBar({
                   Relevance: {useRelevanceFilter ? "On" : "Off"}
                 </button>
               )}
+
+              {/* Deep RAG toggle — shown only when the active assistant has it
+                  enabled (per-assistant pilot). Default off. */}
+              {!retrievalDisabled &&
+                (alternativeAssistant ?? selectedAssistant)
+                  ?.deep_rag_enabled && (
+                  <button
+                    type="button"
+                    onClick={() => setDeepRag(!deepRag)}
+                    title="Escalate to multi-step retrieval (decompose → retrieve per sub-question → synthesize) when a single-shot answer is incomplete. Only available for assistants with Deep RAG enabled."
+                    className={`flex-none text-sm rounded px-2 py-1 ${
+                      deepRag ? "bg-hover text-emphasis" : "text-subtle"
+                    }`}
+                  >
+                    Deep RAG: {deepRag ? "On" : "Off"}
+                  </button>
+                )}
 
               <ChatInputOption
                 flexPriority="stiff"
