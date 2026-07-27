@@ -37,6 +37,7 @@ from danswer.db.models import SearchDoc as DbSearchDoc
 from danswer.db.models import ToolCall
 from danswer.db.models import User
 from danswer.db.persona import get_persona_by_id
+from danswer.deep_rag.controller import run_deep_rag
 from danswer.document_index.factory import get_default_document_index
 from danswer.file_store.models import ChatFileType
 from danswer.file_store.models import FileDescriptor
@@ -548,6 +549,33 @@ def stream_chat_message_objects(
         document_pruning_config.using_tool_message = explicit_tool_calling_supported(
             llm.config.model_provider, llm.config.model_name
         )
+
+        # Deep RAG (beta): if the assistant enables it AND this chat request opts in,
+        # answer via the verdict-gated multi-hop controller instead of the normal
+        # Answer/tool loop, then persist like a normal assistant message and return.
+        # Beta scope: the synthesized answer is streamed as a single piece; the rich
+        # doc-reference/citation UI is not wired yet (citations appear as [n] text).
+        if persona.deep_rag_enabled and new_msg_req.deep_rag:
+            deep_result = run_deep_rag(
+                query=final_msg.message,
+                user=user,
+                persona=persona,
+                db_session=db_session,
+            )
+            yield DanswerAnswerPiece(answer_piece=deep_result.answer)
+            gen_ai_response_message = partial_response(
+                message=deep_result.answer,
+                rephrased_query=None,
+                reference_docs=None,
+                files=None,
+                token_count=len(llm_tokenizer_encode_func(deep_result.answer)),
+                citations=None,
+                error=None,
+                tool_calls=[],
+            )
+            db_session.commit()
+            yield translate_db_message_to_chat_message_detail(gen_ai_response_message)
+            return
 
         # LLM prompt building, response capturing, etc.
         answer = Answer(
