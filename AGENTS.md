@@ -555,6 +555,28 @@ overlay + toast on failure. **No `router.refresh()`, no `reload()`.**
 
 ---
 
+### 14. Deep RAG is feature-gated; off changes nothing — see `DEEP_RAG.md`
+
+Verdict-gated multi-hop RAG (`backend/danswer/deep_rag/`). It only runs when BOTH
+`Persona.deep_rag_enabled` AND the chat request's `deep_rag` flag are on; otherwise
+the chat path is untouched. Non-obvious points if you touch it:
+
+- **The gate is the single-shot self-verdict**, not an up-front classifier and not a
+  retrieval-score threshold (score does not separate needed vs not — proven in
+  `multihop-gate-eval-40.md`). Only a `coverage=="partial"` verdict escalates.
+- **The controller retrieves with the real user + persona ACL** (`SearchPipeline`,
+  `bypass_acl=False`). The eval harness used `bypass_acl=True`; never let that into
+  the request path.
+- **Fail-open**: any deep-path error returns the single-shot answer. Keep it that way.
+- Prompts in `prompts/deep_rag.py` are ported from upstream Onyx Agent Search
+  (decomposition + compare-guard); we intentionally did NOT port its LangGraph.
+- Beta scope: answer streams as one piece; citations are `[n]` text (no rich
+  doc-reference UI yet).
+- The migration (`deeprag0001`) is re-parented onto `ckpt_idx_attempt_01` for a
+  single linear alembic head after the SharePoint merge.
+
+---
+
 ## Common workflows
 
 ### Add a new connector
