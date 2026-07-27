@@ -11,8 +11,10 @@ from typing import TypeVar
 from retry import retry
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
+from slack_sdk.models.blocks import ContextBlock
 from slack_sdk.models.blocks import DividerBlock
 from slack_sdk.models.blocks import SectionBlock
+from slack_sdk.models.blocks.basic_components import MarkdownTextObject
 from sqlalchemy.orm import Session
 
 from danswer.configs.app_configs import DISABLE_GENERATIVE_AI
@@ -34,6 +36,8 @@ from danswer.danswerbot.slack.blocks import build_sme_validation_block
 from danswer.danswerbot.slack.blocks import build_sources_blocks
 from danswer.danswerbot.slack.blocks import get_feedback_reminder_blocks
 from danswer.danswerbot.slack.blocks import get_restate_blocks
+from danswer.danswerbot.slack.constants import is_search_selection
+from danswer.danswerbot.slack.constants import SEARCH_PERSONA_SENTINEL
 from danswer.danswerbot.slack.constants import SLACK_CHANNEL_ID
 from danswer.danswerbot.slack.models import SlackMessageInfo
 from danswer.danswerbot.slack.tools.jira_tools import create_jira_ticket
@@ -58,6 +62,7 @@ from danswer.db.slack_response_blocklist import (
 )
 from danswer.db.users import add_slack_persona_for_user
 from danswer.db.users import add_user_slack_persona
+from danswer.db.users import clear_user_slack_persona
 from danswer.db.users import fetch_user_slack_persona
 from danswer.db.users import get_user_by_email
 from danswer.llm.answering.prompts.citations_prompt import (
@@ -73,6 +78,11 @@ from danswer.one_shot_answer.models import OneShotQAResponse
 from danswer.search.models import BaseFilters
 from danswer.search.models import OptionalSearchSetting
 from danswer.search.models import RetrievalDetails
+from danswer.secondary_llm_flows.search_routing import build_router_catalog_for_user
+from danswer.secondary_llm_flows.search_routing import DEFAULT_SEARCH_PERSONA_ID
+from danswer.secondary_llm_flows.search_routing import get_router_llm
+from danswer.secondary_llm_flows.search_routing import resolve_search_persona
+from danswer.server.settings.store import load_settings
 from danswer.utils.logger import setup_logger
 
 logger_base = setup_logger()
@@ -195,6 +205,91 @@ def contains_questionmark_outside_links(message: str) -> bool:
     message_without_links = re.sub(url_pattern, "", message)
 
     return "?" in message_without_links
+
+
+def _route_search_persona(
+    query: str, sender_id: str | None, client: WebClient
+) -> tuple[Persona | None, list[str]]:
+    """Search-mode auto-route: pick the best assistant for `query` using the SAME
+    engine as the web auto-search (keyword_route -> kNN-over-Slack).
+
+    Returns (routed_assistant, recommended_assistant_names):
+      - routed_assistant: the chosen assistant, or None to keep the all-source
+        default (persona 0).
+      - recommended_assistant_names: the router's next-best assistants (ranks
+        2..N, excluding whoever answered) for the answer footer.
+
+    ACL: routing is scoped to the assistants the Slack sender can access. If the
+    sender can't be resolved to a Danswer user, we do NOT route (return None) — an
+    unknown/external sender gets the plain default rather than being pointed at an
+    assistant they may not be allowed to see. Fail-OPEN on any error."""
+    try:
+        with Session(get_sqlalchemy_engine()) as db_session:
+            acl_user = None
+            try:
+                if sender_id:
+                    email = (
+                        client.users_info(user=sender_id)
+                        .data["user"]["profile"]  # type: ignore
+                        .get("email")
+                    )
+                    if email:
+                        acl_user = get_user_by_email(email=email, db_session=db_session)
+            except Exception:
+                logger_base.warning(
+                    "search route: could not resolve Slack sender for ACL"
+                )
+            if acl_user is None:
+                # Conservative: no routing for an unresolved sender.
+                return None, []
+            catalog = build_router_catalog_for_user(acl_user, db_session)
+            settings = load_settings()
+            resolution = resolve_search_persona(
+                query,
+                catalog,
+                get_router_llm(),
+                db_session,
+                rules_prompt=(
+                    settings.assistant_router_rules_prompt
+                    if settings.assistant_router_rules_enabled
+                    else None
+                ),
+            )
+            # Map the router's ranked ids -> display names for the footer, dropping
+            # whoever actually answered (the top pick / the default).
+            id_to_name = {entry.persona_id: entry.name for entry in catalog}
+            answered_id = (
+                resolution.persona_id
+                if resolution.routed
+                else DEFAULT_SEARCH_PERSONA_ID
+            )
+            recommendations = [
+                id_to_name[pid]
+                for pid in resolution.ranked_ids
+                if pid != answered_id and pid in id_to_name
+            ][:3]
+            if not resolution.routed:
+                return None, recommendations
+            routed = get_persona_with_docset_and_prompts(
+                persona_id=resolution.persona_id, db_session=db_session
+            )
+            return routed, recommendations
+    except Exception:
+        logger_base.exception("search auto-route failed; using all-source default")
+        return None, []
+
+
+def _build_search_footer_block(answered_by: str, recommendations: list[str]) -> list:
+    """A small context footer for Search-mode answers: which assistant answered +
+    the router's next-best assistants the user can switch to."""
+    parts = [f":mag: Answered by *{answered_by}*"]
+    if recommendations:
+        recs = ", ".join(f"*{name}*" for name in recommendations)
+        parts.append(f"Also relevant: {recs} — switch with `/personas <name>`")
+    return [
+        DividerBlock(),
+        ContextBlock(elements=[MarkdownTextObject(text="  ·  ".join(parts))]),
+    ]
 
 
 def handle_message(
@@ -383,6 +478,20 @@ def handle_message(
                 and message_info.thread_messages[0].message.strip()
             ):
                 persona_name = message_info.thread_messages[0].message.strip()
+                # "/personas search" clears the sticky assistant -> back to the
+                # default Search experience (persona 0, all sources).
+                if is_search_selection(persona_name):
+                    clear_user_slack_persona(db_session, sender_id)
+                    respond_in_thread(
+                        client=client,
+                        channel=channel,
+                        text=(
+                            ":mag: Switched to *Search* (default) — I'll automatically "
+                            "route each question to the most relevant assistant."
+                        ),
+                        thread_ts=message_ts_to_respond_to,
+                    )
+                    return
                 # Match the friendly display name OR the internal name, both
                 # case-insensitive — so "/personas Automation Suite" and
                 # "/personas AutomationSuite" both resolve.
@@ -434,8 +543,18 @@ def handle_message(
                 personas, key=lambda x: (x.display_name or x.name).lower()
             )
 
-            # Create select menu options for all personas
-            select_options = []
+            # Create select menu options: "Search" (the default, no assistant)
+            # pinned first, then all personas the user can access.
+            select_options = [
+                {
+                    "text": {
+                        "type": "plain_text",
+                        "text": "🔎 Search — auto-routes to the most relevant assistant",
+                        "emoji": True,
+                    },
+                    "value": SEARCH_PERSONA_SENTINEL,
+                }
+            ]
             for persona in sorted_personas:
                 select_options.append(
                     {
@@ -512,7 +631,11 @@ def handle_message(
                 respond_in_thread(
                     client=client,
                     channel=channel,
-                    text="No persona is set. Please use the /personas command to set up a persona.",
+                    text=(
+                        ":mag: You're using *Search* (default) — I automatically route "
+                        "each question to the most relevant assistant. Use `/personas` "
+                        "to pin a specific one."
+                    ),
                     thread_ts=message_ts_to_respond_to,
                 )
                 return
@@ -527,6 +650,19 @@ def handle_message(
     elif is_bot_msg and (command == "/personas" or command == "/current_persona"):
         logger.info("The slash command was used in a channel, won't work")
         return
+
+    # Search mode (no assistant selected): auto-route this question to the best
+    # assistant, mirroring the web auto-search. Only overrides when the router
+    # picks a specific assistant; the all-source default (persona is None ->
+    # persona_id 0) is otherwise left byte-for-byte unchanged.
+    search_mode = persona is None
+    search_recommendations: list[str] = []
+    if search_mode and messages:
+        routed_persona, search_recommendations = _route_search_persona(
+            query=messages[-1].message, sender_id=sender_id, client=client
+        )
+        if routed_persona is not None:
+            persona = routed_persona
 
     document_set_names: list[str] | None = None
     prompt = None
@@ -944,6 +1080,16 @@ def handle_message(
     all_blocks = (
         restate_question_block + answer_blocks + citations_block + document_blocks
     )
+
+    # Search-mode footer: attribute the answering assistant and surface the
+    # router's next-best assistants (auto-route transparency + discoverability).
+    if search_mode:
+        answered_by = (
+            (persona.display_name or persona.name) if persona is not None else "Search"
+        )
+        all_blocks = all_blocks + _build_search_footer_block(
+            answered_by, search_recommendations
+        )
 
     if channel_conf and channel_conf.get("follow_up_tags") is not None:
         all_blocks.append(build_follow_up_block(message_id=answer.chat_message_id))

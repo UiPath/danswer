@@ -13,6 +13,17 @@ VIEW_DOC_FEEDBACK_ID = "view-doc-feedback"
 # green "Verified by an SME" badge so readers can trust it.
 SME_VALIDATE_BUTTON_ACTION_ID = "sme-validate-answer"
 
+# Sentinel option value for the "Search" choice in the /personas picker.
+# Selecting it clears the user's sticky assistant so the bot reverts to the
+# default Search experience (persona 0 — all sources, no specific assistant).
+SEARCH_PERSONA_SENTINEL = "__search__"
+
+
+def is_search_selection(value: str | None) -> bool:
+    """True when a /personas selection — a modal option value OR a typed name —
+    means "Search" (clear the sticky assistant, use the default)."""
+    return (value or "").strip().lower() in {SEARCH_PERSONA_SENTINEL, "search"}
+
 
 class FeedbackVisibility(str, Enum):
     PRIVATE = "private"

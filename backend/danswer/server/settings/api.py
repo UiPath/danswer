@@ -1,3 +1,5 @@
+from typing import Any
+
 from fastapi import APIRouter
 from fastapi import Depends
 from fastapi import HTTPException
@@ -26,6 +28,31 @@ def put_settings(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     store_settings(settings)
+
+
+@admin_router.patch("")
+def patch_settings(
+    updates: dict[str, Any], _: User | None = Depends(current_admin_user)
+) -> None:
+    """Field-level update: merge ONLY the provided keys over the stored settings.
+
+    The whole-object PUT above replaces every field, so a client saving one
+    control with a stale snapshot silently clobbers other fields (this wiped the
+    assistant-router rulebook twice — a server-set value the UI didn't know
+    about). PATCH sends only what changed, so writes can't step on each other."""
+    if not updates:
+        return
+    unknown = set(updates) - set(Settings.__fields__)
+    if unknown:
+        raise HTTPException(
+            status_code=400, detail=f"Unknown settings field(s): {sorted(unknown)}"
+        )
+    merged = Settings(**{**load_settings().dict(), **updates})
+    try:
+        merged.check_validity()
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    store_settings(merged)
 
 
 @basic_router.get("")

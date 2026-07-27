@@ -515,6 +515,12 @@ class IndexAttempt(Base):
     new_docs_indexed: Mapped[int | None] = mapped_column(Integer, default=0)
     total_docs_indexed: Mapped[int | None] = mapped_column(Integer, default=0)
     docs_removed_from_index: Mapped[int | None] = mapped_column(Integer, default=0)
+    # Resumable-connector checkpoint: opaque JSON persisted by a
+    # CheckpointedConnector (e.g. SharePoint's Graph delta/nextLink cursor) so a
+    # run killed mid-crawl resumes instead of restarting. NULL for connectors
+    # that don't implement checkpointing (their path is unchanged). Small by
+    # design (a token + phase), so stored inline rather than in a file store.
+    checkpoint: Mapped[str | None] = mapped_column(Text, default=None)
     # only filled if status = "failed"
     error_msg: Mapped[str | None] = mapped_column(Text, default=None)
     # only filled if status = "failed" AND an unhandled exception caused the failure

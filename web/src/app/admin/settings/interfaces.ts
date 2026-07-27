@@ -18,11 +18,14 @@ export interface Settings {
   // AutoSearchRollout). The Search tab + endpoint are gated by this; the
   // backend enforces it independently of the UI.
   auto_search_rollout?: "off" | "admin_only" | "everyone";
-  // Enable the semantic intent pre-route (LLM phrase matcher). Default off.
-  auto_search_intent_enabled?: boolean;
   // Show two answers side by side (single top-1 vs union of top matches) for
   // AI-router picks on the Search tab. Default on.
   auto_search_compare_enabled?: boolean;
+  // Global admin routing rulebook (mirrors backend). When enabled, an LLM applies
+  // these natural-language rules BETWEEN the keyword route and the kNN fallback,
+  // overriding kNN (never a hard keyword). Applies to the web Search tab + Slack.
+  assistant_router_rules_enabled?: boolean;
+  assistant_router_rules_prompt?: string;
 }
 
 export interface EnterpriseSettings {

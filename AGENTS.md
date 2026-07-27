@@ -506,6 +506,55 @@ prod push uses the `~/.zshrc` ACR_USERNAME/ACR_PASSWORD admin creds.)
 
 ---
 
+### 13. Admin → Settings controls: use OPTIMISTIC local state — never re-render from the server on a toggle
+
+`SettingsForm.tsx::updateSettingField` PUTs the whole `Settings` object to
+`/api/admin/settings`. The **read-back** is the trap. Both server-driven refresh
+approaches make the whole page visibly **"shake"/flash on every toggle**:
+
+- `window.location.reload()` — obvious full-page reload (worst).
+- `router.refresh()` — a soft re-fetch, but it still re-renders the root
+  `layout.tsx` (which re-reads the module-level `cachedSettings` in
+  `web/src/components/settings/lib.ts` via `no-store`), and that reflow reads as a
+  flash/jump on each change.
+
+**The fix (current):** render from an **optimistic overlay** —
+`settings = { ...combinedSettings.settings, ...pending }`, where `pending` is a
+`useState<Partial<Settings>>`. On change: `setPending(...)` (control flips
+instantly, zero server round-trip in the UI), PUT in the background, revert the
+overlay + toast on failure. **No `router.refresh()`, no `reload()`.**
+
+**Rules:**
+- Settings writes are **field-level `PATCH /admin/settings`** (merges only the
+  keys you send over the stored settings), NOT a whole-object `PUT`. A whole-object
+  PUT sends every field, so a client saving one control with a **stale snapshot
+  silently clobbers other fields** — including server-set values the UI never
+  loaded (this wiped the assistant-router rulebook twice: a toggle PUT with an
+  empty `assistant_router_rules_prompt`). Send only what changed.
+- Do NOT call `router.refresh()` or `window.location.reload()` after a settings
+  write — both shake the page. Reflect the change with local optimistic state
+  instead; the persisted value loads fresh on the next real navigation.
+- Do NOT memoize the server-side settings read in a **module-level variable**
+  (`web/src/components/settings/lib.ts::getCombinedSettings`). Module state in the
+  Next server is shared across **all requests/users** in the process, so a cache
+  there serves **stale settings to everyone until the pod restarts** — it hid a
+  rule set directly in the store *even in a fresh browser*, and `RootLayout` fed
+  that stale value into `SettingsContext`. `getCombinedSettings` must fetch fresh
+  (`fetchSettingsSS`, `no-store`) every call; use React `cache()` for
+  per-*request* dedup if needed, never module scope.
+- The instant optimistic flip *is* the feedback (fixes the "no feedback → user
+  re-clicks" problem too). Add a success/error toast for persistence result.
+- Don't confuse "no feedback" with "broken." Before assuming a toggle doesn't
+  persist, check the backend (`load_settings()` server-side) — the PUT usually
+  worked. **Verify a toggle STICKS** (round-trips); `PUT 200` ≠ "works in the UI"
+  — same class as the Slack channel-config whitelist (a new field silently not
+  surfacing).
+- New `Settings` fields are default-on-absence: they take the model default until
+  first persisted, so a fresh deploy ships them at their default with no
+  migration.
+
+---
+
 ## Common workflows
 
 ### Add a new connector

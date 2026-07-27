@@ -18,7 +18,9 @@ import { adminDeleteCredential, linkCredential } from "@/lib/credential";
 import { CredentialForm } from "@/components/admin/connectors/CredentialForm";
 import {
   TextFormField,
+  TextArrayField,
   TextArrayFieldBuilder,
+  SelectorFormField,
 } from "@/components/admin/connectors/Field";
 import { ConnectorsTable } from "@/components/admin/connectors/table/ConnectorsTable";
 import { ConnectorForm } from "@/components/admin/connectors/ConnectorForm";
@@ -303,43 +305,73 @@ const MainSection = () => {
             }
             source="sharepoint"
             inputType="poll"
-            // formBody={<></>}
-            formBodyBuilder={TextArrayFieldBuilder({
-              name: "sites",
-              label: "Sites:",
-              subtext: (
-                <>
-                  <br />
-                  <ul>
-                    <li>
-                      • If no sites are specified, all sites in your
-                      organization will be indexed (Sites.Read.All permission
-                      required).
-                    </li>
-                    <li>
-                      • Specifying
-                      &apos;https://danswerai.sharepoint.com/sites/support&apos;
-                      for example will only index documents within this site.
-                    </li>
-                    <li>
-                      • Specifying
-                      &apos;https://danswerai.sharepoint.com/sites/support/subfolder&apos;
-                      for example will only index documents within this folder.
-                    </li>
-                  </ul>
-                </>
-              ),
-            })}
+            formBodyBuilder={(values) => (
+              <>
+                <TextArrayField
+                  name="sites"
+                  label="Sites:"
+                  values={values}
+                  subtext={
+                    <>
+                      <br />
+                      <ul>
+                        <li>
+                          • If no sites are specified, all sites in your
+                          organization will be indexed (Sites.Read.All
+                          permission required).
+                        </li>
+                        <li>
+                          • Specifying
+                          &apos;https://danswerai.sharepoint.com/sites/support&apos;
+                          for example will only index documents within this
+                          site.
+                        </li>
+                        <li>
+                          • Specifying
+                          &apos;https://danswerai.sharepoint.com/sites/support/subfolder&apos;
+                          for example will only index documents within this
+                          folder.
+                        </li>
+                      </ul>
+                    </>
+                  }
+                />
+                <SelectorFormField
+                  name="scrape_scope"
+                  label="Scrape scope:"
+                  options={[
+                    {
+                      name: "Documents only",
+                      value: "documents",
+                      description:
+                        "Index files from the site's default document library " +
+                        "(PDF, Word, PowerPoint, Excel, …). Original behaviour.",
+                    },
+                    {
+                      name: "Full site",
+                      value: "full",
+                      description:
+                        "Recurse the whole site: every document library plus " +
+                        "all modern site pages (.aspx page content).",
+                    },
+                  ]}
+                />
+              </>
+            )}
             validationSchema={Yup.object().shape({
               sites: Yup.array()
                 .of(Yup.string().required("Site names must be strings"))
                 .required(),
+              scrape_scope: Yup.string().oneOf(["documents", "full"]),
             })}
             initialValues={{
               sites: [],
+              scrape_scope: "documents",
             }}
             credentialId={sharepointCredential.id}
             refreshFreq={10 * 60} // 10 minutes
+            pruneFreq={60 * 60 * 24 * 7} // default: Weekly
+            showPruneFreqSelector
           />
         </Card>
       ) : (

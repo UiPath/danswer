@@ -4,6 +4,7 @@ from slack_sdk import WebClient
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.exc import NoResultFound
 
+from danswer.danswerbot.slack.constants import is_search_selection
 from danswer.danswerbot.slack.handlers.handle_thread_summary import (
     handle_thread_summary,
 )
@@ -12,6 +13,7 @@ from danswer.db.persona import fetch_persona_by_id
 from danswer.db.persona import get_personas
 from danswer.db.users import add_slack_persona_for_user
 from danswer.db.users import add_user_slack_persona
+from danswer.db.users import clear_user_slack_persona
 from danswer.db.users import fetch_user_slack_persona
 from danswer.db.users import get_user_by_email
 from danswer.utils.logger import setup_logger
@@ -30,6 +32,20 @@ def handle_modal_submission(client: WebClient, body: dict[str, Any]) -> None:
         user_id = body["user"]["id"]
 
         channel_id = body["view"]["private_metadata"]
+
+        # "Search" pinned option: clear the user's sticky assistant so the bot
+        # reverts to the default Search experience (persona 0, all sources).
+        if is_search_selection(selected_persona_id):
+            with Session(get_sqlalchemy_engine()) as db_session:
+                clear_user_slack_persona(db_session=db_session, sender_id=user_id)
+            client.chat_postMessage(
+                channel=channel_id,
+                text=(
+                    ":mag: *Search* (default) is now active — I'll automatically route "
+                    "each question to the most relevant assistant."
+                ),
+            )
+            return {"response_action": "clear"}
 
         with Session(get_sqlalchemy_engine()) as db_session:
             try:
