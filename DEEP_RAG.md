@@ -9,16 +9,29 @@ chat path is exactly as before.
 
 | assistant `deep_rag_enabled` | chat request `deep_rag` | behavior |
 |---|---|---|
-| off | (n/a) | current single-shot; toggle not shown |
-| on | off (default) | current single-shot |
-| on | on | Deep RAG **forced**: single-shot + always-escalate (decompose → synthesize) + compare-guard |
+| assistant `deep_rag_enabled` | chat toggle (per question) | behavior |
+|---|---|---|
+| off (not rolled out) | shown; **defaults OFF**, user can flip on | on → Deep RAG forced; off → single-shot |
+| on (rolled out) | shown; **defaults ON**, user can flip off | on → Deep RAG forced; off → single-shot |
 
-The chat toggle is a **manual per-question override**: when on it FORCES the deep path
-regardless of the single-shot coverage verdict (`force=True`). The compare-guard still
-keeps single-shot if the deep answer isn't substantially better, so forcing can't
-produce a *worse* answer — only extra work. The verdict-gated *adaptive* mode
-(`force=False`: escalate only on a `partial` verdict) is retained in the controller for
-a future "deep-by-default per assistant" setting; it is not what the manual toggle does.
+Two independent controls:
+- **Assistant lever** (`deep_rag_enabled`) = the gradual-rollout knob. It sets the chat
+  toggle's *default* state for that assistant. It no longer gates whether Deep RAG can
+  run.
+- **Chat toggle** (`request.deep_rag`) = a **per-question override, always available on
+  every assistant**. The backend runs Deep RAG purely on this flag, regardless of the
+  assistant lever — so a user can force it even on a not-yet-rolled-out assistant, or
+  turn it off on a rolled-out one.
+
+When the toggle is on it **forces** the deep path (`force=True`) regardless of the
+single-shot coverage verdict; the compare-guard still keeps single-shot if the deep
+answer isn't substantially better, so forcing can't produce a *worse* answer — only
+extra work. The verdict-gated *adaptive* mode (`force=False`, escalate only on
+`partial`) is retained in the controller for a future "deep-by-default" behavior.
+
+_Deep RAG is intentionally **chat-only**. The search surface auto-selects the assistant
+via routing, so a per-question override doesn't fit there — not exposed by design.
+(Answer Trace still records the search routing decision.)_
 
 ## Flow (`backend/danswer/deep_rag/controller.py`)
 

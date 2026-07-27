@@ -410,6 +410,13 @@ export function ChatPage({
   const livePersona =
     selectedPersona || filteredAssistants[0] || availablePersonas[0];
 
+  // Default the per-question Deep RAG toggle to the active assistant's setting
+  // (gradual rollout); the user can still flip it either way on any assistant.
+  // Resets when the active assistant changes.
+  useEffect(() => {
+    setDeepRag(livePersona?.deep_rag_enabled ?? false);
+  }, [livePersona?.id]);
+
   const [chatSessionSharedStatus, setChatSessionSharedStatus] =
     useState<ChatSessionSharedStatus>(ChatSessionSharedStatus.Private);
 

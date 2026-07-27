@@ -484,22 +484,21 @@ export function ChatInputBar({
                 </button>
               )}
 
-              {/* Deep RAG toggle — shown only when the active assistant has it
-                  enabled (per-assistant pilot). Default off. */}
-              {!retrievalDisabled &&
-                (alternativeAssistant ?? selectedAssistant)
-                  ?.deep_rag_enabled && (
-                  <button
-                    type="button"
-                    onClick={() => setDeepRag(!deepRag)}
-                    title="Force multi-step retrieval for this question (decompose → retrieve per sub-question → synthesize), regardless of whether a single-shot answer would suffice. Only available for assistants with Deep RAG enabled."
-                    className={`flex-none text-sm rounded px-2 py-1 ${
-                      deepRag ? "bg-hover text-emphasis" : "text-subtle"
-                    }`}
-                  >
-                    Deep RAG: {deepRag ? "On" : "Off"}
-                  </button>
-                )}
+              {/* Deep RAG toggle — always available as a per-question override; its
+                  DEFAULT follows the active assistant's deep_rag_enabled (rollout),
+                  but the user can flip it either way on any assistant. */}
+              {!retrievalDisabled && (
+                <button
+                  type="button"
+                  onClick={() => setDeepRag(!deepRag)}
+                  title="Force multi-step retrieval for this question (decompose → retrieve per sub-question → synthesize), regardless of whether a single-shot answer would suffice. Defaults on for assistants with Deep RAG enabled; can be toggled on any assistant."
+                  className={`flex-none text-sm rounded px-2 py-1 ${
+                    deepRag ? "bg-hover text-emphasis" : "text-subtle"
+                  }`}
+                >
+                  Deep RAG: {deepRag ? "On" : "Off"}
+                </button>
+              )}
 
               <ChatInputOption
                 flexPriority="stiff"

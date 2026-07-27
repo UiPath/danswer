@@ -572,7 +572,10 @@ def stream_chat_message_objects(
         # Answer/tool loop, then persist like a normal assistant message and return.
         # Beta scope: the synthesized answer is streamed as a single piece; the rich
         # doc-reference/citation UI is not wired yet (citations appear as [n] text).
-        if persona.deep_rag_enabled and new_msg_req.deep_rag:
+        # Per-question override: the chat toggle runs Deep RAG regardless of the
+        # assistant's deep_rag_enabled (that flag now sets the toggle's DEFAULT /
+        # gradual-rollout, it no longer gates execution). See DEEP_RAG.md.
+        if new_msg_req.deep_rag:
             # Serialize prior turns so follow-up questions decompose/answer in
             # context (keep the most recent ~4k chars). Mirrors upstream's
             # history-aware decomposition.
