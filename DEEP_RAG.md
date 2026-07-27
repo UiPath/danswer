@@ -76,6 +76,11 @@ Measured on 40 Automation Suite / Orchestrator questions (see
 - Citations appear as **`[n]` text**; the rich doc-reference/citation UI is not
   wired yet (`reference_docs=None`, `citations=None` on persist).
 - No token-usage/tool-call metadata for the deep path.
+- **Conversation history is not used.** `run_deep_rag` sees only the current message,
+  so single-shot retrieval and decomposition ignore prior turns. Multi-turn
+  follow-ups ("what about the 2024.10 version?") may decompose/retrieve on the
+  fragment alone. Upstream conditions its decomposition on `{{history}}`; threading
+  history in is the top follow-up (see Future work).
 
 ## Enable / test
 
@@ -95,9 +100,26 @@ Measured on 40 Automation Suite / Orchestrator questions (see
 
 ## Future work
 
+- **Thread conversation history** into single-shot retrieval + decomposition so
+  multi-turn follow-ups work (closes the history limitation above; upstream passes
+  `{{history}}` to its decomposition prompt).
 - Rich citations + doc-reference UI for the deep path (map synthesized `[n]` to
   reference docs like the normal `Answer` flow).
+- **Per-sub-question answering + quality-check** — upstream generates an answer per
+  sub-question (`generate_sub_answer`) and drops weak ones (`check_sub_answer`), then
+  composes; we synthesize directly from grouped chunks. A quality lever at higher
+  LLM cost.
 - Optional per-doc LLM verification / query expansion (upstream `verify_documents`,
   `expand_queries`) if retrieval noise proves to be the bottleneck.
 - Tool/action calling ("B") — structured lookups (e.g. ownership system-of-record)
   for question classes RAG can't answer reliably.
+
+## Upstream comparison (what we deliberately did NOT port)
+
+vs Onyx `deep_search` (main, Mar-2025): we skip the **LangGraph substrate**, the
+**always-decompose + second refinement round** (replaced by our verdict gate — their
+gate is a stub), **per-sub-question answer generation/check**, **query expansion**,
+**per-doc verification**, and **streaming of intermediate reasoning**. We port their
+**decomposition** and **compare** prompts. Net: a plain controller that captures the
+core multi-hop value at a fraction of the LLM calls, plus a real auto-gate upstream
+never built.
