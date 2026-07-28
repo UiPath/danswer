@@ -33,6 +33,7 @@ from danswer.danswerbot.slack.constants import LIKE_BLOCK_ACTION_ID
 from danswer.danswerbot.slack.constants import SME_VALIDATE_BUTTON_ACTION_ID
 from danswer.danswerbot.slack.icons import source_to_github_img_link
 from danswer.danswerbot.slack.utils import build_feedback_id
+from danswer.danswerbot.slack.utils import markdown_to_slack
 from danswer.danswerbot.slack.utils import remove_slack_text_interactions
 from danswer.danswerbot.slack.utils import translate_vespa_highlight_to_slack
 from danswer.search.models import SavedSearchDoc
@@ -411,8 +412,17 @@ def build_qa_response_blocks(
             )
         ]
     else:
-        answer_processed = strip_code_fence_languages(
-            decode_escapes(remove_slack_text_interactions(answer))
+        # Sanitize Slack interactions FIRST, then convert LLM markdown -> Slack mrkdwn.
+        # Order matters: remove_slack_text_interactions.replace_links() collapses
+        # <url|text> -> text, so markdown_to_slack (which produces <url|text> links)
+        # must run AFTER it, otherwise the URLs would be stripped. markdown_to_slack
+        # also turns ### headers into *bold* with blank-line spacing and -/* bullets
+        # into •, so every Slack answer renders cleanly (not just Deep RAG's
+        # multi-section synthesis, which is what surfaced the clubbing).
+        answer_processed = markdown_to_slack(
+            strip_code_fence_languages(
+                decode_escapes(remove_slack_text_interactions(answer))
+            )
         )
         if process_message_for_citations:
             answer_processed = _process_citations_for_slack(answer_processed)

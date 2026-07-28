@@ -295,15 +295,18 @@ def markdown_to_slack(text: str) -> str:
     """
 
     def _header(match: "re.Match[str]") -> str:
-        # drop any residual ** in the title, render the heading as bold
+        # drop any residual ** in the title, render the heading as bold, and force a
+        # blank line before it so sections don't club together in Slack (which shows
+        # single newlines tightly). Excess newlines are collapsed below.
         title = match.group(1).replace("*", "").strip()
-        return f"*{title}*"
+        return f"\n*{title}*"
 
     out = _MD_LINK_RE.sub(r"<\2|\1>", text)  # [text](url) -> <url|text>
     out = _MD_BOLD_RE.sub(r"*\1*", out)  # **bold** -> *bold*
-    out = _MD_HEADER_RE.sub(_header, out)  # ### Heading -> *Heading*
+    out = _MD_HEADER_RE.sub(_header, out)  # ### Heading -> (blank line) *Heading*
     out = _MD_BULLET_RE.sub(r"\1• ", out)  # -/* bullets -> •
-    return out
+    out = re.sub(r"\n{3,}", "\n\n", out)  # collapse runs of blank lines to one
+    return out.strip()
 
 
 def get_channel_from_id(client: WebClient, channel_id: str) -> dict[str, Any]:
