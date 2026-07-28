@@ -108,7 +108,12 @@ def render_answer_markdown(answer: str) -> str:
       bullets to •.
     """
     if DANSWER_BOT_SLACK_MARKDOWN_RENDERER == "mistune":
-        return decode_escapes(remove_slack_entities_only(format_slack_message(answer)))
+        rendered = decode_escapes(
+            remove_slack_entities_only(format_slack_message(answer))
+        )
+        # header() emits a leading blank line before each section (see formatting.py);
+        # collapse any resulting run of blank lines and drop the stray leading one.
+        return re.sub(r"\n{3,}", "\n\n", rendered).strip()
     return markdown_to_slack(
         strip_code_fence_languages(
             decode_escapes(remove_slack_text_interactions(answer))

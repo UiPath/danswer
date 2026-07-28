@@ -30,7 +30,12 @@ class SlackRenderer(Renderer):
         return text
 
     def header(self, text: str, level: int, raw: str | None = None) -> str:
-        return f"*{text}*\n"
+        # Diverge from upstream (which returns "*text*\n"): force a blank line BEFORE
+        # each section title so multi-section answers don't club together. mistune
+        # concatenates block outputs with no separator, so the leading "\n" here is
+        # what produces the blank line between sections. The stray leading newline on
+        # the very first header is stripped by the caller (render_answer_markdown).
+        return f"\n*{text}*\n"
 
     def emphasis(self, text: str) -> str:
         return f"_{text}_"
