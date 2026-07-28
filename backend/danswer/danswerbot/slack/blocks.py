@@ -24,6 +24,7 @@ from danswer.configs.app_configs import DISABLE_GENERATIVE_AI
 from danswer.configs.constants import DocumentSource
 from danswer.configs.constants import SearchFeedbackType
 from danswer.configs.danswerbot_configs import DANSWER_BOT_NUM_DOCS_TO_DISPLAY
+from danswer.configs.danswerbot_configs import DANSWER_BOT_SLACK_MARKDOWN_RENDERER
 from danswer.danswerbot.slack.constants import DISLIKE_BLOCK_ACTION_ID
 from danswer.danswerbot.slack.constants import FEEDBACK_DOC_BUTTON_BLOCK_ACTION_ID
 from danswer.danswerbot.slack.constants import FOLLOWUP_BUTTON_ACTION_ID
@@ -31,9 +32,11 @@ from danswer.danswerbot.slack.constants import FOLLOWUP_BUTTON_RESOLVED_ACTION_I
 from danswer.danswerbot.slack.constants import IMMEDIATE_RESOLVED_BUTTON_ACTION_ID
 from danswer.danswerbot.slack.constants import LIKE_BLOCK_ACTION_ID
 from danswer.danswerbot.slack.constants import SME_VALIDATE_BUTTON_ACTION_ID
+from danswer.danswerbot.slack.formatting import format_slack_message
 from danswer.danswerbot.slack.icons import source_to_github_img_link
 from danswer.danswerbot.slack.utils import build_feedback_id
 from danswer.danswerbot.slack.utils import markdown_to_slack
+from danswer.danswerbot.slack.utils import remove_slack_entities_only
 from danswer.danswerbot.slack.utils import remove_slack_text_interactions
 from danswer.danswerbot.slack.utils import translate_vespa_highlight_to_slack
 from danswer.search.models import SavedSearchDoc
@@ -90,6 +93,27 @@ _CODE_FENCE_LANGUAGE_RE = re.compile(r"```[ \t]*[A-Za-z][\w+#.\-]*[ \t]*(\r?\n)"
 
 def strip_code_fence_languages(text: str) -> str:
     return _CODE_FENCE_LANGUAGE_RE.sub(r"```\1", text)
+
+
+def render_answer_markdown(answer: str) -> str:
+    """Convert an LLM markdown answer to Slack mrkdwn using the configured renderer
+    (DANSWER_BOT_SLACK_MARKDOWN_RENDERER), so the two can be A/B'd on real answers.
+
+    - "mistune": upstream-ported AST renderer. Parse markdown FIRST (it owns links +
+      bold), then strip Slack entities with the reduced sanitizer that won't undo them,
+      then decode escapes — mirrors upstream Onyx's ordering.
+    - "regex" (default): in-house markdown_to_slack. Our sanitizer strips <url|text>
+      and re-handles bold, so it must run FIRST; markdown_to_slack then (re-)adds Slack
+      links/bold, converts ### headers to *bold* with blank-line spacing, and -/*
+      bullets to •.
+    """
+    if DANSWER_BOT_SLACK_MARKDOWN_RENDERER == "mistune":
+        return decode_escapes(remove_slack_entities_only(format_slack_message(answer)))
+    return markdown_to_slack(
+        strip_code_fence_languages(
+            decode_escapes(remove_slack_text_interactions(answer))
+        )
+    )
 
 
 def _split_text(text: str, limit: int = 3000) -> list[str]:
@@ -412,18 +436,7 @@ def build_qa_response_blocks(
             )
         ]
     else:
-        # Sanitize Slack interactions FIRST, then convert LLM markdown -> Slack mrkdwn.
-        # Order matters: remove_slack_text_interactions.replace_links() collapses
-        # <url|text> -> text, so markdown_to_slack (which produces <url|text> links)
-        # must run AFTER it, otherwise the URLs would be stripped. markdown_to_slack
-        # also turns ### headers into *bold* with blank-line spacing and -/* bullets
-        # into •, so every Slack answer renders cleanly (not just Deep RAG's
-        # multi-section synthesis, which is what surfaced the clubbing).
-        answer_processed = markdown_to_slack(
-            strip_code_fence_languages(
-                decode_escapes(remove_slack_text_interactions(answer))
-            )
-        )
+        answer_processed = render_answer_markdown(answer)
         if process_message_for_citations:
             answer_processed = _process_citations_for_slack(answer_processed)
         answer_blocks = [

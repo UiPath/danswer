@@ -281,6 +281,20 @@ def remove_slack_text_interactions(slack_str: str) -> str:
     return slack_str
 
 
+def remove_slack_entities_only(slack_str: str) -> str:
+    """Reduced sanitizer for use WITH the mistune renderer (formatting.py), mirroring
+    upstream Onyx's remove_slack_text_interactions. Strips Slack entities (tags,
+    channels, mentions, catchall) but deliberately does NOT run replace_links or
+    handle_bold_syntax_for_slack — the markdown parser already owns links and bold, so
+    re-running those would collapse the <url|text> links it emitted."""
+    slack_str = SlackTextCleaner.replace_tags_basic(slack_str)
+    slack_str = SlackTextCleaner.replace_channels_basic(slack_str)
+    slack_str = SlackTextCleaner.replace_special_mentions(slack_str)
+    slack_str = SlackTextCleaner.replace_special_catchall(slack_str)
+    slack_str = SlackTextCleaner.add_zero_width_whitespace_after_tag(slack_str)
+    return slack_str
+
+
 _MD_HEADER_RE = re.compile(r"(?m)^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$")
 _MD_LINK_RE = re.compile(r"\[([^\]]+)\]\((https?://[^)\s]+)\)")
 _MD_BOLD_RE = re.compile(r"\*\*([^*\n]+)\*\*")
