@@ -1,9 +1,13 @@
 """Deep RAG controller — feature-gated, verdict-driven multi-hop.
 
-Flow (only runs when the assistant AND the chat override both enable it):
+Callers:
+  - Web chat: `force=True` (per-question toggle) — always escalate.
+  - Slack bot: `force=False`, gated on the assistant's deep_rag_enabled — adaptive.
+
+Flow:
   1. single-shot answer + self-reported coverage verdict (one LLM call)
-  2. coverage == "complete"  -> return single-shot (no escalation, ~1x cost)
-  3. coverage == "partial"   -> decompose (cap N, seeded by the verdict's `missing`)
+  2. coverage == "complete" and not force -> return single-shot (no escalation, ~1x)
+  3. otherwise (partial, or forced) -> decompose (cap N, seeded by `missing`)
                                 -> retrieve per sub-question -> synthesize
                                 -> compare-guard: keep the deeper answer only if it is
                                    SUBSTANTIALLY better, else fall back to single-shot
@@ -14,8 +18,9 @@ Design notes:
     (mirrors the eval harness that validated this logic).
   - Fail-OPEN: any error in the deep path returns the single-shot answer. Deep RAG must
     never make the current experience worse.
-  - run_deep_rag retrieves through SearchPipeline with the REAL user + persona (ACL
-    enforced). It must never use bypass_acl — that was eval-only.
+  - Retrieval enforces the REAL user's ACL by default; `bypass_acl=True` only for
+    surfaces that manage access differently (the Slack bot, user=None). Never bypass
+    in the web request path.
   - We reuse upstream Onyx's decomposition + comparison prompt learnings (see
     danswer/prompts/deep_rag.py), not its LangGraph.
 """
@@ -258,10 +263,17 @@ def deep_rag_answer(
 
 
 def _persona_retriever(
-    user: User | None, persona: Persona, llm: LLM, fast_llm: LLM, db_session: Session
+    user: User | None,
+    persona: Persona,
+    llm: LLM,
+    fast_llm: LLM,
+    db_session: Session,
+    bypass_acl: bool = False,
 ) -> RetrieveFn:
-    """Real retrieval: SearchPipeline with the REAL user + persona (ACL enforced).
-    NEVER bypass_acl — that was eval-only."""
+    """Retrieval via SearchPipeline scoped to the persona. Enforces the REAL user's
+    ACL by default (web chat). `bypass_acl=True` only for surfaces that manage access
+    differently — e.g. the Slack bot, which retrieves with user=None like its normal
+    answer flow. Never bypass in the web request path."""
 
     def retrieve(query: str, k: int) -> list[Any]:
         request = SearchRequest(query=query, persona=persona)
@@ -271,7 +283,7 @@ def _persona_retriever(
             llm=llm,
             fast_llm=fast_llm,
             db_session=db_session,
-            bypass_acl=False,
+            bypass_acl=bypass_acl,
         )
         sections = sorted(
             pipeline.retrieved_sections, key=lambda s: (s.score or 0.0), reverse=True
@@ -289,14 +301,19 @@ def run_deep_rag(
     max_subquestions: int = DEFAULT_MAX_SUBQUESTIONS,
     history: str = "",
     force: bool = False,
+    bypass_acl: bool = False,
 ) -> DeepRagResult:
-    """Entry point: wire the real LLM + ACL-scoped retriever into the deep_rag loop.
+    """Entry point: wire the LLM + persona-scoped retriever into the deep_rag loop.
 
     `history` is the serialized prior conversation (empty for the first turn), so
     follow-up questions decompose/answer in context. `force=True` always escalates
-    (the manual per-question override); `force=False` is verdict-gated."""
+    (the web manual override); `force=False` is verdict-gated (adaptive — used by
+    Slack). `bypass_acl=True` for surfaces like the Slack bot (see _persona_retriever).
+    """
     llm, fast_llm = get_llms_for_persona(persona)
-    retrieve = _persona_retriever(user, persona, llm, fast_llm, db_session)
+    retrieve = _persona_retriever(
+        user, persona, llm, fast_llm, db_session, bypass_acl=bypass_acl
+    )
     return deep_rag_answer(
         query,
         retrieve,

@@ -29,9 +29,15 @@ answer isn't substantially better, so forcing can't produce a *worse* answer —
 extra work. The verdict-gated *adaptive* mode (`force=False`, escalate only on
 `partial`) is retained in the controller for a future "deep-by-default" behavior.
 
-_Deep RAG is intentionally **chat-only**. The search surface auto-selects the assistant
-via routing, so a per-question override doesn't fit there — not exposed by design.
-(Answer Trace still records the search routing decision.)_
+**Surfaces:**
+- **Web chat** — per-question toggle; when on it **forces** the deep path (`force=True`).
+- **Slack bot** — no per-message toggle, so it's **assistant-gated + adaptive**: if the
+  selected assistant has `deep_rag_enabled`, run `force=False` (single-shot → escalate
+  only on a `partial` verdict → compare-guard). Retrieves with `bypass_acl` like the
+  bot's normal answer flow; surfaces "🔎 Deep-searched N angles" when it escalated; fails
+  open to the normal Slack answer. See `danswerbot/slack/handlers/handle_message.py`.
+- **Web search tab** — intentionally **excluded** (auto-routes the assistant, so a
+  per-question override doesn't fit). Answer Trace still records its routing decision.
 
 ## Flow (`backend/danswer/deep_rag/controller.py`)
 

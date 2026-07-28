@@ -17,6 +17,8 @@ from slack_sdk.models.blocks import SectionBlock
 from slack_sdk.models.blocks.basic_components import MarkdownTextObject
 from sqlalchemy.orm import Session
 
+from danswer.chat.models import CitationInfo
+from danswer.chat.models import QADocsResponse
 from danswer.configs.app_configs import DISABLE_GENERATIVE_AI
 from danswer.configs.danswerbot_configs import DANSWER_BOT_ANSWER_GENERATION_TIMEOUT
 from danswer.configs.danswerbot_configs import DANSWER_BOT_DISABLE_COT
@@ -50,6 +52,8 @@ from danswer.danswerbot.slack.utils import respond_in_thread
 from danswer.danswerbot.slack.utils import slack_usage_report
 from danswer.danswerbot.slack.utils import SlackRateLimiter
 from danswer.danswerbot.slack.utils import update_emote_react
+from danswer.db.chat import create_db_search_doc
+from danswer.db.chat import translate_db_search_doc_to_server_search_doc
 from danswer.db.engine import get_sqlalchemy_engine
 from danswer.db.models import Persona
 from danswer.db.models import SlackBotConfig
@@ -65,6 +69,7 @@ from danswer.db.users import add_user_slack_persona
 from danswer.db.users import clear_user_slack_persona
 from danswer.db.users import fetch_user_slack_persona
 from danswer.db.users import get_user_by_email
+from danswer.deep_rag.controller import run_deep_rag
 from danswer.llm.answering.prompts.citations_prompt import (
     compute_max_document_tokens_for_persona,
 )
@@ -78,6 +83,7 @@ from danswer.one_shot_answer.models import OneShotQAResponse
 from danswer.search.models import BaseFilters
 from danswer.search.models import OptionalSearchSetting
 from danswer.search.models import RetrievalDetails
+from danswer.search.utils import chunks_or_sections_to_search_docs
 from danswer.secondary_llm_flows.search_routing import build_router_catalog_for_user
 from danswer.secondary_llm_flows.search_routing import DEFAULT_SEARCH_PERSONA_ID
 from danswer.secondary_llm_flows.search_routing import get_router_llm
@@ -782,6 +788,81 @@ def handle_message(
         max_history_tokens: int | None = None
 
         with Session(get_sqlalchemy_engine()) as db_session:
+            # Deep RAG on Slack: assistant-gated + ADAPTIVE. If the selected
+            # assistant has deep_rag_enabled, run the verdict-gated loop (single-shot
+            # -> escalate only if the answer is judged partial -> compare-guard ->
+            # best answer). Fails OPEN to the normal Slack answer path on any error.
+            dr_persona = fetch_persona_by_id(db_session, new_message_request.persona_id)
+            if (
+                not DISABLE_GENERATIVE_AI
+                and dr_persona is not None
+                and dr_persona.deep_rag_enabled
+            ):
+                try:
+                    dr_query = new_message_request.messages[-1].message
+                    dr_history = "\n".join(
+                        m.message for m in new_message_request.messages[:-1]
+                    )[-4000:]
+                    dr = run_deep_rag(
+                        query=dr_query,
+                        user=None,
+                        persona=dr_persona,
+                        db_session=db_session,
+                        history=dr_history,
+                        force=False,  # adaptive: escalate only on a partial verdict
+                        bypass_acl=bypass_acl,
+                    )
+                    # Persist the retrieved sections as search docs so the Slack
+                    # sources blocks render (and feedback references resolve).
+                    dr_db_docs = [
+                        create_db_search_doc(
+                            server_search_doc=doc, db_session=db_session
+                        )
+                        for doc in chunks_or_sections_to_search_docs(dr.sections)
+                    ]
+                    db_session.commit()
+                    dr_citations: list[CitationInfo] = []
+                    dr_seen: set[int] = set()
+                    for marker in re.findall(r"\[(\d+)\]", dr.answer):
+                        num = int(marker)
+                        if num in dr_seen or not (1 <= num <= len(dr.sections)):
+                            continue
+                        cited_doc_id = getattr(
+                            dr.sections[num - 1], "document_id", None
+                        )
+                        if cited_doc_id is not None:
+                            dr_citations.append(
+                                CitationInfo(citation_num=num, document_id=cited_doc_id)
+                            )
+                            dr_seen.add(num)
+                    dr_answer_text = dr.answer
+                    if dr.escalated:
+                        dr_answer_text += (
+                            f"\n\n_🔎 Deep-searched {len(dr.sub_questions)} angles._"
+                        )
+                    return OneShotQAResponse(
+                        answer=dr_answer_text,
+                        docs=QADocsResponse(
+                            rephrased_query=dr_query,
+                            top_documents=[
+                                translate_db_search_doc_to_server_search_doc(d)
+                                for d in dr_db_docs
+                            ],
+                            predicted_flow=None,
+                            predicted_search=None,
+                            applied_source_filters=None,
+                            applied_time_cutoff=None,
+                            recency_bias_multiplier=1.0,
+                        ),
+                        citations=dr_citations or None,
+                        error_msg=None,
+                        answer_valid=True,
+                    )
+                except Exception:
+                    logger.exception(
+                        "deep_rag Slack path failed; falling back to normal answer"
+                    )
+
             if len(new_message_request.messages) > 1:
                 persona = cast(
                     Persona,
