@@ -430,7 +430,11 @@ def handle_message(
 
     if is_bot_msg and channel_name is None:
         command = message_info.command
-        if command == "/personas":
+        # `/personas-dev` is a dev-only alias: the dev bot (Darwinx) can't register
+        # `/personas` when the prod bot already owns that command name in the same
+        # workspace, so register `/personas-dev` on the dev app to exercise this
+        # locally. Harmless in prod (that command isn't registered there).
+        if command in ("/personas", "/personas-dev"):
             with Session(get_sqlalchemy_engine()) as db_session:
                 # ACL scope: only offer personas this Slack user can access.
                 # Resolve the sender to a Danswer user via their Slack email;
