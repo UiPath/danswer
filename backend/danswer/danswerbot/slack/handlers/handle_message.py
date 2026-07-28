@@ -48,6 +48,7 @@ from danswer.danswerbot.slack.utils import ChannelIdAdapter
 from danswer.danswerbot.slack.utils import fetch_userids_from_emails
 from danswer.danswerbot.slack.utils import fetch_userids_from_groups
 from danswer.danswerbot.slack.utils import get_slack_message_link
+from danswer.danswerbot.slack.utils import markdown_to_slack
 from danswer.danswerbot.slack.utils import respond_in_thread
 from danswer.danswerbot.slack.utils import slack_usage_report
 from danswer.danswerbot.slack.utils import SlackRateLimiter
@@ -835,7 +836,9 @@ def handle_message(
                                 CitationInfo(citation_num=num, document_id=cited_doc_id)
                             )
                             dr_seen.add(num)
-                    dr_answer_text = dr.answer
+                    # Convert the multi-section synthesis markdown to Slack mrkdwn
+                    # (### headers -> *bold*, **b** -> *b*, links, bullets).
+                    dr_answer_text = markdown_to_slack(dr.answer)
                     if dr.escalated:
                         dr_answer_text += (
                             f"\n\n_🔎 Deep-searched {len(dr.sub_questions)} angles._"
