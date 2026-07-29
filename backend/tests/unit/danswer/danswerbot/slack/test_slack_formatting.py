@@ -71,9 +71,11 @@ def test_mistune_blockquote_uses_native_slack_quote() -> None:
     assert "<blockquote>" not in _mistune("> quoted")
 
 
-def test_mistune_hrule_not_raw_html() -> None:
+def test_mistune_hrule_dropped_to_blank_line() -> None:
+    # a horizontal rule renders as just section spacing, no visible line, no raw <hr>
     out = _mistune("a\n\n---\n\nb")
-    assert "───────" in out and "<hr>" not in out
+    assert out == "a\n\nb"
+    assert "<hr>" not in out and "───" not in out
 
 
 def test_mistune_hard_linebreak_is_newline_not_br() -> None:
