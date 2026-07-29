@@ -42,6 +42,23 @@ kubectl cp darwin/$POD:/tmp/clone_bundle ./clone_bundle
 The bundle is `meta.json` + `db.json` + `vespa/<source>.jsonl` (one chunk per
 line).
 
+#### Cloning a specific document set (e.g. Automation Suite)
+
+To pull a focused corpus by **document-set name** instead of (or in addition to)
+per-source, use `--doc-sets`. Given without `--sources`, it clones *only* the
+doc-set(s):
+
+```bash
+kubectl exec -n darwin $POD -- python /tmp/clone.py export \
+    --out /tmp/clone_bundle --doc-sets AutomationSuite --per-doc-set 1000
+```
+
+This writes `vespa/docset_<name>.jsonl.gz` (latest `--per-doc-set` docs, default
+1000). Import needs no extra flags — it globs `vespa/*.jsonl(.gz)` and the
+`document_set` DB rows come across with the normal DB clone, so doc-set query-time
+scoping works locally. `AutomationSuite` is large (~146k chunks total in prod); the
+`--per-doc-set` cap keeps the slice manageable — raise it for fuller coverage.
+
 ### Phase 2 — import (locally)
 
 Run from `backend/` with your **local** env. A single-node local Vespa serves the

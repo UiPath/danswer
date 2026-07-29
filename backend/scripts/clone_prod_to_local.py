@@ -4,7 +4,10 @@ Copies, into a local setup that already runs the app + an empty Vespa + a
 migrated Postgres:
 
   1. Vespa: the latest N documents (default 500) PER SOURCE — all their chunks,
-     including embeddings, ACLs and document-set membership.
+     including embeddings, ACLs and document-set membership. You can additionally
+     (or instead) clone by DOCUMENT SET with --doc-sets, e.g. to pull the
+     Automation Suite corpus for focused local testing:
+         export --doc-sets AutomationSuite --per-doc-set 1000
   2. Postgres: assistants (personas) + their prompts + document sets + the
      persona<->prompt and persona<->document_set associations.
 
@@ -124,15 +127,18 @@ def _docid_from_vespa_id(vespa_id: str) -> str:
 # --------------------------------------------------------------------------- #
 # EXPORT
 # --------------------------------------------------------------------------- #
-def _latest_doc_ids(client: httpx.Client, index: str, source: str, n: int) -> list[str]:
-    """The N most-recently-updated distinct document_ids for a source."""
+def _grouped_doc_ids(
+    client: httpx.Client, index: str, where: str, params: dict, n: int
+) -> list[str]:
+    """The N most-recently-updated distinct document_ids matching `where` (a Vespa
+    selection using the placeholders in `params`)."""
     yql = (
-        f"select * from {index} where source_type contains @src | "
+        f"select * from {index} where {where} | "
         f"all(group(document_id) max({n}) order(-max(doc_updated_at)) each())"
     )
     resp = client.post(
         f"{VESPA_APP_CONTAINER_URL}/search/",
-        json={"yql": yql, "src": source, "hits": 0, "timeout": "30s"},
+        json={**params, "yql": yql, "hits": 0, "timeout": "30s"},
     )
     resp.raise_for_status()
     doc_ids: list[str] = []
@@ -159,6 +165,22 @@ def _latest_doc_ids(client: httpx.Client, index: str, source: str, n: int) -> li
     seen: set[str] = set()
     ordered = [d for d in doc_ids if not (d in seen or seen.add(d))]
     return ordered[:n]
+
+
+def _latest_doc_ids(client: httpx.Client, index: str, source: str, n: int) -> list[str]:
+    """The N most-recently-updated distinct document_ids for a source."""
+    return _grouped_doc_ids(
+        client, index, "source_type contains @src", {"src": source}, n
+    )
+
+
+def _latest_doc_ids_for_docset(
+    client: httpx.Client, index: str, doc_set: str, n: int
+) -> list[str]:
+    """The N most-recently-updated distinct document_ids in a document set."""
+    return _grouped_doc_ids(
+        client, index, "document_sets contains @ds", {"ds": doc_set}, n
+    )
 
 
 def _iter_chunks_for_docs(
@@ -189,16 +211,50 @@ def _iter_chunks_for_docs(
                 break
 
 
+def _safe_name(name: str) -> str:
+    """Filesystem-safe stem for a doc-set name (which may contain spaces/slashes)."""
+    return "".join(ch if ch.isalnum() or ch in "-_." else "_" for ch in name)
+
+
+def _export_docs(
+    client: httpx.Client, index: str, doc_ids: list[str], path: Path
+) -> int:
+    """Stream all chunks for doc_ids to a gzip file; return chunk count. Streaming
+    keeps memory bounded (embeddings are large) and the bundle small (float-text
+    compresses well)."""
+    n = 0
+    with gzip.open(path, "wt") as f:
+        for c in _iter_chunks_for_docs(client, index, doc_ids):
+            f.write(json.dumps(c) + "\n")
+            n += 1
+    return n
+
+
 def export(args: argparse.Namespace) -> None:
     out_dir = Path(args.out)
     (out_dir / "vespa").mkdir(parents=True, exist_ok=True)
     index = _index_name()
-    sources = args.sources or DEFAULT_SOURCES
+    doc_sets = args.doc_sets or []
+    # If the caller asked for doc-sets but not sources, clone only the doc-sets
+    # (don't also drag in the default per-source slice).
+    if args.sources is not None:
+        sources = args.sources
+    elif doc_sets:
+        sources = []
+    else:
+        sources = DEFAULT_SOURCES
     print(
         f"[export] index_name={index}  sources={sources}  per_source={args.per_source}"
+        f"  doc_sets={doc_sets}  per_doc_set={args.per_doc_set}"
     )
 
-    meta = {"index_name": index, "per_source": args.per_source, "sources": sources}
+    meta = {
+        "index_name": index,
+        "per_source": args.per_source,
+        "sources": sources,
+        "doc_sets": doc_sets,
+        "per_doc_set": args.per_doc_set,
+    }
     (out_dir / "meta.json").write_text(json.dumps(meta, indent=2))
 
     if not args.db_only:
@@ -208,16 +264,24 @@ def export(args: argparse.Namespace) -> None:
                 if not doc_ids:
                     print(f"[export]   {src}: 0 documents", flush=True)
                     continue
-                # Stream straight to a gzip file: bounded memory + a much smaller
-                # bundle (embedding float-text compresses well).
                 path = out_dir / "vespa" / f"{src}.jsonl.gz"
-                n = 0
-                with gzip.open(path, "wt") as f:
-                    for c in _iter_chunks_for_docs(client, index, doc_ids):
-                        f.write(json.dumps(c) + "\n")
-                        n += 1
+                n = _export_docs(client, index, doc_ids, path)
                 print(
                     f"[export]   {src}: {len(doc_ids)} docs, {n} chunks -> {path.name}",
+                    flush=True,
+                )
+            for ds in doc_sets:
+                doc_ids = _latest_doc_ids_for_docset(
+                    client, index, ds, args.per_doc_set
+                )
+                if not doc_ids:
+                    print(f"[export]   docset {ds!r}: 0 documents", flush=True)
+                    continue
+                path = out_dir / "vespa" / f"docset_{_safe_name(ds)}.jsonl.gz"
+                n = _export_docs(client, index, doc_ids, path)
+                print(
+                    f"[export]   docset {ds!r}: {len(doc_ids)} docs, {n} chunks "
+                    f"-> {path.name}",
                     flush=True,
                 )
 
@@ -345,7 +409,19 @@ def main() -> None:
     pe = sub.add_parser("export", help="export from PROD (run inside a prod pod)")
     pe.add_argument("--out", required=True, help="bundle output directory")
     pe.add_argument("--per-source", type=int, default=500)
-    pe.add_argument("--sources", nargs="*", help=f"defaults to: {DEFAULT_SOURCES}")
+    pe.add_argument(
+        "--sources",
+        nargs="*",
+        help=f"defaults to: {DEFAULT_SOURCES} (unless --doc-sets is given alone)",
+    )
+    pe.add_argument(
+        "--doc-sets",
+        nargs="*",
+        help="clone by document-set NAME(s), e.g. AutomationSuite (latest "
+        "--per-doc-set docs each). If given without --sources, only doc-sets "
+        "are cloned.",
+    )
+    pe.add_argument("--per-doc-set", type=int, default=1000)
     pe.add_argument("--vespa-only", action="store_true")
     pe.add_argument("--db-only", action="store_true")
     pe.set_defaults(func=export)
