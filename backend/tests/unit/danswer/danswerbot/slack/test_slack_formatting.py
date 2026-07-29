@@ -56,6 +56,14 @@ def test_mistune_ordered_and_unordered_lists() -> None:
     assert _mistune("1. a\n2. b") == "1. a\n\n2. b"
 
 
+def test_mistune_loose_list_no_blank_between_point_and_subbullets() -> None:
+    # a "loose" list (blank lines in source) paragraph-wraps the lead line; the number
+    # must stay directly above its own sub-bullets, with the blank line only BETWEEN
+    # numbered points
+    md = "1. **H:**\n\n    - a\n    - b\n\n2. **H2:**\n\n    - c"
+    assert _mistune(md) == "1. *H:*\n    • a\n    • b\n\n2. *H2:*\n    • c"
+
+
 def test_mistune_nested_list_not_clubbed() -> None:
     # regression: the upstream "li: " hack glued a parent item onto its first child
     assert _mistune("- top\n    - child\n- top2") == "• top\n    • child\n• top2"

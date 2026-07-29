@@ -78,7 +78,11 @@ class SlackRenderer(Renderer):
             prefix = f"{i}. " if ordered else "• "
             lines.append(prefix + item_lines[0])
             for cont in item_lines[1:]:
-                lines.append(f"    {cont}" if cont.strip() else cont)
+                # drop blank lines WITHIN an item (loose lists paragraph-wrap the lead
+                # line, which otherwise detaches a point from its own sub-bullets);
+                # spacing BETWEEN points is added above for ordered lists
+                if cont.strip():
+                    lines.append(f"    {cont}")
         # leading newline: a nested list must start on its own line, not glued to the
         # parent item's inline text
         return "\n" + "\n".join(lines) + "\n"
