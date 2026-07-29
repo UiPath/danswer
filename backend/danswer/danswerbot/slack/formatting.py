@@ -89,10 +89,10 @@ class SlackRenderer(Renderer):
         return f"\n{quoted}\n"
 
     def hrule(self) -> str:
-        # Slack has no horizontal rule. A visible dashed line reads as clutter since
-        # sections are already blank-line separated, so drop it to just a blank line
-        # (the surrounding \n runs are collapsed by render_answer_markdown).
-        return "\n\n"
+        # Slack has no horizontal rule. Drop it entirely so the adjacent blocks are
+        # joined by a single newline (their own trailing \n) rather than a blank line
+        # or a visible dashed line.
+        return ""
 
     def table_cell(self, content: str, **flags: Any) -> str:
         return content.strip().replace("\n", " ") + _CELL_SEP
