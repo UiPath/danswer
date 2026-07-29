@@ -51,8 +51,9 @@ def test_mistune_sections_get_blank_line() -> None:
 
 
 def test_mistune_ordered_and_unordered_lists() -> None:
+    # bullets stay tight; numbered points get a blank line between them
     assert _mistune("- a\n- b") == "• a\n• b"
-    assert _mistune("1. a\n2. b") == "1. a\n2. b"
+    assert _mistune("1. a\n2. b") == "1. a\n\n2. b"
 
 
 def test_mistune_nested_list_not_clubbed() -> None:

@@ -70,6 +70,10 @@ class SlackRenderer(Renderer):
         items = [seg for seg in body.split(_LIST_ITEM) if seg.strip()]
         lines: list[str] = []
         for i, item in enumerate(items, start=1):
+            # numbered points get a blank line between them for readability (they tend
+            # to be section-like); bullet lists stay tight
+            if ordered and i > 1:
+                lines.append("")
             item_lines = item.strip("\n").split("\n")
             prefix = f"{i}. " if ordered else "• "
             lines.append(prefix + item_lines[0])
