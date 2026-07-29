@@ -232,6 +232,7 @@ def _route_search_persona(
     try:
         with Session(get_sqlalchemy_engine()) as db_session:
             acl_user = None
+            email = None
             try:
                 if sender_id:
                     email = (
@@ -245,6 +246,12 @@ def _route_search_persona(
                 logger_base.warning(
                     "search route: could not resolve Slack sender for ACL"
                 )
+            logger_base.info(
+                "search route: sender_id=%s email_resolved=%s acl_user_id=%s",
+                sender_id,
+                bool(email),
+                (str(acl_user.id) if acl_user else None),
+            )
             if acl_user is None:
                 # Conservative: no routing for an unresolved sender.
                 return None, []
@@ -260,6 +267,12 @@ def _route_search_persona(
                     if settings.assistant_router_rules_enabled
                     else None
                 ),
+            )
+            logger_base.info(
+                "search route: routed=%s persona_id=%s ranked=%s",
+                resolution.routed,
+                resolution.persona_id,
+                resolution.ranked_ids[:5],
             )
             # Map the router's ranked ids -> display names for the footer, dropping
             # whoever actually answered (the top pick / the default).
