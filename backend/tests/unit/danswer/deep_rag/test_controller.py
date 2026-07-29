@@ -52,7 +52,7 @@ class _ScriptedLLM:
     ) -> AIMessage:
         p = prompt if isinstance(prompt, str) else str(prompt)
         self.calls.append(p)
-        if "substantially better" in p:
+        if "refined answer" in p:  # compare-guard prompt (compares initial vs refined)
             return AIMessage(content=self.comparison)
         if "no more than" in p:  # decomposition prompt
             if self.raise_on_decompose:

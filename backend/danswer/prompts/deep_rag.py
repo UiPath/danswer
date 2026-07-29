@@ -44,16 +44,29 @@ Output ONLY the sub-questions, one per line, with no numbering or extra text.
     "{sep}", _SEP
 )
 
-# Ported from upstream INITIAL_REFINED_ANSWER_COMPARISON_PROMPT — the compare-guard.
+# Adapted from upstream INITIAL_REFINED_ANSWER_COMPARISON_PROMPT — the compare-guard.
 # Keeps the deeper answer only if it is SUBSTANTIALLY better, else we fall back.
+# DIVERGENCE FROM UPSTREAM: upstream defines "better" mainly as more comprehensive /
+# more detailed / more citations — which the refined (deep) answer, being ~always
+# longer, trivially satisfies, so the guard degenerated to "deep always wins". We judge
+# on CORRECTNESS and how well each answer actually answers the question, and explicitly
+# tell the judge NOT to reward length/detail/citations on their own.
 COMPARISON_PROMPT = """\
-For the given question, compare the initial answer and the refined answer and determine if the refined \
-answer is SUBSTANTIALLY better than the initial answer, not just a bit better. Better could mean: \
-additional information, more comprehensive information, more concise information, more structured \
-information, more details, new bullet points, or substantially more document citations.
+For the given question, decide which answer is genuinely better — meaning MORE CORRECT and a \
+MORE COMPLETE, DIRECT answer to the question — and only say the refined answer wins if it is \
+SUBSTANTIALLY better, not just a bit better.
 
-Put yourself in the shoes of the user: is the refined answer really substantially better, and does it \
-deliver genuinely new insights compared to the initial answer?
+Judge on QUALITY, NOT SIZE. A longer, more detailed, more heavily formatted, or more heavily \
+cited answer is NOT automatically better. Do not favor an answer merely for its length, extra \
+sections, bullet points, or number of citations.
+
+The refined answer is SUBSTANTIALLY better ONLY if it is clearly more accurate, more directly and \
+completely addresses what was actually asked, or fixes a real error or gap in the initial answer. \
+If the refined answer is longer but adds vague, off-topic, repetitive, or unsupported/contradictory \
+content — or does not answer the question any better than the initial answer — then it is NOT better.
+
+Put yourself in the shoes of the user who asked THIS question: which answer would they consider \
+more correct and more useful?
 
 Here is the question:
 {sep}
@@ -70,8 +83,8 @@ Here is the refined answer:
 {refined_answer}
 {sep}
 
-Is the refined answer substantially better than the initial answer? \
-Answer with a single word: "yes" or "no".
+Is the refined answer SUBSTANTIALLY better — more correct and a more complete, direct answer to the \
+question, not merely longer? Answer with a single word: "yes" or "no".
 """.replace(
     "{sep}", _SEP
 )
