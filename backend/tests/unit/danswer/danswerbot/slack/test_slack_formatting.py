@@ -18,6 +18,16 @@ def test_mistune_header_and_bold() -> None:
     assert _mistune("### Cloud\nText is **bold**.") == "*Cloud*\nText is *bold*."
 
 
+def test_mistune_header_with_inline_bold_not_double_starred() -> None:
+    # regression: "### 1. **X**" must become "*1. X*" (numbered + bold), NOT the broken
+    # "*1. *X**" where the wrapping star collides with the inline bold's star
+    assert (
+        _mistune("### 1. **Deleting Docker Images**") == "*1. Deleting Docker Images*"
+    )
+    assert _mistune("## **Removing Tags**") == "*Removing Tags*"
+    assert _mistune("### Deleting **old** images") == "*Deleting old images*"
+
+
 def test_mistune_distinguishes_italic_from_bold() -> None:
     # the key correctness win over the regex renderer: single-* is italic (_x_),
     # double-* is bold (*x*)

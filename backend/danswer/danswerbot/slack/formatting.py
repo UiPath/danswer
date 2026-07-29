@@ -44,7 +44,13 @@ class SlackRenderer(Renderer):
         # concatenates block outputs with no separator, so the leading "\n" here is
         # what produces the blank line between sections. The stray leading newline on
         # the very first header is stripped by the caller (render_answer_markdown).
-        return f"\n*{text}*\n"
+        #
+        # Also strip any emphasis markers already rendered inside the heading text
+        # (e.g. "### **Deleting**" -> text is "*Deleting*"): wrapping that in *...*
+        # again yields the broken "**Deleting**" / "*1. *Deleting**" that Slack won't
+        # bold. The whole heading is made bold instead (matches the regex renderer).
+        inner = text.replace("*", "").replace("_", "").strip()
+        return f"\n*{inner}*\n"
 
     def emphasis(self, text: str) -> str:
         return f"_{text}_"
