@@ -9,7 +9,8 @@ migrated Postgres:
      Automation Suite corpus for focused local testing:
          export --doc-sets AutomationSuite --per-doc-set 1000
   2. Postgres: assistants (personas) + their prompts + document sets + the
-     persona<->prompt and persona<->document_set associations.
+     persona<->prompt and persona<->document_set associations, plus slack_bot_config
+     (the Slack channel->persona map that drives Search auto-routing locally).
 
 so local retrieval + the assistant router + answering closely resemble prod and
 you can test before pushing.
@@ -93,12 +94,16 @@ DEFAULT_SOURCES = [
 ]
 
 # DB tables cloned, in FK-safe insert order. (joins last.)
+# slack_bot_config comes after persona (FK persona_id) — it carries the
+# channel->persona map that powers Search auto-routing (build_channel_persona_map),
+# so cloning it lets the assistant router route locally like prod.
 DB_TABLES = [
     "prompt",
     "document_set",
     "persona",
     "persona__prompt",
     "persona__document_set",
+    "slack_bot_config",
 ]
 
 DOC_ID_BATCH = 15  # doc_ids per Vespa visit selection
