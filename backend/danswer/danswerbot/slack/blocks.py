@@ -131,14 +131,23 @@ def _split_text(text: str, limit: int = 3000) -> list[str]:
             chunks.append(text)
             break
 
-        # Find the nearest space before the limit to avoid splitting a word
-        split_at = text.rfind(" ", 0, limit)
-        if split_at == -1:  # No spaces found, force split
-            split_at = limit
+        window = text[:limit]
+        # Prefer to break at a NEWLINE so a line is never cut across two Slack blocks.
+        # A *bold* span lives entirely on one line, so splitting mid-line can orphan a
+        # "*" (e.g. "...Handling" | "Dependencies:*") and break the bolding. Fall back
+        # to a space (word-safe), then a hard cut, only when a single line is itself
+        # longer than the limit.
+        newline_at = window.rfind("\n")
+        if newline_at > 0:
+            chunks.append(text[:newline_at])
+            text = text[newline_at + 1 :]
+            continue
 
-        chunk = text[:split_at]
-        chunks.append(chunk)
-        text = text[split_at:].lstrip()  # Remove leading spaces from the next chunk
+        split_at = window.rfind(" ")
+        if split_at <= 0:  # no space in an over-long line -> force split
+            split_at = limit
+        chunks.append(text[:split_at])
+        text = text[split_at:].lstrip()
 
     return chunks
 

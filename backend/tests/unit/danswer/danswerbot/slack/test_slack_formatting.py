@@ -115,3 +115,17 @@ def test_render_switch_mistune(monkeypatch) -> None:  # type: ignore[no-untyped-
     monkeypatch.setattr(blocks, "DANSWER_BOT_SLACK_MARKDOWN_RENDERER", "mistune")
     out = blocks.render_answer_markdown("is **b** and *i* [x](https://y.com)")
     assert "_i_" in out and "*b*" in out and "<https://y.com|x>" in out
+
+
+def test_split_text_never_orphans_bold_across_blocks() -> None:
+    # a heading straddling the 3000-char SectionBlock boundary must not be cut mid-line
+    # (that orphans a '*' and breaks the bolding, e.g. "Dependencies:*")
+    heading = "*Best Practices for Handling Dependencies:*"
+    for pad in range(2950, 3050):
+        text = ("word " * 900)[:pad] + "\n" + heading + "\nmore body text here."
+        chunks = blocks._split_text(text)
+        lines = [ln for c in chunks for ln in c.splitlines()]
+        assert any(ln.strip() == heading for ln in lines), f"heading split at pad={pad}"
+        for c in chunks:
+            assert c.count("*") % 2 == 0, f"orphaned '*' at pad={pad}"
+        assert all(len(c) <= 3000 for c in chunks)
