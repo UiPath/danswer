@@ -50,6 +50,10 @@ IMPORTANT CONSTRAINTS / CAVEATS
   admin "Document Sets" page will show 0 connectors for them — expected.
 * Personas are imported with user_id=NULL and is_public=true so your local admin
   sees them; persona<->user / persona<->user_group grants are NOT copied.
+* slack_bot_config is imported APPEND-ONLY: cloned rows are shifted into a high id
+  range (SLACK_BOT_CONFIG_ID_OFFSET) so they never overwrite local dev test-channel
+  configs. This populates the channel->persona map (Search auto-routing) without
+  disturbing your local Slack setup.
 * Re-runnable: DB rows upsert by primary key; Vespa chunks PUT (idempotent).
 """
 import argparse
@@ -108,6 +112,11 @@ DB_TABLES = [
 
 DOC_ID_BATCH = 15  # doc_ids per Vespa visit selection
 HTTP_TIMEOUT = 60.0
+
+# Cloned slack_bot_config rows are shifted into this high id range on import so they
+# NEVER overwrite local dev test-channel configs (whose ids are small). Idempotent:
+# a shifted id upserts onto itself on re-run.
+SLACK_BOT_CONFIG_ID_OFFSET = 1_000_000
 
 
 # --------------------------------------------------------------------------- #
@@ -366,6 +375,11 @@ def _import_db(out_dir: Path) -> None:
             for row in rows:
                 row = {k: v for k, v in row.items() if k in colnames}
                 row.update(overrides.get(tbl, {}))
+                if tbl == "slack_bot_config" and row.get("id") is not None:
+                    # append-only: never clobber local dev test-channel configs. The
+                    # only FK into slack_bot_config.id is on the (un-cloned) onboarding
+                    # table, whose local rows point at the preserved local ids.
+                    row["id"] = SLACK_BOT_CONFIG_ID_OFFSET + int(row["id"])
                 stmt = pg_insert(table).values(**row)
                 update_cols = {c: stmt.excluded[c] for c in row if c not in pk}
                 if update_cols:
@@ -376,8 +390,11 @@ def _import_db(out_dir: Path) -> None:
                     stmt = stmt.on_conflict_do_nothing(index_elements=pk)
                 conn.execute(stmt)
             print(f"[import]   db.{tbl}: upserted {len(rows)} rows")
-            # keep the id sequence ahead of the explicit ids we just inserted
-            if "id" in colnames:
+            # keep the id sequence ahead of the explicit ids we just inserted — but
+            # NOT for slack_bot_config, whose offset (1M+) ids must not drag the local
+            # sequence up (new local configs must keep getting small ids so they never
+            # collide with a future re-clone's offset range).
+            if "id" in colnames and tbl != "slack_bot_config":
                 conn.execute(
                     text(
                         f"SELECT setval(pg_get_serial_sequence('{tbl}', 'id'), "
