@@ -157,3 +157,52 @@ def test_empty_history_renders_no_block() -> None:
     llm = _ScriptedLLM(verdict=_complete("A"))
     deep_rag_answer("q", _retrieve, cast(LLM, llm), history="")
     assert not any("Conversation so far" in c for c in llm.calls)
+
+
+def test_cited_doc_ids_maps_markers_to_sections() -> None:
+    from danswer.deep_rag.controller import _cited_doc_ids
+
+    secs = _retrieve("q", 3)  # document_ids d0, d1, d2
+    assert _cited_doc_ids("uses [1] and [3].", secs) == {"d0", "d2"}
+    assert _cited_doc_ids("no citations here", secs) == set()
+    assert _cited_doc_ids("[9] out of range", secs) == set()
+
+
+def test_apply_authoritative_footer_appends(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    import danswer.deep_rag.controller as ctrl
+    from danswer.deep_rag.controller import _apply_authoritative_footer
+    from danswer.deep_rag.controller import DeepRagResult
+
+    monkeypatch.setattr(ctrl, "AUTHORITATIVE_CITATION_RETENTION_ENABLED", True)
+    monkeypatch.setattr(ctrl, "llm_doc_from_inference_section", lambda s: s)
+    monkeypatch.setattr(
+        ctrl,
+        "retained_authoritative_footer",
+        lambda ans, docs, cited, llm, question="": "*Authoritative sources*\n• <u|X>",
+    )
+    r = DeepRagResult(
+        answer="base [1]",
+        escalated=True,
+        source="multi_hop",
+        coverage="partial",
+        sections=_retrieve("q", 2),
+    )
+    _apply_authoritative_footer(r, "q", cast(LLM, object()))
+    assert r.answer.startswith("base [1]") and "Authoritative sources" in r.answer
+
+
+def test_apply_authoritative_footer_noop_when_disabled(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    import danswer.deep_rag.controller as ctrl
+    from danswer.deep_rag.controller import _apply_authoritative_footer
+    from danswer.deep_rag.controller import DeepRagResult
+
+    monkeypatch.setattr(ctrl, "AUTHORITATIVE_CITATION_RETENTION_ENABLED", False)
+    r = DeepRagResult(
+        answer="base",
+        escalated=False,
+        source="single_shot",
+        coverage="complete",
+        sections=_retrieve("q", 2),
+    )
+    _apply_authoritative_footer(r, "q", cast(LLM, object()))
+    assert r.answer == "base"

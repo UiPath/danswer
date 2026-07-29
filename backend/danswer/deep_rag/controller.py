@@ -35,8 +35,11 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from danswer.chat.chat_utils import llm_doc_from_inference_section
+from danswer.configs.chat_configs import AUTHORITATIVE_CITATION_RETENTION_ENABLED
 from danswer.db.models import Persona
 from danswer.db.models import User
+from danswer.llm.answering.authoritative_retention import retained_authoritative_footer
 from danswer.llm.factory import get_llms_for_persona
 from danswer.llm.interfaces import LLM
 from danswer.llm.utils import message_to_string
@@ -293,6 +296,38 @@ def _persona_retriever(
     return retrieve
 
 
+def _cited_doc_ids(answer: str, sections: list[Any]) -> set[str]:
+    """document_ids behind the [n] markers the answer actually cited."""
+    ids: set[str] = set()
+    for m in re.findall(r"\[(\d+)\]", answer):
+        i = int(m) - 1
+        if 0 <= i < len(sections):
+            did = getattr(sections[i], "document_id", None)
+            if did:
+                ids.add(str(did))
+    return ids
+
+
+def _apply_authoritative_footer(result: DeepRagResult, query: str, llm: LLM) -> None:
+    """Parity with the standard answer pipeline (answer.py): append an "Authoritative
+    sources" footer for relevant PROTECTED_SOURCES docs that are in the deep-rag context
+    but were NOT cited. Deep RAG runs its own synthesis and never hits answer.py where
+    this normally runs, so without this the footer is missing on deep answers. Gated by
+    the same flag; fail-open (a footer failure never breaks the answer)."""
+    if not AUTHORITATIVE_CITATION_RETENTION_ENABLED or not result.sections:
+        return
+    try:
+        docs = [llm_doc_from_inference_section(s) for s in result.sections]
+        cited = _cited_doc_ids(result.answer, result.sections)
+        footer = retained_authoritative_footer(
+            result.answer, docs, cited, llm, question=query
+        )
+        if footer:
+            result.answer = result.answer + "\n\n" + footer
+    except Exception:
+        logger.exception("deep_rag authoritative retention failed; skipping footer")
+
+
 def run_deep_rag(
     query: str,
     user: User | None,
@@ -314,7 +349,7 @@ def run_deep_rag(
     retrieve = _persona_retriever(
         user, persona, llm, fast_llm, db_session, bypass_acl=bypass_acl
     )
-    return deep_rag_answer(
+    result = deep_rag_answer(
         query,
         retrieve,
         llm,
@@ -322,3 +357,5 @@ def run_deep_rag(
         history=history,
         force=force,
     )
+    _apply_authoritative_footer(result, query, llm)
+    return result
