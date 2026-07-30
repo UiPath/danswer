@@ -31,6 +31,9 @@ that are more specific
 
 Important:
  - Each sub-question should lend itself to be answered by a RAG system; phrase it that way.
+ - If the question COMPARES two or more entities or product versions (e.g. "difference between \
+X and Y"), create a SEPARATE sub-question for EACH one on its own — never put both in the same \
+sub-question. Each side must be researched independently (its documents are retrieved separately).
  - Don't just decompose; make sure the sub-questions have the proper form (e.g., no 'I').
  - Do NOT create sub-questions that are clarifying questions to the user, make suggestions, or ask the \
 user for more information. Take the information from the user as given.

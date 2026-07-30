@@ -27,6 +27,7 @@ Design notes:
 from __future__ import annotations
 
 import json
+import os
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -61,12 +62,14 @@ logger = setup_logger()
 RetrieveFn = Callable[[str, int], list[Any]]
 
 DEFAULT_MAX_SUBQUESTIONS = 3
-_SINGLE_SHOT_K = 12
+_SINGLE_SHOT_K = 15
 _SUBQ_K = 6
-# Max PROTECTED_SOURCES chunks allowed in the final synthesis context, applied AFTER
-# deduping across sub-questions and chosen by score (curated sources shouldn't crowd out
-# the rest of the multi-hop evidence).
-_SYNTHESIS_PROTECTED_CAP = 4
+# How many distinct PROTECTED_SOURCES documents to retain from EACH sub-question's
+# retrieval (highest-scored). Applied per sub-question (not globally) so each
+# single-version sub-question keeps its own curated docs — a global by-score cap would
+# collapse a version comparison onto whichever version scores higher. Configurable;
+# default 3 gives richer, more-specific comparisons (measured) at a modest token cost.
+DEEP_RAG_SUBQ_PROTECTED_DOCS = int(os.environ.get("DEEP_RAG_SUBQ_PROTECTED_DOCS") or 3)
 
 
 @dataclass
@@ -210,7 +213,9 @@ def multi_hop(
     Returns (answer, ordered_sections) where ordered_sections[i] is the section
     numbered [i+1] in the synthesis context (so the caller can map citations)."""
     seen: set[tuple[Any, Any]] = set()
-    per_sq: list[tuple[str, list[Any]]] = []
+    ordered: list[Any] = []
+    blocks: list[str] = []
+    n = 1
     for sq in sub_questions:
         kept = []
         for s in retrieve(sq, _SUBQ_K):
@@ -218,19 +223,11 @@ def multi_hop(
             if key not in seen:
                 seen.add(key)
                 kept.append(s)
-        per_sq.append((sq, kept))
-
-    # After deduping across sub-questions, cap curated (PROTECTED_SOURCES) chunks in the
-    # final synthesis context to the top _SYNTHESIS_PROTECTED_CAP by score (all other
-    # sources kept), so curated content doesn't crowd out the multi-hop evidence.
-    flat = [s for _, kept in per_sq for s in kept]
-    keep_ids = {id(s) for s in _cap_protected(flat, _SYNTHESIS_PROTECTED_CAP)}
-
-    ordered: list[Any] = []
-    blocks: list[str] = []
-    n = 1
-    for sq, kept in per_sq:
-        kept = [s for s in kept if id(s) in keep_ids]
+        # Keep only the top DEEP_RAG_SUBQ_PROTECTED_DOCS curated documents from THIS
+        # sub-question (all non-protected kept). Per sub-question, so each single-version
+        # sub-question retains its own curated docs — a global cap would drop the
+        # lower-scored version entirely on a comparison.
+        kept = _cap_protected_docs(kept, DEEP_RAG_SUBQ_PROTECTED_DOCS)
         if not kept:
             continue
         blocks.append(f"### Sub-question: {sq}\n{_format_context(kept, n)}")
@@ -303,7 +300,15 @@ def deep_rag_answer(
         refined, mh_sections = multi_hop(
             query, sub_questions, retrieve, llm, persona_prompt=persona_prompt
         )
-        if refined_is_better(query, answer, refined, llm):
+        # Keep the deep answer when single-shot self-reported it was inadequate
+        # (coverage="partial") — that's exactly why we escalated, so falling back to the
+        # inadequate single-shot is never right. Only run the compare-guard when
+        # single-shot was adequate ("complete") and the user FORCED deep anyway, i.e. to
+        # protect against a worse forced-deep answer.
+        keep_refined = coverage == "partial" or refined_is_better(
+            query, answer, refined, llm
+        )
+        if keep_refined:
             return DeepRagResult(
                 answer=refined,
                 escalated=True,
@@ -372,25 +377,70 @@ def _topk_reserving_protected(sections: list[Any], k: int) -> list[Any]:
     )[:k]
 
 
-def _cap_protected(sections: list[Any], cap: int) -> list[Any]:
-    """From a (deduped) section list, keep every non-PROTECTED_SOURCES section plus at
-    most `cap` protected sections (highest score first). Preserves input order for the
-    kept sections so per-sub-question grouping and [n] citation numbering stay stable.
+def _cap_protected_docs(sections: list[Any], max_docs: int) -> list[Any]:
+    """Keep every non-PROTECTED_SOURCES section plus the protected sections belonging to
+    at most `max_docs` distinct protected DOCUMENTS (ranked by their best chunk score).
+    Preserves input order so [n] citation numbering stays stable. No-op when max_docs<0.
     """
-    if not _PROTECTED_SET:
+    if not _PROTECTED_SET or max_docs < 0:
         return sections
-    protected = [s for s in sections if _section_source(s) in _PROTECTED_SET]
-    if len(protected) <= cap:
-        return sections
-    top = sorted(
-        protected, key=lambda s: (getattr(s, "score", 0.0) or 0.0), reverse=True
-    )[:cap]
-    keep_protected = {id(s) for s in top}
+    best: dict[Any, float] = {}
+    for s in sections:
+        if _section_source(s) in _PROTECTED_SET:
+            did = getattr(s, "document_id", None)
+            score = getattr(s, "score", 0.0) or 0.0
+            if did not in best or score > best[did]:
+                best[did] = score
+    keep_docs = {
+        d
+        for d, _ in sorted(best.items(), key=lambda kv: kv[1], reverse=True)[:max_docs]
+    }
     return [
         s
         for s in sections
-        if _section_source(s) not in _PROTECTED_SET or id(s) in keep_protected
+        if _section_source(s) not in _PROTECTED_SET
+        or getattr(s, "document_id", None) in keep_docs
     ]
+
+
+# UiPath releases are labeled differently by era/product, so a version token rarely
+# matches the corpus string (e.g. "24.10" vs indexed "2024.10"; "25.10"/"2025.10" vs the
+# Automation Suite label "2.2510"). Rewrite the token IN PLACE to the corpus form(s) and
+# retrieve each variant separately (merging) — appending forms to one query instead
+# dilutes the embedding and drops good hits (measured). Mapping: <=24.MM -> YYYY.MM only;
+# >=25.MM -> both 2.NNMM (Automation Suite) and YYYY.MM (desktop products keep YYYY.MM).
+# The optional "20" prefix matches BOTH the 2-digit ("25.10") and 4-digit ("2025.10")
+# spellings — decomposition emits either, and 4-digit "2025.10" is still the wrong label
+# for Automation Suite (2.2510), so both must expand.
+_VERSION_RE = re.compile(r"\b(?:20)?(2\d)\.(\d{1,2})\b")
+
+
+def _version_forms(nn: str, mm: str) -> list[str]:
+    if int(nn) <= 24:
+        return [f"20{nn}.{mm}"]
+    return [f"2.{nn}{mm.zfill(2)}", f"20{nn}.{mm}"]
+
+
+def _version_query_variants(query: str) -> list[str]:
+    """Rewrite each version token to its corpus form(s) via regex substitution, yielding
+    one clean single-form query per variant (deduped). Positional re.sub (not str.replace)
+    so every token is rewritten in one pass, in place, without replace-all surprises.
+    No-op (returns [query]) when there is no version token."""
+    matches = list(_VERSION_RE.finditer(query))
+    if not matches:
+        return [query]
+    depth = max(len(_version_forms(m.group(1), m.group(2))) for m in matches)
+    variants: list[str] = []
+    for i in range(depth):
+
+        def repl(m: "re.Match[str]", idx: int = i) -> str:
+            fs = _version_forms(m.group(1), m.group(2))
+            return fs[idx] if idx < len(fs) else fs[-1]
+
+        v = _VERSION_RE.sub(repl, query)
+        if v not in variants:
+            variants.append(v)
+    return variants
 
 
 def _persona_retriever(
@@ -406,7 +456,7 @@ def _persona_retriever(
     differently — e.g. the Slack bot, which retrieves with user=None like its normal
     answer flow. Never bypass in the web request path."""
 
-    def retrieve(query: str, k: int) -> list[Any]:
+    def _one(query: str) -> list[Any]:
         request = SearchRequest(query=query, persona=persona)
         pipeline = SearchPipeline(
             search_request=request,
@@ -416,12 +466,23 @@ def _persona_retriever(
             db_session=db_session,
             bypass_acl=bypass_acl,
         )
-        sections = sorted(
-            pipeline.retrieved_sections, key=lambda s: (s.score or 0.0), reverse=True
-        )
+        return list(pipeline.retrieved_sections)
+
+    def retrieve(query: str, k: int) -> list[Any]:
+        # Retrieve each version-normalized variant and merge (deduped). Single variant
+        # for non-version / <=24 queries, so this is a no-op there.
+        seen: set[tuple[Any, Any]] = set()
+        merged: list[Any] = []
+        for vq in _version_query_variants(query):
+            for s in _one(vq):
+                key = (getattr(s, "document_id", None), getattr(s, "chunk_id", None))
+                if key not in seen:
+                    seen.add(key)
+                    merged.append(s)
+        merged.sort(key=lambda s: (getattr(s, "score", 0.0) or 0.0), reverse=True)
         # Reserve slots for PROTECTED_SOURCES so curated sources survive the top-k cut
         # into the final synthesis (parity with the normal answer path's doc-pruning).
-        return _topk_reserving_protected(sections, k)
+        return _topk_reserving_protected(merged, k)
 
     return retrieve
 

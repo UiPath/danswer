@@ -107,12 +107,25 @@ def test_partial_escalates_and_keeps_refined_when_better() -> None:
     assert res.num_sections > 0
 
 
-def test_partial_but_refined_not_better_falls_back_to_single_shot() -> None:
-    llm = _ScriptedLLM(verdict=_partial("keep me"), comparison="no")
+def test_partial_keeps_refined_even_when_guard_says_not_better() -> None:
+    # coverage=partial means single-shot self-reported it was inadequate — that's WHY we
+    # escalated — so we keep the refined answer regardless of the compare-guard (the guard
+    # only guards the force-on-complete case). Prevents falling back to a punt.
+    llm = _ScriptedLLM(verdict=_partial("insufficient, check SME"), comparison="no")
     res = deep_rag_answer("q", _retrieve, cast(LLM, llm))
-    assert res.escalated is True  # we did try
-    assert res.source == "single_shot"  # ...but kept the single-shot answer
-    assert res.answer == "keep me"
+    assert res.escalated is True
+    assert res.source == "multi_hop"
+    assert res.answer == "REFINED ANSWER"
+
+
+def test_forced_on_complete_still_falls_back_when_not_better() -> None:
+    # single-shot was COMPLETE but the user forced deep; the compare-guard still applies
+    # and keeps single-shot when the deep answer isn't substantially better.
+    llm = _ScriptedLLM(verdict=_complete("good enough"), comparison="no")
+    res = deep_rag_answer("q", _retrieve, cast(LLM, llm), force=True)
+    assert res.escalated is True
+    assert res.source == "single_shot"
+    assert res.answer == "good enough"
 
 
 def test_deep_path_error_fails_open_to_single_shot() -> None:
@@ -281,7 +294,7 @@ def test_topk_plain_when_no_protected(monkeypatch) -> None:  # type: ignore[no-u
     assert out == ["a", "b", "c", "d", "e", "f"]
 
 
-def test_cap_protected_keeps_top_n_by_score(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+def test_cap_protected_docs_keeps_top_n_distinct_docs(monkeypatch) -> None:  # type: ignore[no-untyped-def]
     import danswer.deep_rag.controller as ctrl
     from danswer.configs.constants import DocumentSource
 
@@ -293,18 +306,50 @@ def test_cap_protected_keeps_top_n_by_score(monkeypatch) -> None:  # type: ignor
 
     monkeypatch.setattr(ctrl, "_PROTECTED_SET", {DocumentSource.WEB})
     secs = [
-        _SrcSec("n1", 0.90, DocumentSource.SLACK),
-        _SrcSec("p1", 0.85, DocumentSource.WEB),
-        _SrcSec("p2", 0.80, DocumentSource.WEB),
-        _SrcSec("n2", 0.75, DocumentSource.SLACK),
-        _SrcSec("p3", 0.70, DocumentSource.WEB),
-        _SrcSec("p4", 0.60, DocumentSource.WEB),
-        _SrcSec("p5", 0.50, DocumentSource.WEB),  # 5th protected -> dropped (cap=4)
-        _SrcSec("p6", 0.40, DocumentSource.WEB),  # 6th protected -> dropped
-        _SrcSec("n3", 0.30, DocumentSource.SLACK),
+        _SrcSec("n1", 0.90, DocumentSource.SLACK),  # non-protected
+        _SrcSec("pA", 0.85, DocumentSource.WEB),  # protected doc A (best)
+        _SrcSec("pA", 0.60, DocumentSource.WEB),  # doc A, 2nd chunk (same doc kept)
+        _SrcSec("pB", 0.80, DocumentSource.WEB),  # protected doc B (2nd best)
+        _SrcSec("pC", 0.50, DocumentSource.WEB),  # protected doc C -> dropped (max=2)
+        _SrcSec("n2", 0.30, DocumentSource.SLACK),  # non-protected
     ]
-    ids = [s.document_id for s in ctrl._cap_protected(secs, 4)]
-    # every non-protected kept, in original order
-    assert [i for i in ids if i.startswith("n")] == ["n1", "n2", "n3"]
-    # only the top-4 protected by score survive; input order preserved for kept
-    assert ids == ["n1", "p1", "p2", "n2", "p3", "p4", "n3"]
+    ids = [s.document_id for s in ctrl._cap_protected_docs(secs, 2)]
+    # all non-protected kept; top-2 protected DOCUMENTS (A,B) kept incl. both A chunks;
+    # 3rd protected doc dropped; input order preserved
+    assert ids == ["n1", "pA", "pA", "pB", "n2"]
+
+
+def test_version_query_variants() -> None:
+    from danswer.deep_rag.controller import _version_query_variants
+
+    # <=24.MM -> YYYY.MM only, replaced in place
+    assert _version_query_variants("features in 24.10") == ["features in 2024.10"]
+    # >=25.MM -> suite (2.NNMM) + desktop (YYYY.MM)
+    assert _version_query_variants("features in 25.10") == [
+        "features in 2.2510",
+        "features in 2025.10",
+    ]
+    # multi-version: each token rewritten per variant; 24.10 reuses its only form
+    assert _version_query_variants("diff 25.10 vs 24.10") == [
+        "diff 2.2510 vs 2024.10",
+        "diff 2025.10 vs 2024.10",
+    ]
+    # 4-digit spelling must expand too: "2025.10" -> {2.2510, 2025.10} (decomposition
+    # sometimes emits the year form, which is still WRONG for Automation Suite)
+    assert _version_query_variants("features in 2025.10") == [
+        "features in 2.2510",
+        "features in 2025.10",
+    ]
+    # 4-digit <=24 is already the corpus form -> single, unchanged
+    assert _version_query_variants("features in 2024.10") == ["features in 2024.10"]
+    # mixed 4-digit + 2-digit in one query, rewritten positionally in one pass
+    assert _version_query_variants("diff 2025.10 vs 24.10") == [
+        "diff 2.2510 vs 2024.10",
+        "diff 2025.10 vs 2024.10",
+    ]
+    # no version token -> single unchanged query
+    assert _version_query_variants("how to create a folder") == [
+        "how to create a folder"
+    ]
+    # minor zero-padded in the 2.NNMM form
+    assert _version_query_variants("suite 25.4")[0] == "suite 2.2504"
