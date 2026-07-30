@@ -234,3 +234,77 @@ def test_default_identity_when_no_persona_prompt() -> None:
     deep_rag_answer("q", _retrieve, cast(LLM, llm))  # persona_prompt="" (default)
     ss = [c for c in llm.calls if "JSON:" in c]
     assert ss and all("You are a UiPath documentation assistant." in c for c in ss)
+
+
+def test_topk_reserves_protected_sources(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    import danswer.deep_rag.controller as ctrl
+    from danswer.configs.constants import DocumentSource
+
+    @dataclass
+    class _SrcSec:
+        document_id: str
+        score: float
+        source_type: object
+
+    monkeypatch.setattr(ctrl, "SOURCE_DIVERSITY_RESERVED_SLOTS", 2)
+    monkeypatch.setattr(ctrl, "_PROTECTED_SET", {DocumentSource.WEB})
+    secs = [
+        _SrcSec("a", 0.90, DocumentSource.SLACK),
+        _SrcSec("b", 0.85, DocumentSource.SLACK),
+        _SrcSec("c", 0.80, DocumentSource.SLACK),
+        _SrcSec("d", 0.70, DocumentSource.SLACK),
+        _SrcSec("e", 0.60, DocumentSource.SLACK),
+        _SrcSec("f", 0.55, DocumentSource.SLACK),
+        _SrcSec("g", 0.40, DocumentSource.WEB),  # protected, low score
+        _SrcSec("h", 0.30, DocumentSource.WEB),  # protected, low score
+    ]
+    ids = {s.document_id for s in ctrl._topk_reserving_protected(secs, 6)}
+    assert len(ids) == 6
+    assert "g" in ids and "h" in ids  # protected survive the cut despite low score
+    assert "a" in ids and "b" in ids  # top non-protected still kept
+
+
+def test_topk_plain_when_no_protected(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    import danswer.deep_rag.controller as ctrl
+    from danswer.configs.constants import DocumentSource
+
+    @dataclass
+    class _SrcSec:
+        document_id: str
+        score: float
+        source_type: object
+
+    monkeypatch.setattr(ctrl, "SOURCE_DIVERSITY_RESERVED_SLOTS", 2)
+    monkeypatch.setattr(ctrl, "_PROTECTED_SET", {DocumentSource.WEB})
+    secs = [_SrcSec(chr(97 + i), 1.0 - i * 0.1, DocumentSource.SLACK) for i in range(8)]
+    out = [s.document_id for s in ctrl._topk_reserving_protected(secs, 6)]
+    assert out == ["a", "b", "c", "d", "e", "f"]
+
+
+def test_cap_protected_keeps_top_n_by_score(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    import danswer.deep_rag.controller as ctrl
+    from danswer.configs.constants import DocumentSource
+
+    @dataclass
+    class _SrcSec:
+        document_id: str
+        score: float
+        source_type: object
+
+    monkeypatch.setattr(ctrl, "_PROTECTED_SET", {DocumentSource.WEB})
+    secs = [
+        _SrcSec("n1", 0.90, DocumentSource.SLACK),
+        _SrcSec("p1", 0.85, DocumentSource.WEB),
+        _SrcSec("p2", 0.80, DocumentSource.WEB),
+        _SrcSec("n2", 0.75, DocumentSource.SLACK),
+        _SrcSec("p3", 0.70, DocumentSource.WEB),
+        _SrcSec("p4", 0.60, DocumentSource.WEB),
+        _SrcSec("p5", 0.50, DocumentSource.WEB),  # 5th protected -> dropped (cap=4)
+        _SrcSec("p6", 0.40, DocumentSource.WEB),  # 6th protected -> dropped
+        _SrcSec("n3", 0.30, DocumentSource.SLACK),
+    ]
+    ids = [s.document_id for s in ctrl._cap_protected(secs, 4)]
+    # every non-protected kept, in original order
+    assert [i for i in ids if i.startswith("n")] == ["n1", "n2", "n3"]
+    # only the top-4 protected by score survive; input order preserved for kept
+    assert ids == ["n1", "p1", "p2", "n2", "p3", "p4", "n3"]

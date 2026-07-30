@@ -37,6 +37,9 @@ from sqlalchemy.orm import Session
 
 from danswer.chat.chat_utils import llm_doc_from_inference_section
 from danswer.configs.chat_configs import AUTHORITATIVE_CITATION_RETENTION_ENABLED
+from danswer.configs.chat_configs import PROTECTED_SOURCES
+from danswer.configs.chat_configs import SOURCE_DIVERSITY_RESERVED_SLOTS
+from danswer.configs.constants import DocumentSource
 from danswer.db.models import Persona
 from danswer.db.models import User
 from danswer.llm.answering.authoritative_retention import retained_authoritative_footer
@@ -60,6 +63,10 @@ RetrieveFn = Callable[[str, int], list[Any]]
 DEFAULT_MAX_SUBQUESTIONS = 3
 _SINGLE_SHOT_K = 12
 _SUBQ_K = 6
+# Max PROTECTED_SOURCES chunks allowed in the final synthesis context, applied AFTER
+# deduping across sub-questions and chosen by score (curated sources shouldn't crowd out
+# the rest of the multi-hop evidence).
+_SYNTHESIS_PROTECTED_CAP = 4
 
 
 @dataclass
@@ -203,9 +210,7 @@ def multi_hop(
     Returns (answer, ordered_sections) where ordered_sections[i] is the section
     numbered [i+1] in the synthesis context (so the caller can map citations)."""
     seen: set[tuple[Any, Any]] = set()
-    ordered: list[Any] = []
-    blocks: list[str] = []
-    n = 1
+    per_sq: list[tuple[str, list[Any]]] = []
     for sq in sub_questions:
         kept = []
         for s in retrieve(sq, _SUBQ_K):
@@ -213,6 +218,21 @@ def multi_hop(
             if key not in seen:
                 seen.add(key)
                 kept.append(s)
+        per_sq.append((sq, kept))
+
+    # After deduping across sub-questions, cap curated (PROTECTED_SOURCES) chunks in the
+    # final synthesis context to the top _SYNTHESIS_PROTECTED_CAP by score (all other
+    # sources kept), so curated content doesn't crowd out the multi-hop evidence.
+    flat = [s for _, kept in per_sq for s in kept]
+    keep_ids = {id(s) for s in _cap_protected(flat, _SYNTHESIS_PROTECTED_CAP)}
+
+    ordered: list[Any] = []
+    blocks: list[str] = []
+    n = 1
+    for sq, kept in per_sq:
+        kept = [s for s in kept if id(s) in keep_ids]
+        if not kept:
+            continue
         blocks.append(f"### Sub-question: {sq}\n{_format_context(kept, n)}")
         ordered.extend(kept)
         n += len(kept)
@@ -316,6 +336,63 @@ def deep_rag_answer(
         )
 
 
+_PROTECTED_SET = {
+    DocumentSource._value2member_map_[s]
+    for s in PROTECTED_SOURCES
+    if s in DocumentSource._value2member_map_
+}
+
+
+def _section_source(section: Any) -> Any:
+    src = getattr(section, "source_type", None)
+    if src is not None:
+        return src
+    center = getattr(section, "center_chunk", None)
+    return getattr(center, "source_type", None) if center is not None else None
+
+
+def _topk_reserving_protected(sections: list[Any], k: int) -> list[Any]:
+    """Top-k by score, but guarantee up to SOURCE_DIVERSITY_RESERVED_SLOTS PROTECTED_SOURCES
+    sections survive into the result — parity with the normal answer path's doc-pruning, so
+    curated sources (web/KB/OutSystems/highspot) reach the final synthesis even when pure
+    score-truncation would drop them. `sections` must be pre-sorted by score desc."""
+    if len(sections) <= k:
+        return sections
+    reserve = max(0, SOURCE_DIVERSITY_RESERVED_SLOTS)
+    if reserve <= 0 or not _PROTECTED_SET:
+        return sections[:k]
+    guaranteed = [s for s in sections if _section_source(s) in _PROTECTED_SET][:reserve]
+    if not guaranteed:
+        return sections[:k]
+    gid = {id(s) for s in guaranteed}
+    rest = [s for s in sections if id(s) not in gid]
+    merged = guaranteed + rest[: max(0, k - len(guaranteed))]
+    return sorted(
+        merged, key=lambda s: (getattr(s, "score", 0.0) or 0.0), reverse=True
+    )[:k]
+
+
+def _cap_protected(sections: list[Any], cap: int) -> list[Any]:
+    """From a (deduped) section list, keep every non-PROTECTED_SOURCES section plus at
+    most `cap` protected sections (highest score first). Preserves input order for the
+    kept sections so per-sub-question grouping and [n] citation numbering stay stable.
+    """
+    if not _PROTECTED_SET:
+        return sections
+    protected = [s for s in sections if _section_source(s) in _PROTECTED_SET]
+    if len(protected) <= cap:
+        return sections
+    top = sorted(
+        protected, key=lambda s: (getattr(s, "score", 0.0) or 0.0), reverse=True
+    )[:cap]
+    keep_protected = {id(s) for s in top}
+    return [
+        s
+        for s in sections
+        if _section_source(s) not in _PROTECTED_SET or id(s) in keep_protected
+    ]
+
+
 def _persona_retriever(
     user: User | None,
     persona: Persona,
@@ -342,7 +419,9 @@ def _persona_retriever(
         sections = sorted(
             pipeline.retrieved_sections, key=lambda s: (s.score or 0.0), reverse=True
         )
-        return sections[:k]
+        # Reserve slots for PROTECTED_SOURCES so curated sources survive the top-k cut
+        # into the final synthesis (parity with the normal answer path's doc-pruning).
+        return _topk_reserving_protected(sections, k)
 
     return retrieve
 
