@@ -110,14 +110,50 @@ def _format_context(sections: list[Any], start: int = 1) -> str:
     return "\n\n".join(lines)
 
 
+_PERSONA_INSTR_HEADER = (
+    "Follow these assistant instructions for your answer — apply its format, SME "
+    "attribution, confidence handling, and any routing/authority rules exactly:"
+)
+
+
+def _persona_prompt_text(persona: Persona) -> str:
+    """The assistant's configured system + task prompt (its operating contract: format,
+    SME facts, routing/authority rules). Empty when the persona has no prompt."""
+    prompts = getattr(persona, "prompts", None) or []
+    if not prompts:
+        return ""
+    p = prompts[0]
+    parts = [
+        (getattr(p, "system_prompt", "") or "").strip(),
+        (getattr(p, "task_prompt", "") or "").strip(),
+    ]
+    return "\n\n".join(x for x in parts if x)
+
+
+def _persona_block(persona_prompt: str) -> str:
+    """Render the persona prompt as the governing preamble for the deep-rag prompts so
+    deep answers honor the assistant's format/SME facts/routing rules (parity with the
+    normal answer path). Falls back to a generic identity when there is no persona prompt
+    (preserves prior behavior)."""
+    p = (persona_prompt or "").strip()
+    if not p:
+        return "You are a UiPath documentation assistant.\n\n"
+    return f"{_PERSONA_INSTR_HEADER}\n-------\n{p}\n-------\n\n"
+
+
 def single_shot(
-    query: str, retrieve: RetrieveFn, llm: LLM, history: str = ""
+    query: str,
+    retrieve: RetrieveFn,
+    llm: LLM,
+    history: str = "",
+    persona_prompt: str = "",
 ) -> tuple[str, str, list[str], list[Any]]:
     """Answer from one retrieval and self-report coverage.
     Returns (answer, coverage, missing, sections). `sections` is the ordered
     retrieval behind the answer's [n] markers."""
     sections = retrieve(query, _SINGLE_SHOT_K)
     prompt = SINGLE_SHOT_VERDICT_PROMPT.format(
+        persona_instructions=_persona_block(persona_prompt),
         context=_format_context(sections),
         question=query,
         history=_history_block(history),
@@ -157,7 +193,11 @@ def decompose(
 
 
 def multi_hop(
-    query: str, sub_questions: list[str], retrieve: RetrieveFn, llm: LLM
+    query: str,
+    sub_questions: list[str],
+    retrieve: RetrieveFn,
+    llm: LLM,
+    persona_prompt: str = "",
 ) -> tuple[str, list[Any]]:
     """Retrieve per sub-question (deduped) and synthesize.
     Returns (answer, ordered_sections) where ordered_sections[i] is the section
@@ -176,7 +216,11 @@ def multi_hop(
         blocks.append(f"### Sub-question: {sq}\n{_format_context(kept, n)}")
         ordered.extend(kept)
         n += len(kept)
-    prompt = SYNTHESIS_PROMPT.format(question=query, context="\n\n".join(blocks))
+    prompt = SYNTHESIS_PROMPT.format(
+        persona_instructions=_persona_block(persona_prompt),
+        question=query,
+        context="\n\n".join(blocks),
+    )
     return _invoke(llm, prompt), ordered
 
 
@@ -202,6 +246,7 @@ def deep_rag_answer(
     max_subquestions: int = DEFAULT_MAX_SUBQUESTIONS,
     history: str = "",
     force: bool = False,
+    persona_prompt: str = "",
 ) -> DeepRagResult:
     """Multi-hop orchestration. Pure: retrieval + LLM are injected.
 
@@ -210,9 +255,13 @@ def deep_rag_answer(
     the per-question manual override. Even when forced the compare-guard still keeps
     single-shot if the deep answer isn't substantially better, so forcing can't
     produce a worse answer, only extra work.
+
+    `persona_prompt` is the assistant's system/task prompt, threaded into the single-shot
+    and synthesis prompts so deep answers honor the assistant's format, SME facts and
+    routing/authority rules (parity with the normal answer path).
     """
     answer, coverage, missing, ss_sections = single_shot(
-        query, retrieve, llm, history=history
+        query, retrieve, llm, history=history, persona_prompt=persona_prompt
     )
 
     if coverage != "partial" and not force:
@@ -231,7 +280,9 @@ def deep_rag_answer(
         sub_questions = decompose(
             query, missing, llm, max_subquestions, history=history
         )
-        refined, mh_sections = multi_hop(query, sub_questions, retrieve, llm)
+        refined, mh_sections = multi_hop(
+            query, sub_questions, retrieve, llm, persona_prompt=persona_prompt
+        )
         if refined_is_better(query, answer, refined, llm):
             return DeepRagResult(
                 answer=refined,
@@ -356,6 +407,7 @@ def run_deep_rag(
         max_subquestions=max_subquestions,
         history=history,
         force=force,
+        persona_prompt=_persona_prompt_text(persona),
     )
     _apply_authoritative_footer(result, query, llm)
     return result

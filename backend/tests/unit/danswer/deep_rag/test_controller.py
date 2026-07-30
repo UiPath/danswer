@@ -206,3 +206,31 @@ def test_apply_authoritative_footer_noop_when_disabled(monkeypatch) -> None:  # 
     )
     _apply_authoritative_footer(r, "q", cast(LLM, object()))
     assert r.answer == "base"
+
+
+def test_persona_prompt_injected_into_deep_rag_prompts() -> None:
+    # the assistant's system/task prompt must reach BOTH the single-shot and the
+    # synthesis prompt, so deep answers honor its format/SME facts/routing rules
+    llm = _ScriptedLLM(
+        verdict=_partial("initial"),
+        subqs="what is a?\nwhat is b?",
+        synthesis="deep answer [1]",
+        comparison="yes",
+    )
+    persona = "SME-RULE: Scott Schoenberger is the SME for AI connectors."
+    deep_rag_answer("q", _retrieve, cast(LLM, llm), force=True, persona_prompt=persona)
+    single_shot_calls = [c for c in llm.calls if "JSON:" in c]
+    synthesis_calls = [c for c in llm.calls if "ORIGINAL question" in c]
+    assert single_shot_calls and all(persona in c for c in single_shot_calls)
+    assert synthesis_calls and all(persona in c for c in synthesis_calls)
+    # generic identity fallback is NOT used when a persona prompt is present
+    assert not any(
+        "You are a UiPath documentation assistant." in c for c in single_shot_calls
+    )
+
+
+def test_default_identity_when_no_persona_prompt() -> None:
+    llm = _ScriptedLLM(verdict=_complete("A"))
+    deep_rag_answer("q", _retrieve, cast(LLM, llm))  # persona_prompt="" (default)
+    ss = [c for c in llm.calls if "JSON:" in c]
+    assert ss and all("You are a UiPath documentation assistant." in c for c in ss)

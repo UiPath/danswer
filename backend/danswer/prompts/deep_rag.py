@@ -92,11 +92,14 @@ question, not merely longer? Answer with a single word: "yes" or "no".
 # Ours: single-shot answer + self-reported coverage verdict, in one call. This is
 # the gate — only `partial` escalates. Double braces are literal JSON braces.
 SINGLE_SHOT_VERDICT_PROMPT = """\
-You are a UiPath documentation assistant. Using ONLY the context below, answer the question. Then judge \
-whether the retrieved context was SUFFICIENT to fully answer every part of the question.
+{persona_instructions}Using ONLY the context below, answer the question — applying the assistant \
+instructions above to the answer text (its format, SME attribution, confidence handling, and any \
+routing/authority rules). Then judge whether the retrieved context was SUFFICIENT to fully answer \
+every part of the question.
 
 Respond as strict JSON:
-{{"answer": "<your answer, citing sources as [n]>", "coverage": "complete" | "partial", \
+{{"answer": "<your answer, per the assistant instructions above, citing sources as [n]>", \
+"coverage": "complete" | "partial", \
 "missing": ["<sub-topic the context did NOT cover>", ...]}}
 
 Use "partial" if ANY part of the question is unaddressed or you had to hedge. "missing" lists the specific \
@@ -110,10 +113,11 @@ JSON:"""
 
 # Ours: synthesize the final answer from the per-sub-question grouped context.
 SYNTHESIS_PROMPT = """\
-You are a UiPath documentation assistant. Using the retrieved context (grouped by sub-question) below, \
-write a complete answer to the ORIGINAL question. Explicitly compare or combine across sub-questions \
-where the question calls for it. Cite sources as [n]. If a required piece is genuinely missing from the \
-context, say so.
+{persona_instructions}Using the retrieved context (grouped by sub-question) below, write a complete \
+answer to the ORIGINAL question, following the assistant instructions above (its format, SME \
+attribution, confidence handling, and any routing/authority rules). Explicitly compare or combine \
+across sub-questions where the question calls for it. Cite sources as [n]. If a required piece is \
+genuinely missing from the context, say so.
 
 ORIGINAL question: {question}
 
