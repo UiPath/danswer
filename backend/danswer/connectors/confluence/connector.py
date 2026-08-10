@@ -347,10 +347,14 @@ class ConfluenceConnector(LoadConnector, PollConnector):
         # skip it. This is generally used to avoid indexing extra sensitive
         # pages.
         labels_to_skip: list[str] = CONFLUENCE_CONNECTOR_LABELS_TO_SKIP,
+        # if a page title matches one of these, or any of its ancestors match,
+        # the page will be skipped. This allows skipping entire folders/sections.
+        pages_to_skip: list[str] = [],
     ) -> None:
         self.batch_size = batch_size
         self.continue_on_failure = continue_on_failure
         self.labels_to_skip = set(labels_to_skip)
+        self.pages_to_skip = set(pages_to_skip)
         self.recursive_indexer: RecursiveIndexer | None = None
         self.index_origin = index_origin
         (
@@ -404,7 +408,7 @@ class ConfluenceConnector(LoadConnector, PollConnector):
                         if CONFLUENCE_CONNECTOR_INDEX_ONLY_ACTIVE_PAGES
                         else None
                     ),
-                    expand="body.storage.value,version",
+                    expand="body.storage.value,version,ancestors",
                 )
             except Exception:
                 logger.warning(
@@ -427,7 +431,7 @@ class ConfluenceConnector(LoadConnector, PollConnector):
                                     if CONFLUENCE_CONNECTOR_INDEX_ONLY_ACTIVE_PAGES
                                     else None
                                 ),
-                                expand="body.storage.value,version",
+                                expand="body.storage.value,version,ancestors",
                             )
                         )
                     except HTTPError as e:
@@ -441,7 +445,7 @@ class ConfluenceConnector(LoadConnector, PollConnector):
                                 self.space,
                                 start=start_ind + i,
                                 limit=1,
-                                expand="body.view.value,version",
+                                expand="body.view.value,version,ancestors",
                             )
                         )
 
@@ -596,6 +600,20 @@ class ConfluenceConnector(LoadConnector, PollConnector):
 
             if time_filter is None or time_filter(last_modified):
                 page_id = page["id"]
+                page_title = page["title"]
+
+                # Check if page or any of its ancestors should be skipped
+                if self.pages_to_skip:
+                    ancestors = page.get("ancestors", [])
+                    ancestor_titles = {ancestor.get("title", "") for ancestor in ancestors}
+                    if page_title in self.pages_to_skip or ancestor_titles.intersection(
+                        self.pages_to_skip
+                    ):
+                        logger.info(
+                            f"Page '{page_title}' (ID: {page_id}) or one of its ancestors "
+                            f"is in pages_to_skip list. Skipping."
+                        )
+                        continue
 
                 if self.labels_to_skip or not CONFLUENCE_CONNECTOR_SKIP_LABEL_INDEXING:
                     page_labels = self._fetch_labels(self.confluence_client, page_id)
