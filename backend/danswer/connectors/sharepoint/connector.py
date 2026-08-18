@@ -6,6 +6,7 @@ import random
 import re
 import tempfile
 import time
+from collections import deque
 from collections.abc import Generator
 from dataclasses import dataclass
 from dataclasses import field
@@ -15,6 +16,9 @@ from email.utils import parsedate_to_datetime
 from typing import Any
 from typing import IO
 from typing import Optional
+from urllib.parse import quote
+from urllib.parse import unquote
+from urllib.parse import urlsplit
 
 import msal  # type: ignore
 import requests
@@ -52,6 +56,11 @@ _GRAPH_SCOPE = f"{_GRAPH_HOST}/.default"
 SCOPE_DOCUMENTS = "documents"  # default library files only (original behaviour)
 SCOPE_FULL = "full"  # all document libraries + all modern site pages
 _VALID_SCOPES = frozenset({SCOPE_DOCUMENTS, SCOPE_FULL})
+
+# Graph reports the default library's drive name as "Documents" while the
+# browser URL path segment is "Shared Documents" (mirrors upstream Onyx's
+# SHARED_DOCUMENTS_MAP) — accept either spelling in library-scoped URLs.
+_SHARED_DOCUMENTS_MAP = {"Documents": "Shared Documents"}
 
 # --- reliability knobs (learned from upstream Onyx) -------------------------
 # Graph throttles aggressively (429) and its gateway returns transient 5xx; a
@@ -263,6 +272,14 @@ class SiteData:
     folder: Optional[str]
     sites: list = field(default_factory=list)
     driveitems: list = field(default_factory=list)
+    # Library scoping (upstream-style URL semantics): for
+    # /sites/<name>/<Library>[/<nested/folder/...>] URLs, the library's display
+    # name and the "/"-joined folder path inside it (both URL-unquoted).
+    # Elements with drive_name set are crawled ONLY via the checkpoint path
+    # (drive resolved by name, folder subtree via BFS /children) — the legacy
+    # whole-site enumeration skips them.
+    drive_name: Optional[str] = None
+    folder_path: Optional[str] = None
 
 
 def _convert_driveitem_to_document(
@@ -452,19 +469,67 @@ class SharepointConnector(
         self.site_data: list[SiteData] = self._extract_site_and_folder(sites)
 
     @staticmethod
+    def _strip_share_link_tokens(path: str) -> list[str]:
+        """Share links prefix the real path with tokens like /:f:/r/ or /:x:/r/
+        (mirrors upstream Onyx). Stripping them turns a path-style share link
+        into a plain site path. Tokenized short links (/:f:/s/<opaque-token>)
+        have no path to recover — after stripping they fail the site-segment
+        check below and are rejected with guidance."""
+        segments = [segment for segment in path.split("/") if segment]
+        if segments and segments[0].startswith(":"):
+            segments = segments[1:]
+            if segments and segments[0] in {"r", "s", "g"}:
+                segments = segments[1:]
+        return segments
+
+    @staticmethod
     def _extract_site_and_folder(site_urls: list[str]) -> list[SiteData]:
+        """Upstream-style URL semantics: /sites|teams|personal/<name> is the
+        site; the next segment (if any) is a document LIBRARY's display name;
+        anything after that is a folder path inside it. An unparseable URL
+        raises — the old silent skip left empty site_data, which fell back to
+        enumerating all tenant sites (empty under app-only creds), so the
+        attempt "succeeded" with 0 docs."""
         site_data_list = []
         for url in site_urls:
-            parts = url.strip().split("/")
-            if "sites" in parts:
-                sites_index = parts.index("sites")
-                site_url = "/".join(parts[: sites_index + 2])
-                folder = (
-                    parts[sites_index + 2] if len(parts) > sites_index + 2 else None
+            stripped = url.strip()
+            parsed = urlsplit(stripped)
+            parts = SharepointConnector._strip_share_link_tokens(parsed.path)
+            lower_parts = [part.lower() for part in parts]
+            site_type_index = None
+            for site_token in ("sites", "teams", "personal"):
+                if site_token in lower_parts:
+                    site_type_index = lower_parts.index(site_token)
+                    break
+            if (
+                not parsed.scheme
+                or not parsed.netloc
+                or site_type_index is None
+                or len(parts) <= site_type_index + 1
+            ):
+                raise ValueError(
+                    f"Unrecognized SharePoint URL '{stripped}'. Expected "
+                    "'https://<tenant>.sharepoint.com/(sites|teams|personal)/"
+                    "<name>[/<Library>[/<nested/folder/...>]]'. Tokenized "
+                    "sharing links ('.../:f:/s/...') are not supported — paste "
+                    "the folder's path URL from the browser address bar instead."
                 )
-                site_data_list.append(
-                    SiteData(url=site_url, folder=folder, sites=[], driveitems=[])
+            site_url = f"{parsed.scheme}://{parsed.netloc}/" + "/".join(
+                parts[: site_type_index + 2]
+            )
+            remaining = [unquote(part) for part in parts[site_type_index + 2 :]]
+            drive_name = remaining[0] if remaining else None
+            folder_path = "/".join(remaining[1:]) if len(remaining) > 1 else None
+            site_data_list.append(
+                SiteData(
+                    url=site_url,
+                    folder=None,
+                    sites=[],
+                    driveitems=[],
+                    drive_name=drive_name,
+                    folder_path=folder_path,
                 )
+            )
         return site_data_list
 
     # --- raw Graph GET with retry (for the /pages API) ---------------------
@@ -798,6 +863,11 @@ class SharepointConnector(
             filter_str = f"last_modified_datetime ge {start.isoformat()} and last_modified_datetime le {end.isoformat()}"
 
         for element in self.site_data:
+            if element.drive_name:
+                # Library/folder-scoped URLs are crawled via the checkpoint
+                # path (and pruned via _scoped_file_ids) — enumerating the
+                # whole site here would silently widen the scope.
+                continue
             if self.scrape_scope == SCOPE_FULL:
                 # Every document library on the site, not just the default drive.
                 for site in element.sites:
@@ -868,6 +938,15 @@ class SharepointConnector(
                 f"and last_modified_datetime le "
                 f"{end.replace(tzinfo=None).isoformat()}"
             )
+
+        if element.drive_name:
+            # Library/folder-scoped URLs are only crawled via the checkpoint
+            # path; legacy enumeration would silently widen to the whole site.
+            logger.warning(
+                "Skipping library-scoped element '%s' in legacy enumeration.",
+                element.url,
+            )
+            return
 
         if self.scrape_scope == SCOPE_FULL:
             # Every document library on the site, not just the default drive.
@@ -990,14 +1069,95 @@ class SharepointConnector(
 
     # --- resumable, memory-bounded crawl (CheckpointedConnector) -----------
 
-    def _all_drive_ids(self) -> list[str]:
-        """Ordered, de-duped list of drive ids to crawl. Full scope = every
-        library on every site; documents scope = each site's default drive.
-        Cheap (metadata only) and deterministic, so it's a stable index space
-        for checkpoint resume."""
-        drive_ids: list[str] = []
+    @staticmethod
+    def _resolve_drive_id(site: Any, drive_name: str) -> str:
+        """Find a site's drive (document library) id by display name, accepting
+        the browser-URL spelling of the default library ("Shared Documents")
+        for Graph's "Documents" (mirrors upstream Onyx). Raises with the
+        available names so a typo'd library shows an actionable error instead
+        of a silent 0-doc success."""
+        drives = sleep_and_retry(site.drives.get(), "site.drives.get")
+        wanted = drive_name.lower()
+        names = []
+        for drive in drives:
+            name = getattr(drive, "name", None)
+            if not name:
+                continue
+            names.append(name)
+            if name.lower() == wanted:
+                return drive.id
+            if _SHARED_DOCUMENTS_MAP.get(name, "").lower() == wanted:
+                return drive.id
+        raise ValueError(
+            f"Document library '{drive_name}' not found on site. "
+            f"Available libraries: {names}"
+        )
+
+    def _iter_folder_items(
+        self, drive_id: str, folder_path: str, select: str | None = None
+    ) -> Generator[dict[str, Any], None, None]:
+        """BFS over one folder subtree via paged /children calls, yielding
+        non-folder drive items (plain Graph JSON, same shape as delta items).
+        Graph's delta API can't scope to a subtree on SharePoint libraries
+        (root-only), so folder scoping walks /children like upstream Onyx.
+        Memory-bounded: one page at a time, only folder URLs are queued."""
+        encoded_path = quote(folder_path, safe="/")
+        folder_queue: deque[str] = deque(
+            [f"{_GRAPH_BASE}/drives/{drive_id}/root:/{encoded_path}:/children"]
+        )
+        first_request = True
+        while folder_queue:
+            url: str | None = folder_queue.popleft()
+            params: dict[str, str] | None = {"$top": "200"}
+            if select:
+                params["$select"] = select
+            while url:
+                try:
+                    data = self._graph_get(url, params)
+                except requests.HTTPError as e:
+                    if (
+                        first_request
+                        and e.response is not None
+                        and e.response.status_code == 404
+                    ):
+                        raise ValueError(
+                            f"Folder path '{folder_path}' not found in the "
+                            "configured document library. Check the URL's "
+                            "folder segments."
+                        ) from e
+                    raise
+                first_request = False
+                params = None  # nextLink already embeds query params
+                for item in data.get("value", []):
+                    # membership, not truthiness: Graph facets are dicts and an
+                    # empty facet ({}) is falsy, which would misclassify items.
+                    if "folder" in item:
+                        folder_queue.append(
+                            f"{_GRAPH_BASE}/drives/{drive_id}"
+                            f"/items/{item['id']}/children"
+                        )
+                        continue
+                    yield item
+                url = data.get("@odata.nextLink")
+
+    def _delta_roots(self) -> list[tuple[str, str | None]]:
+        """Ordered, de-duped list of (drive_id, folder_path) crawl roots.
+        folder_path None = whole drive (delta enumeration); set = that folder's
+        subtree only (BFS /children). Library-scoped URLs resolve their one
+        drive by name; otherwise full scope = every library on every site,
+        documents scope = each site's default drive. Cheap (metadata only) and
+        deterministic, so it's a stable index space for checkpoint resume."""
+        roots: list[tuple[str, str | None]] = []
         for element in self.site_data:
-            if self.scrape_scope == SCOPE_FULL:
+            if element.drive_name:
+                for site in element.sites:
+                    roots.append(
+                        (
+                            self._resolve_drive_id(site, element.drive_name),
+                            element.folder_path,
+                        )
+                    )
+            elif self.scrape_scope == SCOPE_FULL:
                 for site in element.sites:
                     try:
                         drives = sleep_and_retry(site.drives.get(), "site.drives.get")
@@ -1007,7 +1167,7 @@ class SharepointConnector(
                     for drive in drives:
                         did = getattr(drive, "id", None)
                         if did:
-                            drive_ids.append(did)
+                            roots.append((did, None))
             else:
                 lists: list[Site] = []
                 for site in element.sites:
@@ -1015,8 +1175,8 @@ class SharepointConnector(
                 for lst in lists:
                     did = getattr(getattr(lst, "drive", None), "id", None)
                     if did:
-                        drive_ids.append(did)
-        return list(dict.fromkeys(drive_ids))  # preserve order, drop dups
+                        roots.append((did, None))
+        return list(dict.fromkeys(roots))  # preserve order, drop dups
 
     def load_from_checkpoint(
         self,
@@ -1047,11 +1207,56 @@ class SharepointConnector(
         batch: list[Document] = []
 
         if phase == "drives":
-            drive_ids = self._all_drive_ids()
+            roots = self._delta_roots()
             di = int(state.get("drive_index", 0))
             delta_url = state.get("delta_url")
-            while di < len(drive_ids):
-                drive_id = drive_ids[di]
+            while di < len(roots):
+                drive_id, folder_path = roots[di]
+                if folder_path is not None:
+                    # Folder-scoped root: BFS /children (delta is root-only on
+                    # SharePoint libraries). No durable mid-subtree cursor, so
+                    # mid-crawl batches carry checkpoint=None and the resume
+                    # point advances only once the whole subtree is done —
+                    # folder scopes are small, so a restart re-walks little.
+                    for item in self._iter_folder_items(drive_id, folder_path):
+                        if "file" not in item:  # packages/OneNote etc.
+                            continue
+                        if not _site_page_in_time_window(item, start_dt, end_dt):
+                            continue
+                        name = item.get("name", "")
+                        should_index, skip_reason = _index_decision(
+                            name,
+                            int(item.get("size", 0) or 0),
+                            _parse_graph_datetime(item.get("lastModifiedDateTime")),
+                        )
+                        if not should_index:
+                            logger.debug(
+                                "Skipping %s: %s",
+                                item.get("webUrl") or name,
+                                skip_reason,
+                            )
+                            continue
+                        try:
+                            doc = self._build_delta_document(drive_id, item)
+                        except Exception:
+                            logger.exception(
+                                "Failed to fetch/convert folder item %s; skipping.",
+                                item.get("webUrl"),
+                            )
+                            continue
+                        if doc is None:
+                            continue
+                        batch.append(doc)
+                        if len(batch) >= self.batch_size:
+                            yield batch, None  # mid-subtree: not a resume point
+                            batch = []
+                    yield batch, json.dumps(
+                        {"phase": "drives", "drive_index": di + 1, "delta_url": None}
+                    )
+                    batch = []
+                    di += 1
+                    delta_url = None
+                    continue
                 url: str | None = (
                     delta_url or f"{_GRAPH_BASE}/drives/{drive_id}/root/delta"
                 )
@@ -1115,6 +1320,8 @@ class SharepointConnector(
 
         if phase == "pages" and self.scrape_scope == SCOPE_FULL:
             for element in self.site_data:
+                if element.drive_name:
+                    continue  # library/folder scope: files only, no site pages
                 for site in element.sites:
                     site_id = getattr(site, "id", None)
                     if not site_id:
@@ -1134,6 +1341,29 @@ class SharepointConnector(
                         )
 
         yield batch, json.dumps({"phase": "done"})
+
+    def _scoped_file_ids(
+        self, drive_id: str, folder_path: str | None
+    ) -> Generator[str, None, None]:
+        """Ids of every current file in a library-scoped root ($select'd
+        metadata only, no content) — folder subtrees via the same BFS the
+        indexer uses, whole libraries via a delta walk."""
+        if folder_path is not None:
+            for item in self._iter_folder_items(
+                drive_id, folder_path, select="id,file,folder"
+            ):
+                if "file" in item and item.get("id"):
+                    yield item["id"]
+            return
+        url: str | None = f"{_GRAPH_BASE}/drives/{drive_id}/root/delta"
+        params: dict[str, str] | None = {"$select": "id,file,deleted"}
+        while url:
+            data = self._graph_get(url, params)
+            params = None
+            for item in data.get("value", []):
+                if "file" in item and "deleted" not in item and item.get("id"):
+                    yield item["id"]
+            url = data.get("@odata.nextLink")
 
     def _fetch_site_page_ids(self, site_id: str) -> Generator[str, None, None]:
         """List site-page ids only ($select=id, no canvas) — the cheap path for
@@ -1170,6 +1400,19 @@ class SharepointConnector(
 
         ids: set[str] = set()
         for element in self.site_data:
+            if element.drive_name:
+                # Library/folder scope: enumerate the same subtree the indexer
+                # crawls (ids only). Without this, pruning would diff against
+                # an empty set and delete every doc the scoped crawl indexed.
+                # No site pages either — scoped connectors never index them.
+                for site in element.sites:
+                    ids.update(
+                        self._scoped_file_ids(
+                            self._resolve_drive_id(site, element.drive_name),
+                            element.folder_path,
+                        )
+                    )
+                continue
             for driveitem in element.driveitems:
                 ids.add(driveitem.id)
             if self.scrape_scope == SCOPE_FULL:
