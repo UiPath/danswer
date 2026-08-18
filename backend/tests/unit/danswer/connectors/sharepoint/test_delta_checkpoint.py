@@ -1,7 +1,7 @@
 """Unit tests for the SharePoint delta-based resumable checkpoint enumeration
 (`load_from_checkpoint`), the delta-item -> Document converter, and the
 allow-list + size-cap file filter. Pure logic — network calls (_graph_get,
-_download_item_bytes, _download_item_to_file, _all_drive_ids,
+_download_item_bytes, _download_item_to_file, _delta_roots,
 _populate_sitedata_sites) are stubbed."""
 import io
 import json
@@ -32,7 +32,7 @@ def _file(id_: str, name: str) -> dict:
 def _stub_drives_only(conn: SharepointConnector, pages: dict[str, dict]) -> None:
     conn.graph_client = object()  # truthy: pass the missing-credential guard
     conn._populate_sitedata_sites = lambda: None  # type: ignore[method-assign]
-    conn._all_drive_ids = lambda: ["drv1"]  # type: ignore[method-assign]
+    conn._delta_roots = lambda: [("drv1", None)]  # type: ignore[method-assign]
     conn._download_item_bytes = (  # type: ignore[method-assign]
         lambda drive_id, item_id, label: b"body-" + item_id.encode()
     )
@@ -221,7 +221,7 @@ def test_load_from_checkpoint_skips_disallowed_and_oversized(monkeypatch) -> Non
         },
     }
     conn._populate_sitedata_sites = lambda: None  # type: ignore[method-assign]
-    conn._all_drive_ids = lambda: ["drv1"]  # type: ignore[method-assign]
+    conn._delta_roots = lambda: [("drv1", None)]  # type: ignore[method-assign]
     conn._graph_get = lambda url, params=None: pages["BASE"]  # type: ignore[method-assign]
     conn._download_item_bytes = (  # type: ignore[method-assign]
         lambda drive_id, item_id, label: b"body"
