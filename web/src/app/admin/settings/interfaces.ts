@@ -26,6 +26,10 @@ export interface Settings {
   // overriding kNN (never a hard keyword). Applies to the web Search tab + Slack.
   assistant_router_rules_enabled?: boolean;
   assistant_router_rules_prompt?: string;
+  // Global answer-behavior instructions appended to EVERY assistant's system
+  // prompt (chat, search and Slack). Persona-agnostic policy only; empty =
+  // disabled. Mirrors backend Settings.shared_prompt_instructions.
+  shared_prompt_instructions?: string;
 }
 
 export interface EnterpriseSettings {

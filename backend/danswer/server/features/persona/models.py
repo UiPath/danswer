@@ -36,6 +36,9 @@ class CreatePersonaRequest(BaseModel):
     rerank_enabled: bool = False
     # Per-assistant Deep RAG opt-in. Defaults False so older clients keep behavior.
     deep_rag_enabled: bool = False
+    # Per-assistant opt-OUT of the global Shared Assistant Instructions. Defaults
+    # True (applied) so older clients that omit it keep the global policy.
+    shared_instructions_enabled: bool = True
     prompt_ids: list[int]
     document_set_ids: list[int]
     # e.g. ID of SearchTool or ImageGenerationTool or <USER_DEFINED_TOOL>
@@ -64,6 +67,7 @@ class PersonaSnapshot(BaseModel):
     llm_filter_extraction: bool
     rerank_enabled: bool
     deep_rag_enabled: bool = False
+    shared_instructions_enabled: bool = True
     llm_model_provider_override: str | None
     llm_model_version_override: str | None
     starter_messages: list[StarterMessage] | None
@@ -105,6 +109,7 @@ class PersonaSnapshot(BaseModel):
             llm_filter_extraction=persona.llm_filter_extraction,
             rerank_enabled=persona.rerank_enabled,
             deep_rag_enabled=persona.deep_rag_enabled,
+            shared_instructions_enabled=persona.shared_instructions_enabled,
             llm_model_provider_override=persona.llm_model_provider_override,
             llm_model_version_override=persona.llm_model_version_override,
             starter_messages=persona.starter_messages,

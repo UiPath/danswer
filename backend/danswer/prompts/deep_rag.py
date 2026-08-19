@@ -1,25 +1,27 @@
-"""Prompts for the feature-gated Deep RAG flow.
+"""Prompts for the feature-gated Deep RAG flow: question decomposition, the
+initial-vs-refined answer compare-guard, and the coverage-gate verdict judge.
 
-The decomposition and answer-comparison prompts are ported (and lightly adapted)
-from upstream Onyx's Agent Search — `backend/onyx/prompts/agent_search.py`
-(INITIAL_QUESTION_DECOMPOSITION_PROMPT, INITIAL_REFINED_ANSWER_COMPARISON_PROMPT).
-We reuse upstream's wording deliberately: it is battle-tested across a large user
-base. We do NOT use upstream's LangGraph — only the prompt learnings.
-
-The single-shot verdict and synthesis prompts are ours (validated in the
-multihop-gate eval): single-shot self-reports coverage, and only a `partial`
-verdict escalates to the decompose->synthesize path.
+Answer generation itself (single-shot and multi-hop synthesis) runs on the normal
+`Answer`/`SearchTool` infrastructure — deep RAG no longer re-implements it, and adds
+NOTHING to the answer prompt. The coverage gate is `VERDICT_JUDGE_PROMPT`, a separate
+post-generation judge call over the finished question+answer; only a `partial` verdict
+escalates to the decompose path.
 """
 
 _SEP = "-------"
 
-# Ported from upstream INITIAL_QUESTION_DECOMPOSITION_PROMPT. `{max_subq}` is our
-# configurable cap (upstream hard-codes 3). `{missing_hint}` optionally seeds the
-# decomposition with the single-shot verdict's `missing` list — upstream's
-# "decompose after an initial search" learning, grounded in what we already found.
+# `{max_subq}` is a configurable CEILING (the prompt asks for as few as needed).
+# `{missing_hint}` optionally seeds the decomposition with the single-shot verdict's
+# `missing` list, so the sub-questions target what the first retrieval didn't cover.
 DECOMPOSITION_PROMPT = """\
-Please create a list of no more than {max_subq} sub-questions whose answers would help to \
-inform the answer to the initial question.
+Please create a list of sub-questions whose answers would help to inform the answer to the \
+initial question.
+
+First decide how many sub-questions this question ACTUALLY needs — as few as possible, and \
+never more than {max_subq}. The right number comes from the question's own structure: one per \
+entity/version being compared, one per genuinely distinct sub-topic. A simple single-topic \
+question needs only ONE sub-question; do NOT pad the list to the maximum with redundant \
+rephrasings of the same ask.
 
 The purpose for these sub-questions could be:
   1) decomposition to isolate individual entities (i.e., 'compare sales of company A and company B' -> \
@@ -31,6 +33,13 @@ that are more specific
 
 Important:
  - Each sub-question should lend itself to be answered by a RAG system; phrase it that way.
+ - Every sub-question MUST be self-contained and retain the full context of the initial \
+question: the specific product or subject being asked about, its deployment environment or \
+flavor, and any version mentioned. NEVER produce a sub-question about an underlying platform, \
+dependency, or technology in isolation from that subject — ask "which operating systems does \
+<the product> support on <the platform>?", never "which operating systems does <the platform> \
+support?". A sub-question detached from the subject retrieves content about the platform \
+itself and contaminates the answer with capabilities the subject does not actually have.
  - If the question COMPARES two or more entities or product versions (e.g. "difference between \
 X and Y"), create a SEPARATE sub-question for EACH one on its own — never put both in the same \
 sub-question. Each side must be researched independently (its documents are retrieved separately).
@@ -38,8 +47,22 @@ sub-question. Each side must be researched independently (its documents are retr
  - Do NOT create sub-questions that are clarifying questions to the user, make suggestions, or ask the \
 user for more information. Take the information from the user as given.
 
+Examples:
+
+Initial Question: Does Automation Suite have support for RHEL 9.x as worker nodes on EKS?
+Sub-questions:
+What operating systems does Automation Suite support as worker nodes on EKS?
+Does Automation Suite support RHEL 9.x as worker nodes on EKS?
+
+(DO NOT produce detached questions stripped of the product name, such as: "What operating systems does EKS support?")
+
+Initial Question: How does Product A compare to Product B regarding encryption on AWS?
+Sub-questions:
+What encryption capabilities does Product A support on AWS?
+What encryption capabilities does Product B support on AWS?
+
 Output ONLY the sub-questions, one per line, with no numbering or extra text.
-{missing_hint}{history}Here is the initial question:
+{subject_block}{missing_hint}{history}Here is the initial question:
 {sep}
 {question}
 {sep}
@@ -47,13 +70,11 @@ Output ONLY the sub-questions, one per line, with no numbering or extra text.
     "{sep}", _SEP
 )
 
-# Adapted from upstream INITIAL_REFINED_ANSWER_COMPARISON_PROMPT — the compare-guard.
-# Keeps the deeper answer only if it is SUBSTANTIALLY better, else we fall back.
-# DIVERGENCE FROM UPSTREAM: upstream defines "better" mainly as more comprehensive /
-# more detailed / more citations — which the refined (deep) answer, being ~always
-# longer, trivially satisfies, so the guard degenerated to "deep always wins". We judge
-# on CORRECTNESS and how well each answer actually answers the question, and explicitly
-# tell the judge NOT to reward length/detail/citations on their own.
+# The compare-guard: keeps the deeper answer only if it is SUBSTANTIALLY better,
+# else we fall back to the single-shot. It judges on CORRECTNESS and how directly each
+# answer addresses the question — NOT on length/detail/citation count, which the
+# (~always longer) refined answer would trivially win, degenerating the guard to
+# "deep always wins".
 COMPARISON_PROMPT = """\
 For the given question, decide which answer is genuinely better — meaning MORE CORRECT and a \
 MORE COMPLETE, DIRECT answer to the question — and only say the refined answer wins if it is \
@@ -92,38 +113,31 @@ question, not merely longer? Answer with a single word: "yes" or "no".
     "{sep}", _SEP
 )
 
-# Ours: single-shot answer + self-reported coverage verdict, in one call. This is
-# the gate — only `partial` escalates. Double braces are literal JSON braces.
-SINGLE_SHOT_VERDICT_PROMPT = """\
-{persona_instructions}Using ONLY the context below, answer the question — applying the assistant \
-instructions above to the answer text (its format, SME attribution, confidence handling, and any \
-routing/authority rules). Then judge whether the retrieved context was SUFFICIENT to fully answer \
-every part of the question.
+# Ours: the coverage-gate verdict, produced by a SEPARATE post-generation judge call
+# (fast LLM) over the finished question+answer pair. It used to be a VERDICT_SUFFIX
+# appended to the answer prompt itself, but ANY trailing self-assessment task measurably
+# flattened the answer's markdown (bullets/bold) into plain prose — so the gate now runs
+# outside answer generation entirely, leaving the answer byte-identical to the normal
+# flow's. Output contract (the ---VERDICT--- block) is unchanged; the controller parses
+# it with the same splitter. Only a `partial` verdict escalates to the decompose path; a
+# missing/unparseable verdict fails OPEN (treated as `complete` -> no escalation).
+VERDICT_JUDGE_PROMPT = """\
+You are the coverage gate of a deep-retrieval pipeline. Below is a user's QUESTION and the \
+ANSWER produced from retrieved documentation. Judge whether the answer FULLY and CONFIDENTLY \
+addresses every part of the question.
 
-Respond as strict JSON:
-{{"answer": "<your answer, per the assistant instructions above, citing sources as [n]>", \
-"coverage": "complete" | "partial", \
-"missing": ["<sub-topic the context did NOT cover>", ...]}}
+Set "coverage" to "partial" whenever it does not — INCLUDING if the answer hedges, expresses \
+low confidence, gives a low confidence score, or defers to / recommends contacting an SME, \
+product manager, or another team for any part instead of answering it. Use "complete" ONLY \
+when every part of the question is answered with confidence. "missing" lists the specific \
+sub-topics the answer did not cover with evidence (an empty list when complete).
 
-Use "partial" if ANY part of the question is unaddressed or you had to hedge. "missing" lists the specific \
-sub-topics still needing evidence (empty list if complete).
+QUESTION:
+{question}
 
-Context:
-{context}
+ANSWER:
+{answer}
 
-{history}Question: {question}
-JSON:"""
-
-# Ours: synthesize the final answer from the per-sub-question grouped context.
-SYNTHESIS_PROMPT = """\
-{persona_instructions}Using the retrieved context (grouped by sub-question) below, write a complete \
-answer to the ORIGINAL question, following the assistant instructions above (its format, SME \
-attribution, confidence handling, and any routing/authority rules). Explicitly compare or combine \
-across sub-questions where the question calls for it. Cite sources as [n]. If a required piece is \
-genuinely missing from the context, say so.
-
-ORIGINAL question: {question}
-
-{context}
-
-Answer:"""
+Respond with exactly this block and nothing else:
+---VERDICT---
+{{"coverage": "complete" or "partial", "missing": ["<uncovered sub-topic>", ...]}}"""

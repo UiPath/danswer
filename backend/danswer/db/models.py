@@ -1074,6 +1074,13 @@ class Persona(Base):
     deep_rag_enabled: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="false"
     )
+    # Per-assistant opt-OUT of the global Shared Assistant Instructions (Admin →
+    # Settings → shared_prompt_instructions, appended to every assistant's system
+    # prompt at answer time). Default ON so the global policy applies everywhere;
+    # flip off in the assistant editor for assistants that must not receive it.
+    shared_instructions_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default="true"
+    )
     # Allows the Persona to specify a different LLM version than is controlled
     # globablly via env variables. For flexibility, validity is not currently enforced
     # NOTE: only is applied on the actual response generation - is not used for things like

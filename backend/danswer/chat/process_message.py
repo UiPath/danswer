@@ -1,4 +1,3 @@
-import re
 from collections.abc import Callable
 from collections.abc import Iterator
 from functools import partial
@@ -56,6 +55,7 @@ from danswer.llm.answering.models import CitationConfig
 from danswer.llm.answering.models import DocumentPruningConfig
 from danswer.llm.answering.models import PreviousMessage
 from danswer.llm.answering.models import PromptConfig
+from danswer.llm.answering.models import with_shared_instructions
 from danswer.llm.exceptions import GenAIDisabledException
 from danswer.llm.factory import get_llms_for_persona
 from danswer.llm.factory import get_main_llm_from_tuple
@@ -436,7 +436,7 @@ def stream_chat_message_objects(
         if not final_msg.prompt:
             raise RuntimeError("No Prompt found")
 
-        prompt_config = (
+        prompt_config = with_shared_instructions(
             PromptConfig.from_model(
                 final_msg.prompt,
                 prompt_override=(
@@ -444,7 +444,8 @@ def stream_chat_message_objects(
                 ),
             )
             if not persona
-            else PromptConfig.from_model(persona.prompts[0])
+            else PromptConfig.from_model(persona.prompts[0]),
+            persona=persona or chat_session.persona,
         )
 
         # find out what tools to use
@@ -598,14 +599,14 @@ def stream_chat_message_objects(
                 coverage=deep_result.coverage,
                 sub_questions=deep_result.sub_questions,
                 source=deep_result.source,
+                escalation_reason=deep_result.escalation_reason,
             )
             # Surface the retrieved documents so the UI shows sources (not "the AI
-            # decided this query didn't need a search") and citations resolve —
-            # mirrors the normal search-tool doc handling.
-            deep_server_docs = chunks_or_sections_to_search_docs(deep_result.sections)
+            # decided this query didn't need a search") and citations resolve. The
+            # docs come straight from the normal answer flow the controller reused.
             deep_reference_db_docs = [
                 create_db_search_doc(server_search_doc=doc, db_session=db_session)
-                for doc in deep_server_docs
+                for doc in deep_result.docs
             ]
             yield QADocsResponse(
                 rephrased_query=final_msg.message,
@@ -620,25 +621,13 @@ def stream_chat_message_objects(
                 recency_bias_multiplier=1.0,
             )
 
-            # Map the answer's [n] markers -> saved doc ids (via each cited section's
-            # document_id; multiple [n] may share a doc).
-            docid_to_dbid: dict[str, int] = {}
-            for dbdoc in deep_reference_db_docs:
-                docid_to_dbid.setdefault(dbdoc.document_id, dbdoc.id)
-            deep_citations: dict[int, int] = {}
-            for marker in re.findall(r"\[(\d+)\]", deep_result.answer):
-                idx = int(marker)
-                if 1 <= idx <= len(deep_result.sections):
-                    cited_doc_id = getattr(
-                        deep_result.sections[idx - 1], "document_id", None
-                    )
-                    saved_id = (
-                        docid_to_dbid.get(cited_doc_id)
-                        if cited_doc_id is not None
-                        else None
-                    )
-                    if saved_id is not None:
-                        deep_citations[idx] = saved_id
+            # Map the answer's [n] markers -> saved doc ids via the shared helper (the
+            # citations the normal answer flow computed carry citation_num -> document_id,
+            # already renumbered to match the answer text; the helper re-maps to the rows
+            # we just saved and skips any stray citation).
+            deep_citations = translate_citations(
+                deep_result.citations, deep_reference_db_docs
+            )
 
             yield DanswerAnswerPiece(answer_piece=deep_result.answer)
             gen_ai_response_message = partial_response(

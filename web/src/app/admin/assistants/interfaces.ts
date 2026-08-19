@@ -40,6 +40,8 @@ export interface Persona {
   llm_filter_extraction?: boolean;
   rerank_enabled?: boolean;
   deep_rag_enabled?: boolean;
+  // Per-assistant opt-out of the global Shared Assistant Instructions.
+  shared_instructions_enabled?: boolean;
   llm_model_provider_override?: string;
   llm_model_version_override?: string;
   starter_messages: StarterMessage[] | null;

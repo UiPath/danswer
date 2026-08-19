@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from danswer.llm.answering import doc_pruning as dp
+from danswer.search.versioning import question_version_candidates
 
 BASE = "https://docs.uipath.com/orchestrator/standalone"
 PAGE = "installation-guide/maintenance-considerations"
@@ -47,7 +48,11 @@ def test_versioned_url_parts():
 
 
 def test_rewrites_to_latest_indexed_version():
-    index = [f"{BASE}/2023.4/{PAGE}", f"{BASE}/2023.10/{PAGE}", f"{BASE}/2025.10/{PAGE}"]
+    index = [
+        f"{BASE}/2023.4/{PAGE}",
+        f"{BASE}/2023.10/{PAGE}",
+        f"{BASE}/2025.10/{PAGE}",
+    ]
     docs = [ldoc(f"{BASE}/2023.4/{PAGE}")]
     dp.rewrite_docs_links(docs, _FakeDB(index))
     assert docs[0].link == f"{BASE}/2025.10/{PAGE}"
@@ -87,26 +92,51 @@ def test_new_scheme_outranks_old():
 
 # ---- version-aware targeting ---------------------------------------------------
 
-def test_parse_question_doc_version():
-    assert dp.parse_question_doc_version("is this supported in 23.10?") == "2023.10"
-    assert dp.parse_question_doc_version("on Orchestrator 2024.10 standalone") == "2024.10"
-    # multiple versions -> ambiguous -> None (fall back to latest)
-    assert dp.parse_question_doc_version("upgrade from 23.10 to 25.10") is None
+
+def test_question_version_candidates():
+    # <=24 -> single YYYY.MM corpus form
+    assert question_version_candidates("is this supported in 23.10?") == ["2023.10"]
+    assert question_version_candidates("on Orchestrator 2024.10 standalone") == [
+        "2024.10"
+    ]
+    # >=25 -> BOTH corpus forms (Automation Suite 2.NNMM + standalone YYYY.MM)
+    assert question_version_candidates("what's new in 2025.10?") == [
+        "2.2510",
+        "2025.10",
+    ]
+    assert question_version_candidates("features in 25.10") == ["2.2510", "2025.10"]
+    # multiple distinct versions -> ambiguous -> [] (fall back to latest)
+    assert question_version_candidates("upgrade from 23.10 to 25.10") == []
     # no version
-    assert dp.parse_question_doc_version("how many records can AuditLogEntities hold") is None
+    assert (
+        question_version_candidates("how many records can AuditLogEntities hold") == []
+    )
     # not confused by '2.9 million'
-    assert dp.parse_question_doc_version("the table has 2.9 million records") is None
+    assert question_version_candidates("the table has 2.9 million records") == []
 
 
 def test_targets_requested_version_even_if_older():
     index = [f"{BASE}/2023.10/{PAGE}", f"{BASE}/2025.10/{PAGE}"]
     docs = [ldoc(f"{BASE}/2025.10/{PAGE}")]  # retrieved latest
-    dp.rewrite_docs_links(docs, _FakeDB(index), target_version="2023.10")
+    dp.rewrite_docs_links(docs, _FakeDB(index), target_versions=["2023.10"])
     assert docs[0].link == f"{BASE}/2023.10/{PAGE}"  # downgraded to the asked version
+
+
+def test_targets_scheme_aware_prefers_indexed_candidate():
+    # a "2025.10" question -> candidates ['2.2510','2025.10']; an AS page indexed as
+    # 2.2510 must be targeted even though the question said 2025.10.
+    index = [f"{BASE}/2024.10/{PAGE}", f"{BASE}/2.2510/{PAGE}"]
+    docs = [ldoc(f"{BASE}/2024.10/{PAGE}")]
+    dp.rewrite_docs_links(
+        docs, _FakeDB(index), target_versions=question_version_candidates("in 2025.10")
+    )
+    assert docs[0].link == f"{BASE}/2.2510/{PAGE}"
 
 
 def test_target_version_not_indexed_leaves_link_as_is():
     index = [f"{BASE}/2023.10/{PAGE}", f"{BASE}/2025.10/{PAGE}"]
     docs = [ldoc(f"{BASE}/2025.10/{PAGE}")]
-    dp.rewrite_docs_links(docs, _FakeDB(index), target_version="2022.4")  # not indexed
+    dp.rewrite_docs_links(
+        docs, _FakeDB(index), target_versions=["2022.4"]
+    )  # not indexed
     assert docs[0].link == f"{BASE}/2025.10/{PAGE}"  # unchanged

@@ -17,7 +17,6 @@ from slack_sdk.models.blocks import SectionBlock
 from slack_sdk.models.blocks.basic_components import MarkdownTextObject
 from sqlalchemy.orm import Session
 
-from danswer.chat.models import CitationInfo
 from danswer.chat.models import QADocsResponse
 from danswer.configs.app_configs import DISABLE_GENERATIVE_AI
 from danswer.configs.danswerbot_configs import DANSWER_BOT_ANSWER_GENERATION_TIMEOUT
@@ -83,7 +82,6 @@ from danswer.one_shot_answer.models import OneShotQAResponse
 from danswer.search.models import BaseFilters
 from danswer.search.models import OptionalSearchSetting
 from danswer.search.models import RetrievalDetails
-from danswer.search.utils import chunks_or_sections_to_search_docs
 from danswer.secondary_llm_flows.search_routing import build_router_catalog_for_user
 from danswer.secondary_llm_flows.search_routing import DEFAULT_SEARCH_PERSONA_ID
 from danswer.secondary_llm_flows.search_routing import get_router_llm
@@ -825,29 +823,38 @@ def handle_message(
                         force=False,  # adaptive: escalate only on a partial verdict
                         bypass_acl=bypass_acl,
                     )
-                    # Persist the retrieved sections as search docs so the Slack
-                    # sources blocks render (and feedback references resolve).
+                    logger.info(
+                        "deep_rag: persona_id=%s source=%s escalated=%s "
+                        "docs=%s citations=%s answer_len=%s",
+                        new_message_request.persona_id,
+                        dr.source,
+                        dr.escalated,
+                        len(dr.docs),
+                        len(dr.citations),
+                        len(dr.answer or ""),
+                    )
+                    # Persist the documents the normal answer flow (reused by the
+                    # controller) returned so the Slack sources blocks render (and
+                    # feedback references resolve).
                     dr_db_docs = [
                         create_db_search_doc(
                             server_search_doc=doc, db_session=db_session
                         )
-                        for doc in chunks_or_sections_to_search_docs(dr.sections)
+                        for doc in dr.docs
                     ]
                     db_session.commit()
-                    dr_citations: list[CitationInfo] = []
-                    dr_seen: set[int] = set()
-                    for marker in re.findall(r"\[(\d+)\]", dr.answer):
-                        num = int(marker)
-                        if num in dr_seen or not (1 <= num <= len(dr.sections)):
-                            continue
-                        cited_doc_id = getattr(
-                            dr.sections[num - 1], "document_id", None
-                        )
-                        if cited_doc_id is not None:
-                            dr_citations.append(
-                                CitationInfo(citation_num=num, document_id=cited_doc_id)
-                            )
-                            dr_seen.add(num)
+                    # Citations come straight from the answer flow (citation_num ->
+                    # document_id, already renumbered to match the answer text); keep
+                    # only those whose doc we actually persisted.
+                    dr_doc_ids = {d.document_id for d in dr_db_docs}
+                    dr_citations = [
+                        c for c in dr.citations if c.document_id in dr_doc_ids
+                    ]
+                    logger.info(
+                        "deep_rag: persisted %s db docs (kept %s citations) -> returning",
+                        len(dr_db_docs),
+                        len(dr_citations),
+                    )
                     # markdown -> Slack mrkdwn conversion happens centrally in
                     # build_qa_response_blocks (shared by all Slack answers).
                     dr_answer_text = dr.answer
@@ -872,11 +879,21 @@ def handle_message(
                         citations=dr_citations or None,
                         error_msg=None,
                         answer_valid=True,
+                        # An uncited deep-rag answer is the persona's DELIBERATE deferral
+                        # (grounding-gated: "neither grounded -> surface the honest punt"),
+                        # not a hallucination — post it instead of the 🤷-only suppression.
+                        allow_uncited=True,
                     )
                 except Exception:
                     logger.exception(
                         "deep_rag Slack path failed; falling back to normal answer"
                     )
+            else:
+                logger.info(
+                    "deep_rag: SKIPPED (persona_id=%s deep_rag_enabled=%s) -> normal path",
+                    new_message_request.persona_id,
+                    getattr(dr_persona, "deep_rag_enabled", None),
+                )
 
             if len(new_message_request.messages) > 1:
                 persona = cast(
@@ -1142,7 +1159,12 @@ def handle_message(
             if matching_doc:
                 cited_docs.append((citation.citation_num, matching_doc))
 
-        if not cited_docs:
+        if not cited_docs and answer.allow_uncited:
+            # A deliberate uncited answer (deep-rag surfacing the persona's SME/PM
+            # deferral): post the answer text itself, just with no sources block —
+            # far more useful than the 🤷-only suppression below.
+            logger.info("Posting uncited answer (deliberate deferral, allow_uncited).")
+        elif not cited_docs:
             logger.info("Skipping response: No context documents cited for this query.")
             update_emote_react(
                 emoji="no-idea",
@@ -1170,8 +1192,9 @@ def handle_message(
 
             return True
 
-        cited_docs.sort()
-        citations_block = build_sources_blocks(cited_documents=cited_docs)
+        if cited_docs:  # empty only on the allow_uncited (deliberate deferral) path
+            cited_docs.sort()
+            citations_block = build_sources_blocks(cited_documents=cited_docs)
     elif priority_ordered_docs:
         document_blocks = build_documents_blocks(
             documents=priority_ordered_docs,

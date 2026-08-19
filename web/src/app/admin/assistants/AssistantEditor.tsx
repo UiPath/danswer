@@ -325,6 +325,8 @@ export function AssistantEditor({
     llm_relevance_filter: existingPersona?.llm_relevance_filter ?? false,
     rerank_enabled: existingPersona?.rerank_enabled ?? false,
     deep_rag_enabled: existingPersona?.deep_rag_enabled ?? false,
+    shared_instructions_enabled:
+      existingPersona?.shared_instructions_enabled ?? true,
     llm_model_provider_override:
       existingPersona?.llm_model_provider_override ?? null,
     llm_model_version_override:
@@ -362,6 +364,7 @@ export function AssistantEditor({
             llm_relevance_filter: Yup.boolean().required(),
             rerank_enabled: Yup.boolean().required(),
             deep_rag_enabled: Yup.boolean().required(),
+            shared_instructions_enabled: Yup.boolean().required(),
             llm_model_version_override: Yup.string().nullable(),
             llm_model_provider_override: Yup.string().nullable(),
             starter_messages: Yup.array().of(
@@ -598,11 +601,44 @@ export function AssistantEditor({
                       error={finalPromptError}
                     />
 
+                    {(globalSettings?.shared_prompt_instructions ?? "").trim() &&
+                      (() => {
+                        const sharedInstructions =
+                          globalSettings!.shared_prompt_instructions!.trim();
+                        return (
+                          <>
+                            <BooleanFormField
+                              name="shared_instructions_enabled"
+                              label="Apply Shared Assistant Instructions"
+                              subtext={
+                                "Global instructions (Admin → Settings → Shared Assistant " +
+                                "Instructions) appended to every assistant's prompt when " +
+                                "answering. Shown below for transparency — edit them in " +
+                                "Settings, not here. Disable to exclude this assistant."
+                              }
+                            />
+                            {values.shared_instructions_enabled && (
+                              <div className="mb-4">
+                                <Label>
+                                  Shared Assistant Instructions (read-only)
+                                </Label>
+                                <pre className="text-sm mt-2 whitespace-pre-wrap p-2 border rounded text-subtle">
+                                  {sharedInstructions}
+                                </pre>
+                              </div>
+                            )}
+                          </>
+                        );
+                      })()}
+
                     <Label>Final Prompt</Label>
 
                     {finalPrompt ? (
                       <pre className="text-sm mt-2 whitespace-pre-wrap">
-                        {finalPrompt}
+                        {values.shared_instructions_enabled &&
+                        (globalSettings?.shared_prompt_instructions ?? "").trim()
+                          ? `${finalPrompt}\n\n${globalSettings!.shared_prompt_instructions!.trim()}`
+                          : finalPrompt}
                       </pre>
                     ) : (
                       "-"

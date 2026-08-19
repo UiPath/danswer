@@ -81,6 +81,7 @@ def create_update_persona(
             recency_bias=create_persona_request.recency_bias,
             rerank_enabled=create_persona_request.rerank_enabled,
             deep_rag_enabled=create_persona_request.deep_rag_enabled,
+            shared_instructions_enabled=create_persona_request.shared_instructions_enabled,
             prompt_ids=create_persona_request.prompt_ids,
             tool_ids=create_persona_request.tool_ids,
             document_set_ids=create_persona_request.document_set_ids,
@@ -380,6 +381,7 @@ def upsert_persona(
     db_session: Session,
     rerank_enabled: bool = False,
     deep_rag_enabled: bool = False,
+    shared_instructions_enabled: bool = True,
     display_name: str | None = None,
     routing_keywords: str | None = None,
     is_router_candidate: bool = True,
@@ -439,6 +441,7 @@ def upsert_persona(
         persona.recency_bias = recency_bias
         persona.rerank_enabled = rerank_enabled
         persona.deep_rag_enabled = deep_rag_enabled
+        persona.shared_instructions_enabled = shared_instructions_enabled
         persona.default_persona = default_persona
         persona.llm_model_provider_override = llm_model_provider_override
         persona.llm_model_version_override = llm_model_version_override
@@ -475,6 +478,7 @@ def upsert_persona(
             recency_bias=recency_bias,
             rerank_enabled=rerank_enabled,
             deep_rag_enabled=deep_rag_enabled,
+            shared_instructions_enabled=shared_instructions_enabled,
             default_persona=default_persona,
             prompts=prompts or [],
             document_sets=document_sets or [],

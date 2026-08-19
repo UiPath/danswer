@@ -102,8 +102,13 @@ def record_deep_rag(
     coverage: str,
     sub_questions: list[str],
     source: str,
+    escalation_reason: str = "",
 ) -> None:
-    """Fold a DeepRagResult's branch decisions into the current trace."""
+    """Fold a DeepRagResult's branch decisions into the current trace.
+
+    `escalation_reason` is why we escalated — "verdict_partial" | "no_citations" |
+    "low_confidence" | "forced" | "" — so the trace distinguishes the escalation signals
+    (the recorded `coverage` is the effective, possibly-downgraded value)."""
     t = _CURRENT.get()
     if t is None:
         return
@@ -113,7 +118,10 @@ def record_deep_rag(
     event("deep_rag.single_shot", {"coverage": coverage})
     if escalated:
         event("deep_rag.decompose", {"sub_questions": sub_questions})
-        event("deep_rag.compare_guard", {"kept": source})
+        event(
+            "deep_rag.compare_guard",
+            {"kept": source, "escalation_reason": escalation_reason},
+        )
 
 
 def set_fields(**kwargs: Any) -> None:

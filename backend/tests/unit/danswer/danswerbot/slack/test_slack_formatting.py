@@ -129,3 +129,26 @@ def test_split_text_never_orphans_bold_across_blocks() -> None:
         for c in chunks:
             assert c.count("*") % 2 == 0, f"orphaned '*' at pad={pad}"
         assert all(len(c) <= 3000 for c in chunks)
+
+
+def test_answer_footer_sections_bold_and_spaced(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    # The AutomationSuite persona's "[SME]:" / "[Confidence Score]:" lines + the
+    # authoritative-sources footer must each render as their own BOLD, blank-line-
+    # separated section (in BOTH renderers) — not plain/cramped onto the answer's end.
+    answer = (
+        "Answer:\n"
+        "- point one [1].\n"
+        "[SME]: Quentin Brandon.\n"
+        "[Confidence Score]: 100.\n\n"
+        "**Authoritative sources:**\n"
+        "- [Doc A](https://a.com)"
+    )
+    for renderer in ("mistune", "regex"):
+        monkeypatch.setattr(blocks, "DANSWER_BOT_SLACK_MARKDOWN_RENDERER", renderer)
+        out = blocks.render_answer_markdown(answer)
+        assert "*Answer:*" in out, f"Answer header not bold ({renderer})"
+        for section in ("*SME:*", "*Confidence Score:*", "*Authoritative sources:*"):
+            assert section in out, f"{section} not bold ({renderer})"
+            assert (
+                f"\n\n{section}" in out
+            ), f"{section} not blank-line-separated ({renderer})"

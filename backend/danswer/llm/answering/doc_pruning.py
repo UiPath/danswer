@@ -174,7 +174,8 @@ def _docs_page_and_version(url: str | None) -> tuple[str, str] | None:
 def _versioned_url_parts(url: str | None) -> tuple[str, str, str] | None:
     """(prefix, version, suffix) for a versioned docs URL, else None. The page is
     identified by prefix + suffix (version segment stripped); any version's URL is
-    rebuilt as f"{prefix}/{version}/{suffix}". Scoped by DOCS_VERSION_DEDUP_URL_SUBSTR."""
+    rebuilt as f"{prefix}/{version}/{suffix}". Scoped by DOCS_VERSION_DEDUP_URL_SUBSTR.
+    """
     if not url or not DOCS_VERSION_DEDUP_URL_SUBSTR:
         return None
     if DOCS_VERSION_DEDUP_URL_SUBSTR not in url:
@@ -186,36 +187,21 @@ def _versioned_url_parts(url: str | None) -> tuple[str, str, str] | None:
     return None
 
 
-# Version mentioned in a user question: "23.10", "2023.10", "24.10", etc. We treat
-# a 2-digit year as 20YY ("23.10" -> "2023.10").
-_QUESTION_VERSION_RE = re.compile(r"\b(20\d{2}|\d{2})\.(\d{1,2})\b")
-
-
-def parse_question_doc_version(question: str | None) -> str | None:
-    """Return a normalized docs version token (e.g. '2023.10') IFF the question names
-    exactly ONE version; None when zero or multiple are mentioned (ambiguous — e.g.
-    'upgrade from 23.10 to 25.10' — so we don't guess and fall back to latest)."""
-    found: set[str] = set()
-    for m in _QUESTION_VERSION_RE.finditer(question or ""):
-        year = m.group(1)
-        if len(year) == 2:
-            year = "20" + year
-        found.add(f"{year}.{int(m.group(2))}")  # int() drops any leading zero in minor
-    return next(iter(found)) if len(found) == 1 else None
-
-
 def rewrite_docs_links(
-    docs: list[LlmDoc], db_session: Session, target_version: str | None = None
+    docs: list[LlmDoc], db_session: Session, target_versions: list[str] | None = None
 ) -> None:
     """Rewrite each versioned docs link to the right version of that SAME page (same
     URL with the version path-segment stripped; slug kept):
 
-    - `target_version` set (the question named one version): rewrite to THAT version
-      if it's indexed for the page — even if it's older than what was retrieved
-      (answering 'is X supported in 23.10' must point at the 23.10 doc, not latest).
-      If that version isn't indexed for the page, leave the link as-is.
-    - `target_version` None (version-agnostic question): rewrite to the NEWEST indexed
-      version, and only when it's newer than what was retrieved.
+    - `target_versions` set (the question named one version — as scheme-aware corpus-form
+      candidates, e.g. ['2.2510', '2025.10'] for '2025.10', via
+      `versioning.question_version_candidates`): rewrite to the FIRST candidate indexed
+      for the page — even if it's older than what was retrieved (answering 'is X
+      supported in 23.10' must point at the 23.10 doc, not latest). Trying candidates in
+      order lets an Automation-Suite page match '2.2510' while a standalone page matches
+      '2025.10'. If no candidate is indexed for the page, leave the link as-is.
+    - `target_versions` empty/None (version-agnostic or ambiguous question): rewrite to
+      the NEWEST indexed version, and only when it's newer than what was retrieved.
 
     Mutates `docs` in place; no-op for non-docs links. One PK-indexed prefix-scan per
     distinct page-prefix.
@@ -249,10 +235,12 @@ def rewrite_docs_links(
         versions = page_versions.get((pv[0], pv[2]))
         if not versions:
             continue
-        if target_version is not None:
-            if target_version in versions:
-                doc.link = versions[target_version]  # exact match (may be older)
-            # else: requested version not indexed for this page -> leave as-is
+        if target_versions:
+            for cand in target_versions:  # scheme-aware: e.g. 2.2510 then 2025.10
+                if cand in versions:
+                    doc.link = versions[cand]  # exact match (may be older)
+                    break
+            # else: no requested version indexed for this page -> leave as-is
         else:
             newest = max(versions, key=_docs_version_sort_key)
             if _docs_version_sort_key(newest) > _docs_version_sort_key(pv[1]):
@@ -299,9 +287,9 @@ def dedupe_doc_versions(
         if pv is None:
             continue
         page, ver = pv
-        if page not in newest or _docs_version_sort_key(
-            ver
-        ) > _docs_version_sort_key(newest[page]):
+        if page not in newest or _docs_version_sort_key(ver) > _docs_version_sort_key(
+            newest[page]
+        ):
             newest[page] = ver
 
     kept_docs: list[LlmDoc] = []

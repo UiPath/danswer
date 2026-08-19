@@ -1,4 +1,20 @@
-# Deep RAG reuse refactor — plan (LOCKED)
+# Deep RAG reuse refactor — plan (IMPLEMENTED, not yet deployed)
+
+> **Status 2026-07-30:** implemented on `feature/sharepoint_checkpoint_resume` (working
+> tree, uncommitted). All 6 stages done; gates (black/ruff/mypy) clean, 19 controller unit
+> tests pass, full import graph loads (no circular import). NOT committed / deployed —
+> prod E2E + user sign-off pending. Two behavioral consequences of the reuse, worth noting:
+> 1. **Single-shot now uses the normal retrieval + query rephrase** (persona `num_chunks`,
+>    relevance-filter, rephrase) instead of the old raw 15-chunk retrieve. Version-variant
+>    expansion (`_version_query_variants`) now applies to **multi-hop sub-questions only**;
+>    a version-comparison single-shot typically reports `partial` and escalates anyway.
+> 2. **Deep-rag answers now go through the one-shot persistence path** (each `generate`
+>    call creates a throwaway `one_shot=True` chat session + search-doc rows, exactly like
+>    every normal Slack/one-shot answer already does). So a prod validation run WRITES
+>    benign one-shot rows — it is no longer the pure read-only module-load of the old
+>    controller. Validate accordingly.
+
+
 
 Refactor deep-rag so **all answer generation** runs on the well-tested normal answer
 flow (`Answer` + `SearchTool`), keeping only the genuinely-novel orchestration custom.
@@ -70,6 +86,15 @@ to be missing-then-patched. Status: **locked, not implemented.** Deep-rag is bet
   flow; a normal (non-deep) answer is byte-for-byte unaffected (no verdict suffix).
 - Fork has scant coverage + `Answer` is heavy to unit-test → lean on the injected-`_generate`
   seam + the E2E harness.
+
+## Slack formatting (mistune) — already covered, with one requirement
+The mistune Slack renderer lives in `build_qa_response_blocks` → `render_answer_markdown`
+(blocks.py), which runs on EVERY Slack answer's text — downstream of answer generation. So
+the refactored deep-rag answer (from the normal flow) renders through mistune automatically;
+no extra wiring. **Requirement:** the trailing `---VERDICT---` block MUST be stripped in the
+deep-rag caller BEFORE the answer reaches `build_qa_response_blocks`, or the verdict JSON
+would be rendered (and mistune-formatted) into the Slack message. (Same applies to the web
+chat render path.)
 
 ## Deploy note
 Backend-only build; bounce api-server + `dsl`; verify citations render in **both** chat and

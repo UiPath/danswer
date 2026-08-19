@@ -141,3 +141,32 @@ class PromptConfig(BaseModel):
     # needed so that this can be passed into lru_cache funcs
     class Config:
         frozen = True
+
+
+def with_shared_instructions(
+    prompt_config: PromptConfig, persona: Any = None
+) -> PromptConfig:
+    """Append the admin-configured global answer instructions (Admin → Settings →
+    shared_prompt_instructions) to this prompt's system prompt. Applied at the two
+    places a persona's PromptConfig is built (one-shot/search + chat), so EVERY
+    assistant gets the same cross-cutting answering policy without editing each
+    persona's own prompt. A persona may opt OUT via its shared_instructions_enabled
+    flag (assistant editor). Empty setting -> returned unchanged. Fail-open: a
+    settings-store hiccup must never break answering."""
+    if persona is not None and not getattr(
+        persona, "shared_instructions_enabled", True
+    ):
+        return prompt_config
+    try:
+        # local import: settings store pulls in the dynamic-config machinery, which
+        # this widely-imported models module shouldn't depend on at import time
+        from danswer.server.settings.store import load_settings
+
+        shared = (load_settings().shared_prompt_instructions or "").strip()
+    except Exception:
+        return prompt_config
+    if not shared:
+        return prompt_config
+    return prompt_config.copy(
+        update={"system_prompt": f"{prompt_config.system_prompt}\n\n{shared}"}
+    )
