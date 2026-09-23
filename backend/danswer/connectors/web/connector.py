@@ -199,31 +199,36 @@ def get_internal_links(
 
 def start_playwright() -> Tuple[Playwright, BrowserContext]:
     playwright = sync_playwright().start()
-    # Optionally launch an installed browser (e.g. system Chrome) instead of the
-    # bundled Chromium. Prod leaves this unset and uses the pinned Chromium in
-    # the Linux image; it exists only so local dev can fall back to a working
-    # browser when the pinned build is incompatible with the host OS (the
-    # chromium-1097 build for playwright 1.41.2 SIGSEGVs on recent macOS).
-    browser_channel = os.environ.get("WEB_CONNECTOR_BROWSER_CHANNEL") or None
-    browser = playwright.chromium.launch(headless=True, channel=browser_channel)
+    try:
+        # Optionally launch an installed browser (e.g. system Chrome) instead of the
+        # bundled Chromium. Prod leaves this unset and uses the pinned Chromium in
+        # the Linux image; it exists only so local dev can fall back to a working
+        # browser when the pinned build is incompatible with the host OS (the
+        # chromium-1097 build for playwright 1.41.2 SIGSEGVs on recent macOS).
+        browser_channel = os.environ.get("WEB_CONNECTOR_BROWSER_CHANNEL") or None
+        browser = playwright.chromium.launch(headless=True, channel=browser_channel)
 
-    context = browser.new_context(user_agent=DEFAULT_USER_AGENT)
+        context = browser.new_context(user_agent=DEFAULT_USER_AGENT)
 
-    if (
-        WEB_CONNECTOR_OAUTH_CLIENT_ID
-        and WEB_CONNECTOR_OAUTH_CLIENT_SECRET
-        and WEB_CONNECTOR_OAUTH_TOKEN_URL
-    ):
-        client = BackendApplicationClient(client_id=WEB_CONNECTOR_OAUTH_CLIENT_ID)
-        oauth = OAuth2Session(client=client)
-        token = oauth.fetch_token(
-            token_url=WEB_CONNECTOR_OAUTH_TOKEN_URL,
-            client_id=WEB_CONNECTOR_OAUTH_CLIENT_ID,
-            client_secret=WEB_CONNECTOR_OAUTH_CLIENT_SECRET,
-        )
-        context.set_extra_http_headers(
-            {"Authorization": "Bearer {}".format(token["access_token"])}
-        )
+        if (
+            WEB_CONNECTOR_OAUTH_CLIENT_ID
+            and WEB_CONNECTOR_OAUTH_CLIENT_SECRET
+            and WEB_CONNECTOR_OAUTH_TOKEN_URL
+        ):
+            client = BackendApplicationClient(client_id=WEB_CONNECTOR_OAUTH_CLIENT_ID)
+            oauth = OAuth2Session(client=client)
+            token = oauth.fetch_token(
+                token_url=WEB_CONNECTOR_OAUTH_TOKEN_URL,
+                client_id=WEB_CONNECTOR_OAUTH_CLIENT_ID,
+                client_secret=WEB_CONNECTOR_OAUTH_CLIENT_SECRET,
+            )
+            context.set_extra_http_headers(
+                {"Authorization": "Bearer {}".format(token["access_token"])}
+            )
+    except Exception:
+        # Don't leak a started instance on this thread (see load_from_state).
+        playwright.stop()
+        raise
 
     return playwright, context
 
@@ -546,185 +551,203 @@ class WebConnector(LoadConnector, PollConnector):
         check_internet_connection(base_url)
 
         playwright, context = start_playwright()
-        restart_playwright = False
-        pages_visited = 0
-        while to_visit:
-            if WEB_CONNECTOR_MAX_PAGES and pages_visited >= WEB_CONNECTOR_MAX_PAGES:
-                logger.info(
-                    f"Reached WEB_CONNECTOR_MAX_PAGES ({WEB_CONNECTOR_MAX_PAGES}); "
-                    f"stopping crawl with {len(to_visit)} URL(s) still queued."
-                )
-                break
-
-            current_url = to_visit.pop()
-            if current_url in visited_links:
-                continue
-            visited_links.add(current_url)
-
-            try:
-                protected_url_check(current_url)
-            except Exception as e:
-                last_error = f"Invalid URL {current_url} due to {e}"
-                logger.warning(last_error)
-                continue
-
-            logger.info(f"Visiting {current_url}")
-            pages_visited += 1
-
-            # Reinit the browser if a previous batch/crash flagged it. Done for
-            # every page (as before) so the browser is always live when we reach
-            # the batch-yield / final-stop below.
-            if restart_playwright:
-                playwright, context = start_playwright()
-                restart_playwright = False
-
-            # --- PDF: fetch directly (no browser). timeout so a hung download
-            # can't stall the whole attempt. Matches the original: PDFs don't
-            # trigger the per-batch flush. ---
-            if current_url.split(".")[-1] == "pdf":
-                try:
-                    response = requests.get(current_url, timeout=60)
-                    response.raise_for_status()
-                    page_text = pdf_to_text(file=io.BytesIO(response.content))
-                    doc_batch.append(
-                        Document(
-                            id=current_url,
-                            sections=[Section(link=current_url, text=page_text)],
-                            source=DocumentSource.WEB,
-                            semantic_identifier=current_url.split(".")[-1],
-                            metadata={},
-                        )
+        # Always stop the current instance, however the crawl ends (0 docs ->
+        # RuntimeError, an unexpected exception, or the caller abandoning this
+        # generator). An instance that isn't stopped leaves its asyncio loop
+        # marked running on this thread, so every later start_playwright() on
+        # the thread fails with "using Playwright Sync API inside the asyncio
+        # loop". Dask workers run a single thread each, so one leak broke every
+        # later web connector on that pod until it restarted.
+        try:
+            restart_playwright = False
+            pages_visited = 0
+            while to_visit:
+                if WEB_CONNECTOR_MAX_PAGES and pages_visited >= WEB_CONNECTOR_MAX_PAGES:
+                    logger.info(
+                        f"Reached WEB_CONNECTOR_MAX_PAGES ({WEB_CONNECTOR_MAX_PAGES}); "
+                        f"stopping crawl with {len(to_visit)} URL(s) still queued."
                     )
-                except Exception as e:
-                    last_error = f"Failed to fetch PDF '{current_url}': {e}"
-                    logger.error(last_error)
-                continue
+                    break
 
-            # --- HTML via Playwright, with retries. A single page error retries
-            # with a FRESH PAGE on the same browser (exponential backoff); only
-            # a browser-level crash restarts Playwright. One bad page no longer
-            # tears down the browser or fails the attempt. ---
-            page_doc: Document | None = None
-            for attempt in range(WEB_CONNECTOR_MAX_RETRIES):
-                if attempt > 0:
-                    time.sleep(min(2**attempt + random.uniform(0, 1), 10))
+                current_url = to_visit.pop()
+                if current_url in visited_links:
+                    continue
+                visited_links.add(current_url)
+
                 try:
-                    page = context.new_page()
+                    protected_url_check(current_url)
+                except Exception as e:
+                    last_error = f"Invalid URL {current_url} due to {e}"
+                    logger.warning(last_error)
+                    continue
+
+                logger.info(f"Visiting {current_url}")
+                pages_visited += 1
+
+                # Reinit the browser if a previous batch/crash flagged it. Done for
+                # every page (as before) so the browser is always live when we reach
+                # the batch-yield / final-stop below.
+                if restart_playwright:
+                    playwright, context = start_playwright()
+                    restart_playwright = False
+
+                # --- PDF: fetch directly (no browser). timeout so a hung download
+                # can't stall the whole attempt. Matches the original: PDFs don't
+                # trigger the per-batch flush. ---
+                if current_url.split(".")[-1] == "pdf":
                     try:
-                        page_response = page.goto(
-                            current_url,
-                            timeout=WEB_CONNECTOR_PAGE_TIMEOUT_MS,
-                            # 'domcontentloaded' (DOM parsed) instead of the
-                            # default 'load' (waits for every image/font/etc.) —
-                            # far faster and enough for text extraction.
-                            wait_until="domcontentloaded",
-                        )
-                        page_status = page_response.status if page_response else None
-                        fallback_html: str | None = None
-                        if page_response and is_cloudflare_challenge(
-                            page_response.status, page_response.headers
-                        ):
-                            # Retrying the browser just gets the challenge again;
-                            # try once without it instead.
-                            logger.info(
-                                f"Cloudflare bot challenge on {current_url}; "
-                                "retrying without the browser"
+                        response = requests.get(current_url, timeout=60)
+                        response.raise_for_status()
+                        page_text = pdf_to_text(file=io.BytesIO(response.content))
+                        doc_batch.append(
+                            Document(
+                                id=current_url,
+                                sections=[Section(link=current_url, text=page_text)],
+                                source=DocumentSource.WEB,
+                                semantic_identifier=current_url.split(".")[-1],
+                                metadata={},
                             )
-                            fallback = fetch_html_without_browser(current_url)
-                            if fallback is None:
+                        )
+                    except Exception as e:
+                        last_error = f"Failed to fetch PDF '{current_url}': {e}"
+                        logger.error(last_error)
+                    continue
+
+                # --- HTML via Playwright, with retries. A single page error retries
+                # with a FRESH PAGE on the same browser (exponential backoff); only
+                # a browser-level crash restarts Playwright. One bad page no longer
+                # tears down the browser or fails the attempt. ---
+                page_doc: Document | None = None
+                for attempt in range(WEB_CONNECTOR_MAX_RETRIES):
+                    if attempt > 0:
+                        time.sleep(min(2**attempt + random.uniform(0, 1), 10))
+                    try:
+                        page = context.new_page()
+                        try:
+                            page_response = page.goto(
+                                current_url,
+                                timeout=WEB_CONNECTOR_PAGE_TIMEOUT_MS,
+                                # 'domcontentloaded' (DOM parsed) instead of the
+                                # default 'load' (waits for every image/font/etc.) —
+                                # far faster and enough for text extraction.
+                                wait_until="domcontentloaded",
+                            )
+                            page_status = (
+                                page_response.status if page_response else None
+                            )
+                            fallback_html: str | None = None
+                            if page_response and is_cloudflare_challenge(
+                                page_response.status, page_response.headers
+                            ):
+                                # Retrying the browser just gets the challenge again;
+                                # try once without it instead.
+                                logger.info(
+                                    f"Cloudflare bot challenge on {current_url}; "
+                                    "retrying without the browser"
+                                )
+                                fallback = fetch_html_without_browser(current_url)
+                                if fallback is None:
+                                    last_error = (
+                                        f"Skipped indexing {current_url}: blocked by a "
+                                        f"Cloudflare bot challenge (HTTP {page_status}), "
+                                        "and a non-browser fetch also failed"
+                                    )
+                                    logger.info(last_error)
+                                    break
+                                final_page, fallback_html = fallback
+                                page_status = 200
+                            else:
+                                final_page = page.url
+                            if final_page != current_url:
+                                logger.info(f"Redirected to {final_page}")
+                                protected_url_check(final_page)
+                                current_url = final_page
+                                if current_url in visited_links:
+                                    logger.info("Redirected page already indexed")
+                                    break
+                                visited_links.add(current_url)
+
+                            content = (
+                                fallback_html
+                                if fallback_html is not None
+                                else page.content()
+                            )
+                            soup = BeautifulSoup(content, "html.parser")
+
+                            if self.recursive and not is_polling:
+                                for link in get_internal_links(
+                                    base_url,
+                                    current_url,
+                                    soup,
+                                    allowed_prefixes=self.recursive_prefixes,
+                                ):
+                                    if link not in visited_links:
+                                        to_visit.append(link)
+
+                            if page_status and str(page_status)[0] in ("4", "5"):
                                 last_error = (
-                                    f"Skipped indexing {current_url}: blocked by a "
-                                    f"Cloudflare bot challenge (HTTP {page_status}), "
-                                    "and a non-browser fetch also failed"
+                                    f"Skipped indexing {current_url} due to HTTP "
+                                    f"{page_status} response"
                                 )
                                 logger.info(last_error)
-                                break
-                            final_page, fallback_html = fallback
-                            page_status = 200
-                        else:
-                            final_page = page.url
-                        if final_page != current_url:
-                            logger.info(f"Redirected to {final_page}")
-                            protected_url_check(final_page)
-                            current_url = final_page
-                            if current_url in visited_links:
-                                logger.info("Redirected page already indexed")
-                                break
-                            visited_links.add(current_url)
+                                break  # a real 4xx/5xx — don't retry
 
-                        content = (
-                            fallback_html
-                            if fallback_html is not None
-                            else page.content()
-                        )
-                        soup = BeautifulSoup(content, "html.parser")
-
-                        if self.recursive and not is_polling:
-                            for link in get_internal_links(
-                                base_url,
-                                current_url,
-                                soup,
-                                allowed_prefixes=self.recursive_prefixes,
-                            ):
-                                if link not in visited_links:
-                                    to_visit.append(link)
-
-                        if page_status and str(page_status)[0] in ("4", "5"):
-                            last_error = (
-                                f"Skipped indexing {current_url} due to HTTP "
-                                f"{page_status} response"
+                            parsed_html = web_html_cleanup(soup, self.mintlify_cleanup)
+                            page_doc = Document(
+                                id=current_url,
+                                sections=[
+                                    Section(
+                                        link=current_url, text=parsed_html.cleaned_text
+                                    )
+                                ],
+                                source=DocumentSource.WEB,
+                                semantic_identifier=parsed_html.title or current_url,
+                                metadata={},
                             )
-                            logger.info(last_error)
-                            break  # a real 4xx/5xx — don't retry
-
-                        parsed_html = web_html_cleanup(soup, self.mintlify_cleanup)
-                        page_doc = Document(
-                            id=current_url,
-                            sections=[
-                                Section(link=current_url, text=parsed_html.cleaned_text)
-                            ],
-                            source=DocumentSource.WEB,
-                            semantic_identifier=parsed_html.title or current_url,
-                            metadata={},
+                            break  # success
+                        finally:
+                            page.close()
+                    except Exception as e:
+                        last_error = (
+                            f"Failed to fetch '{current_url}' "
+                            f"(attempt {attempt + 1}/{WEB_CONNECTOR_MAX_RETRIES}): {e}"
                         )
-                        break  # success
-                    finally:
-                        page.close()
-                except Exception as e:
-                    last_error = (
-                        f"Failed to fetch '{current_url}' "
-                        f"(attempt {attempt + 1}/{WEB_CONNECTOR_MAX_RETRIES}): {e}"
-                    )
-                    logger.warning(last_error)
-                    if _is_browser_dead(e):
-                        # Browser/context crashed — restart it so the next
-                        # attempt (and subsequent pages) have a live browser.
-                        try:
-                            playwright.stop()
-                        except Exception:
-                            pass
-                        playwright, context = start_playwright()
-                    # else: transient page error — retry with a fresh page.
+                        logger.warning(last_error)
+                        if _is_browser_dead(e):
+                            # Browser/context crashed — restart it so the next
+                            # attempt (and subsequent pages) have a live browser.
+                            try:
+                                playwright.stop()
+                            except Exception:
+                                pass
+                            playwright, context = start_playwright()
+                        # else: transient page error — retry with a fresh page.
 
-            if page_doc is not None:
-                doc_batch.append(page_doc)
+                if page_doc is not None:
+                    doc_batch.append(page_doc)
 
-            if len(doc_batch) >= self.batch_size:
+                if len(doc_batch) >= self.batch_size:
+                    playwright.stop()
+                    restart_playwright = True
+                    at_least_one_doc = True
+                    yield doc_batch
+                    doc_batch = []
+
+            if doc_batch:
                 playwright.stop()
-                restart_playwright = True
                 at_least_one_doc = True
                 yield doc_batch
-                doc_batch = []
 
-        if doc_batch:
-            playwright.stop()
-            at_least_one_doc = True
-            yield doc_batch
-
-        if not at_least_one_doc:
-            if last_error:
-                raise RuntimeError(last_error)
-            raise RuntimeError("No valid pages found.")
+            if not at_least_one_doc:
+                if last_error:
+                    raise RuntimeError(last_error)
+                raise RuntimeError("No valid pages found.")
+        finally:
+            # No-op if already stopped (batch boundary / final batch).
+            try:
+                playwright.stop()
+            except Exception as e:
+                logger.warning(f"Failed to stop Playwright: {e}")
 
     def poll_source(
         self, start: SecondsSinceUnixEpoch, end: SecondsSinceUnixEpoch
