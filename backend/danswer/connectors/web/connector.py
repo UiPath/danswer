@@ -51,6 +51,43 @@ DEFAULT_USER_AGENT = (
 )
 
 
+def is_cloudflare_challenge(status: int | None, headers: dict[str, str]) -> bool:
+    """Did Cloudflare serve its bot check ("Just a moment...") in place of the
+    page? It marks those responses with `cf-mitigated: challenge` (403, or 503
+    for the older JS challenge). The challenge page's JS also rewrites page.url
+    to a one-time `?__cf_chl_rt_tk=` URL, which must not be treated as a
+    redirect."""
+    return (
+        status in (403, 503) and headers.get("cf-mitigated", "").lower() == "challenge"
+    )
+
+
+def fetch_html_without_browser(url: str) -> tuple[str, str] | None:
+    """Fallback for pages whose Cloudflare bot check blocks headless Chromium.
+
+    Cloudflare challenges clients that claim to be a browser but fail its
+    fingerprinting (headless Chromium, or anything sending DEFAULT_USER_AGENT),
+    while many sites let a plainly declared non-browser client through — e.g.
+    w3.org serves the real page to python-requests but a 403 challenge to our
+    Chrome user agent. So this deliberately sends requests' default user agent.
+
+    Returns (final_url, html), or None if the fetch fails or isn't HTML."""
+    try:
+        response = requests.get(url, timeout=WEB_CONNECTOR_PAGE_TIMEOUT_MS / 1000)
+    except requests.RequestException as e:
+        logger.warning(f"Non-browser fetch of {url} failed: {e}")
+        return None
+
+    content_type = response.headers.get("content-type", "")
+    if not response.ok or "html" not in content_type:
+        logger.info(
+            f"Non-browser fetch of {url} returned HTTP {response.status_code} "
+            f"({content_type or 'no content-type'})"
+        )
+        return None
+    return response.url, response.text
+
+
 def _is_browser_dead(exc: Exception) -> bool:
     """Heuristic: did the exception kill the browser/context (vs. just this
     page)? Only then is a full Playwright restart warranted; otherwise we retry
@@ -582,7 +619,30 @@ class WebConnector(LoadConnector, PollConnector):
                             # far faster and enough for text extraction.
                             wait_until="domcontentloaded",
                         )
-                        final_page = page.url
+                        page_status = page_response.status if page_response else None
+                        fallback_html: str | None = None
+                        if page_response and is_cloudflare_challenge(
+                            page_response.status, page_response.headers
+                        ):
+                            # Retrying the browser just gets the challenge again;
+                            # try once without it instead.
+                            logger.info(
+                                f"Cloudflare bot challenge on {current_url}; "
+                                "retrying without the browser"
+                            )
+                            fallback = fetch_html_without_browser(current_url)
+                            if fallback is None:
+                                last_error = (
+                                    f"Skipped indexing {current_url}: blocked by a "
+                                    f"Cloudflare bot challenge (HTTP {page_status}), "
+                                    "and a non-browser fetch also failed"
+                                )
+                                logger.info(last_error)
+                                break
+                            final_page, fallback_html = fallback
+                            page_status = 200
+                        else:
+                            final_page = page.url
                         if final_page != current_url:
                             logger.info(f"Redirected to {final_page}")
                             protected_url_check(final_page)
@@ -592,7 +652,11 @@ class WebConnector(LoadConnector, PollConnector):
                                 break
                             visited_links.add(current_url)
 
-                        content = page.content()
+                        content = (
+                            fallback_html
+                            if fallback_html is not None
+                            else page.content()
+                        )
                         soup = BeautifulSoup(content, "html.parser")
 
                         if self.recursive and not is_polling:
@@ -605,13 +669,10 @@ class WebConnector(LoadConnector, PollConnector):
                                 if link not in visited_links:
                                     to_visit.append(link)
 
-                        if page_response and str(page_response.status)[0] in (
-                            "4",
-                            "5",
-                        ):
+                        if page_status and str(page_status)[0] in ("4", "5"):
                             last_error = (
                                 f"Skipped indexing {current_url} due to HTTP "
-                                f"{page_response.status} response"
+                                f"{page_status} response"
                             )
                             logger.info(last_error)
                             break  # a real 4xx/5xx — don't retry
