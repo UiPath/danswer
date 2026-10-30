@@ -12,6 +12,7 @@ from danswer.configs.model_configs import GEN_AI_ACCOUNT_ID
 from danswer.configs.model_configs import GEN_AI_API_VERSION
 from danswer.configs.model_configs import GEN_AI_CLIENT_ID
 from danswer.configs.model_configs import GEN_AI_CLIENT_SECRET
+from danswer.configs.model_configs import GEN_AI_GATEWAY_BASE_URL
 from danswer.configs.model_configs import GEN_AI_IDENTITY_ENDPOINT
 from danswer.configs.model_configs import GEN_AI_MAX_OUTPUT_TOKENS
 from danswer.configs.model_configs import GEN_AI_MODEL_NAME
@@ -85,7 +86,7 @@ class CustomModelServer(LLM):
         model = llm_model_name or GEN_AI_MODEL_NAME
         if not endpoint:
             endpoint = (
-                "https://alpha.uipath.com/{account_id}/{tenant_id}"
+                f"{GEN_AI_GATEWAY_BASE_URL}" + "/{account_id}/{tenant_id}"
                 f"/llmgateway_/api/raw/vendor/{vendor}/model/{model}/completions"
             )
 
