@@ -3,7 +3,6 @@ from collections.abc import Generator
 from typing import Any
 from typing import cast
 
-from litellm import image_generation  # type: ignore
 from pydantic import BaseModel
 
 from danswer.chat.chat_utils import combine_message_chain
@@ -149,6 +148,12 @@ class ImageGenerationTool(Tool):
         )
 
     def _generate_image(self, prompt: str) -> ImageGenerationResponse:
+        # Imported lazily: litellm is pinned to 1.14.4 (the newest release that
+        # still supports this codebase's pydantic v1), which predates
+        # `image_generation`. Importing it at module level broke danswer.main.
+        # No persona uses this tool today.
+        from litellm import image_generation  # type: ignore
+
         response = image_generation(
             prompt=prompt,
             model=self.model,

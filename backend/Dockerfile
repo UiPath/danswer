@@ -12,6 +12,12 @@ ARG DANSWER_VERSION=0.3-dev
 ENV DANSWER_VERSION=${DANSWER_VERSION}
 
 RUN echo "DANSWER_VERSION: ${DANSWER_VERSION}"
+
+# Build-time downloads go to shared, read-only paths (not /root, which is
+# root-only) so the image can run as the non-root `danswer` user below.
+ENV HF_HOME=/opt/danswer/hf-cache \
+    NLTK_DATA=/opt/danswer/nltk_data \
+    PLAYWRIGHT_BROWSERS_PATH=/opt/danswer/ms-playwright
 # Install system dependencies
 # cmake needed for psycopg (postgres)
 # libpq-dev needed for psycopg (postgres)
@@ -72,10 +78,11 @@ RUN apt-get update && \
 RUN python -c "from transformers import AutoTokenizer; AutoTokenizer.from_pretrained('intfloat/e5-base-v2')"
 
 # Pre-downloading NLTK for setups with limited egress
-RUN python -c "import nltk; \
-nltk.download('stopwords', quiet=True); \
-nltk.download('wordnet', quiet=True); \
-nltk.download('punkt', quiet=True);"
+RUN python -c "import nltk, os; \
+d = os.environ['NLTK_DATA']; \
+nltk.download('stopwords', quiet=True, download_dir=d); \
+nltk.download('wordnet', quiet=True, download_dir=d); \
+nltk.download('punkt', quiet=True, download_dir=d);"
 
 # Set up application files
 WORKDIR /app
@@ -102,6 +109,13 @@ COPY ./scripts/backfill_analytics_rollup.py /app/scripts/backfill_analytics_roll
 COPY ./assets /app/assets
 
 ENV PYTHONPATH /app
+
+# Run as a non-root user. Everything it needs from the build (HF tokenizer,
+# NLTK data, Playwright Chromium, /app) is world-readable; /tmp stays writable.
+RUN groupadd --system --gid 1001 danswer && \
+    useradd --system --uid 1001 --gid 1001 --home-dir /home/danswer --create-home danswer && \
+    chmod -R a+rX /opt/danswer /app
+USER 1001
 
 # Default command which does nothing
 # This container is used by api server and background which specify their own CMD
