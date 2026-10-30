@@ -66,10 +66,12 @@ data:
       - role: node
       authorization:
         credentials_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+      # Kubelet serving certs on this cluster are issued by the cluster CA
+      # (serving-cert rotation) with the node IP in the SAN, so verify them.
+      # Don't "fix" scraping via the API-server proxy: that needs nodes/proxy,
+      # which reaches the full kubelet API (exec/run) — nodes/metrics is enough.
       tls_config:
         ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
-        # AKS kubelet serving certs are self-signed (not issued by the cluster CA).
-        insecure_skip_verify: true
       relabel_configs:
       - source_labels: [__meta_kubernetes_node_name]
         target_label: node
