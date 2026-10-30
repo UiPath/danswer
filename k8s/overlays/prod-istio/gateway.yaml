@@ -61,11 +61,10 @@ metadata:
     service.beta.kubernetes.io/azure-load-balancer-ipv4: 98.64.205.95
 spec:
   type: LoadBalancer
+  # No status-port (15021) here: it's Istio's health endpoint and must not be
+  # on the public LB. Azure probes healthCheckNodePort (externalTrafficPolicy
+  # Local); pods' readiness still uses 15021 inside the cluster.
   ports:
-  - name: status-port
-    port: 15021
-    protocol: TCP
-    targetPort: 15021
   - name: http2
     port: 80
     protocol: TCP
