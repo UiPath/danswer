@@ -115,10 +115,13 @@ New secret: also add it to `overlays/prod/keyvault-secrets.yaml` with
 `objectAlias` = the env var name, re-apply it. Then `kubectl rollout restart`
 the consumers.
 
-**Local** uses a separate vault, `darwin-dev-kv` (dev values only), read with
-your own `az login` by `k8s/scripts/dev-secrets.sh`:
+**Local** uses no vault: every developer keeps a personal, never-committed
+`~/.darwin-dev.env` (mode 600; template `overlays/local/secrets.env.example`),
+because local values (DB passwords etc.) differ per machine. The two shared
+team values (dex-oauth's 90-day `local-dev-only` client secret, the non-prod
+LLM gateway secret) are handed over by a teammate. `k8s/scripts/dev-secrets.sh`
+reads the file:
 - host-run stack (`dapi`/`dbe`/`dsl`): `eval "$(k8s/scripts/dev-secrets.sh export)"`
-  — nothing written to disk.
 - local Kubernetes overlay: `k8s/scripts/dev-secrets.sh k8s` renders the
   gitignored `overlays/local/secrets.env`.
 
@@ -267,7 +270,8 @@ upgrade Vespa, use `vespa-upgrade.sh` (see "Upgrade Vespa" above).
 First ask whether it can be passwordless (managed identity). If not:
 1. Put it in `darwin-prod-kv` (see "Secrets") and add it to
    `overlays/prod/keyvault-secrets.yaml` with `objectAlias` = env var name.
-2. Put a dev value in `darwin-dev-kv` under the same name.
+2. Add the key to `overlays/local/secrets.env.example` (empty) so developers
+   know to set it in their `~/.darwin-dev.env`.
 3. Every backend container that mounts `app-secrets` gets it as an env var;
    nothing to change in `base/`.
 
@@ -717,7 +721,7 @@ is retried by the indexing pipeline (no data loss, just rework).
 
 - **No secret values in the repo or on laptops for prod.** Prod secrets
   live only in `darwin-prod-kv`. `overlays/local/secrets.env` is gitignored
-  and generated from `darwin-dev-kv`.
+  and generated from your personal `~/.darwin-dev.env`.
 - **The `deployment/kubernetes/*` tree is upstream Onyx reference only.**
   Not applied to Darwin. See AGENTS.md "Critical fact §9".
 
