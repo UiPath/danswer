@@ -16,23 +16,12 @@ spec:
     spec:
       containers:
       - command:
+        - /bin/sh
+        - /opt/secrets-loader/with-secrets.sh
         - /usr/bin/supervisord
-        env:
-        - name: POSTGRES_USER
-          valueFrom:
-            secretKeyRef:
-              key: postgres_user
-              name: danswer-secrets
-        - name: POSTGRES_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              key: postgres_password
-              name: danswer-secrets
         envFrom:
         - configMapRef:
             name: env-configmap
-        - secretRef:
-            name: danswer-secrets
         image: danswer-backend
         imagePullPolicy: IfNotPresent
         name: background
@@ -40,7 +29,43 @@ spec:
           requests:
             cpu: '2'
             memory: 10Gi
-        # No volumes — vestigial like the split deployments: the file store and
-        # dynamic config are Postgres-backed (files optionally Azure Blob), so
-        # nothing reads /home/storage or /home/file_connector_storage. The PVCs
-        # remain defined in persistent-volumes.yaml, just unmounted here.
+          limits:
+            cpu: '2'
+            memory: 12Gi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        - name: home
+          mountPath: /home/danswer
+        - name: app-secrets
+          mountPath: /mnt/secrets
+          readOnly: true
+        - name: secrets-loader
+          mountPath: /opt/secrets-loader
+          readOnly: true
+      serviceAccountName: darwin-workload
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      automountServiceAccountToken: false
+      volumes:
+      - name: tmp
+        emptyDir: {}
+      - name: home
+        emptyDir: {}
+      - name: app-secrets
+        secret:
+          secretName: danswer-secrets
+      - name: secrets-loader
+        configMap:
+          name: secrets-loader

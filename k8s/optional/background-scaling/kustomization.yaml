@@ -12,9 +12,9 @@
 # Parameterization mirrors base:
 #   - Image refs use the logical name `danswer-backend`; the including
 #     overlay's `images:` block rewrites them (no images: needed here).
-#   - Secrets/config load identically to base: explicit POSTGRES_USER /
-#     POSTGRES_PASSWORD via secretKeyRef, plus
-#     `envFrom: [configMapRef env-configmap, secretRef danswer-secrets]`.
+#   - Secrets/config load identically to base: `envFrom: configMapRef
+#     env-configmap` plus the app-secrets files exported by with-secrets.sh
+#     (base/secrets-loader.yaml; the volume source is set per overlay).
 #   - Replica counts live in the `replicas:` block below (one place).
 #     dask-worker is the knob you turn for more indexing throughput.
 #   - Manifests are environment-neutral (NO node affinity / tolerations).

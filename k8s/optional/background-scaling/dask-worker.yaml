@@ -15,84 +15,74 @@ spec:
       - name: worker
         image: danswer-backend
         imagePullPolicy: IfNotPresent
-        # Wait for the Dask scheduler to accept connections before starting the
-        # worker, then exec it. A worker that boots before the scheduler is
-        # ready fails to register its Nanny and exits 1 -> CrashLoopBackOff
-        # until pod ordering happens to work out.
-        #
-        # This retry loop is environment-agnostic — plain TCP connect, no
-        # dependency on any mesh or platform feature; it behaves the same with
-        # or without istio. It lives in the MAIN container (not an
-        # initContainer) for exactly that portability: under istio,
-        # initContainers run before the sidecar proxy, so their traffic to a
-        # mesh Service is blackholed until envoy is up — an init-based wait
-        # would hang there. The main-container loop also naturally waits out
-        # envoy when istio IS present. `exec` hands PID to the worker so
-        # signals/termination propagate normally.
         command:
         - /bin/sh
+        - /opt/secrets-loader/with-secrets.sh
+        - /bin/sh
         - -c
-        - |
-          until python -c "import socket; socket.create_connection(('dask-scheduler-service', 8786), timeout=3)" 2>/dev/null; do
-            echo "waiting for dask-scheduler-service:8786..."
-            sleep 2
-          done
-          echo "dask-scheduler reachable; starting worker"
-          exec dask worker tcp://dask-scheduler-service:8786 --nworkers=1 --nthreads=1 --memory-limit=8GB
+        - "until python -c \"import socket; socket.create_connection(('dask-scheduler-service',\
+          \ 8786), timeout=3)\" 2>/dev/null; do\n  echo \"waiting for dask-scheduler-service:8786...\"\
+          \n  sleep 2\ndone\necho \"dask-scheduler reachable; starting worker\"\n\
+          exec dask worker tcp://dask-scheduler-service:8786 --nworkers=1 --nthreads=1\
+          \ --memory-limit=8GB\n"
         env:
         - name: PYTHONPATH
           value: /app
         - name: CURRENT_PROCESS_IS_AN_INDEXING_JOB
           value: 'true'
-        # Return freed heap pages to the OS immediately. Indexing allocates large
-        # transient buffers per doc (file bytes, extracted text, chunks,
-        # embeddings); glibc otherwise retains the freed arenas as "unmanaged
-        # memory", climbing ~2MB/doc until the dask nanny SIGTERMs the worker
-        # (diagnosed: RSS climbs while the Python heap stays flat = fragmentation,
-        # not a leak). This keeps RSS flat over long many-doc crawls.
         - name: MALLOC_TRIM_THRESHOLD_
           value: '0'
-        # Scratch dir for the SharePoint connector's streamed large-file
-        # downloads (e.g. big .pptx decks): the file is streamed here in chunks,
-        # its text extracted, then deleted — so a 150MB deck never sits in worker
-        # RAM. Backed by the emptyDir below (node-local, per-pod, ephemeral).
         - name: SHAREPOINT_DOWNLOAD_DIR
           value: /scratch/sp-downloads
-        - name: POSTGRES_USER
-          valueFrom:
-            secretKeyRef:
-              key: postgres_user
-              name: danswer-secrets
-        - name: POSTGRES_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              key: postgres_password
-              name: danswer-secrets
         envFrom:
         - configMapRef:
             name: env-configmap
-        - secretRef:
-            name: danswer-secrets
         volumeMounts:
         - name: sp-scratch
           mountPath: /scratch/sp-downloads
-        # No PVCs — indexing reads File-connector uploads from PGFileStore
-        # (Postgres large objects), not /home/file_connector_storage; the
-        # dynamic config store is Postgres-backed too. The only scratch need is
-        # the SharePoint large-file download dir below, and it's an emptyDir
-        # (per-pod, node-local) NOT a PVC: the 2 workers run on different nodes,
-        # so a single RWO PVC could not multi-attach. See README.
+        - name: tmp
+          mountPath: /tmp
+        - name: home
+          mountPath: /home/danswer
+        - name: app-secrets
+          mountPath: /mnt/secrets
+          readOnly: true
+        - name: secrets-loader
+          mountPath: /opt/secrets-loader
+          readOnly: true
         resources:
           requests:
-            cpu: "1"
+            cpu: '1'
             memory: 4Gi
           limits:
             cpu: '2'
             memory: 8Gi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
       volumes:
-      # Ephemeral node-local scratch for streamed connector downloads. Deleted
-      # with the pod; sizeLimit caps it well under available node disk (~80GB
-      # free) since only one file streams at a time (max 150MB) before deletion.
       - name: sp-scratch
         emptyDir:
           sizeLimit: 2Gi
+      - name: tmp
+        emptyDir: {}
+      - name: home
+        emptyDir: {}
+      - name: app-secrets
+        secret:
+          secretName: danswer-secrets
+      - name: secrets-loader
+        configMap:
+          name: secrets-loader
+      serviceAccountName: darwin-workload
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      automountServiceAccountToken: false

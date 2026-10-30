@@ -16,6 +16,7 @@ namespace: velero
 
 resources:
   - namespace.yaml
+  - azure-config.yaml
   - rbac.yaml
   - deployment.yaml
   - service.yaml
@@ -40,9 +41,6 @@ images:
 # key (`cloud`) the deployment mounts. Hash suffix disabled so the static
 # secretName resolves.
 secretGenerator:
-  - name: cloud-credentials
-    files:
-      - cloud=credentials-velero
   # slack-notify: bot token + channel for the post-backup notifier CronJob.
   # Built from the gitignored slack-notify.env (copy slack-notify.env.example).
   - name: slack-notify

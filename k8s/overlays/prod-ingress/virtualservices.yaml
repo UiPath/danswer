@@ -1,0 +1,63 @@
+# App routes match port 443 only, so nothing is ever served over plain HTTP.
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: nginx-vs
+  namespace: darwin
+spec:
+  gateways:
+    - istio-system/gateway-prod
+  hosts:
+    - darwin.westeurope.cloudapp.azure.com
+  http:
+    - match:
+        - port: 443
+          uri:
+            prefix: /
+      headers:
+        response:
+          set:
+            Strict-Transport-Security: max-age=31536000
+      route:
+        - destination:
+            host: nginx-service
+            port:
+              number: 80
+---
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: llm-proxy
+  namespace: darwin
+  labels:
+    app.kubernetes.io/part-of: interview-copilot
+spec:
+  gateways:
+    - istio-system/gateway-prod
+  hosts:
+    - darwin.westeurope.cloudapp.azure.com
+  http:
+    - match:
+        - port: 443
+          uri:
+            prefix: /llm-proxy/v1/
+      rewrite:
+        uri: /v1/
+      route:
+        - destination:
+            host: llm-proxy.darwin.svc.cluster.local
+            port:
+              number: 80
+      timeout: 310s
+    - match:
+        - port: 443
+          uri:
+            exact: /llm-proxy/healthz
+      rewrite:
+        uri: /healthz
+      route:
+        - destination:
+            host: llm-proxy.darwin.svc.cluster.local
+            port:
+              number: 80
+      timeout: 10s

@@ -14,7 +14,7 @@ Only the Vespa state that can't be cheaply rebuilt — the 6 PVCs labeled
 - `vespa-var1-vespa-configserver-{0,1,2}` (3×5Gi) — deployed app package/schema
 
 Everything else is intentionally excluded (model caches re-download; logs and
-workspace are scratch; `dynamic-pvc`/`file-connector-pvc` are unused; Redis is
+workspace are scratch; the legacy `dynamic-pvc`/`file-connector-pvc` were deleted 2026-10-29; Redis is
 cache). Postgres — the real source of truth — is external + Azure-managed and
 backed up separately.
 
@@ -29,11 +29,18 @@ the authoritative recovery path is re-indexing from Postgres.
   21-day-old one is garbage-collected (snapshots GC'd too). Worst-case data
   loss on a crash is up to one week; max rollback is 21 days.
 
-## Azure wiring (reused, no new role assignments)
+## Azure wiring (no secret)
 
-- Auth: SP `155fae3c-6bce-46be-8c15-25adf84b4c4e`, which already holds
-  `Contributor` on `darwin-backups`, `MC_darwin_darwin_westeurope`, and
-  `darwin` — so **no Owner/UAA ticket is needed**. Only a fresh client secret.
+- Auth: **managed identity `darwin-velero-mi`** via AKS workload identity
+  (since 2026-10-30). The `velero` ServiceAccount carries
+  `azure.workload.identity/client-id`, the pod the `azure.workload.identity/use`
+  label, and `azure-config.yaml` (a ConfigMap mounted as
+  `AZURE_CREDENTIALS_FILE`) holds only subscription / resource group / cloud.
+  Roles (granted by security): Contributor on `darwin-backups`,
+  `MC_darwin_darwin_westeurope`, `darwin`, plus Storage Account Key Operator /
+  Reader on `darwinaksbackup` and Disk Snapshot Contributor / Disk Restore
+  Operator on the node RG. The old SP `155fae3c` has no secrets left (its
+  last one was revoked 2026-10-30).
 - Backup metadata store (`BackupStorageLocation`): SA `darwinaksbackup` /
   container `darwinaksbackup` in RG `darwin-backups` (the old store, purged).
 - Disk snapshots (`VolumeSnapshotLocation`): node RG
@@ -61,16 +68,15 @@ kubectl config current-context   # -> darwin
 velero install --crds-only        # if the velero CLI is handy, OR
 kubectl apply -f https://raw.githubusercontent.com/vmware-tanzu/velero/v1.13.2/config/crd/v1/crds/crds.yaml
 
-# 2. Azure SP secret — create a FRESH client secret on app 155fae3c
-#    (as an OWNER OF THE APP REGISTRATION; NOT subscription Owner/UAA), then:
-cp credentials-velero.example credentials-velero
-#    edit credentials-velero -> paste AZURE_CLIENT_SECRET
+# 2. Azure auth needs nothing here: managed identity darwin-velero-mi (see
+#    "Azure wiring"). If you rebuild the cluster, re-create its federated
+#    credential for system:serviceaccount:velero:velero against the new OIDC issuer.
 
 # 3. Slack notifier — reuse the existing bot token, and INVITE the bot to
 #    #darwin-devs (the bot-token path posts by channel, not the email address):
 cp slack-notify.env.example slack-notify.env
-kubectl get secret danswer-secrets -n darwin \
-  -o jsonpath='{.data.DANSWER_BOT_SLACK_BOT_TOKEN}' | base64 -d   # -> SLACK_BOT_TOKEN
+#    (the Darwin bot token now lives only in Key Vault darwin-prod-kv as
+#    DANSWER-BOT-SLACK-BOT-TOKEN — see k8s/README.md "Secrets")
 
 # 4. Apply
 kubectl apply -k k8s/overlays/prod-velero
@@ -82,7 +88,7 @@ velero backup create --from-schedule vespa-weekly  # on-demand test run (or wait
 kubectl -n velero get backups.velero.io            # PHASE Completed
 ```
 
-`credentials-velero` and `slack-notify.env` are gitignored — never commit them.
+`slack-notify.env` is gitignored — never commit it.
 
 ## Restore (outline)
 

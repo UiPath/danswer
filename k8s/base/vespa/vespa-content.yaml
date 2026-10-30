@@ -1,3 +1,5 @@
+# Runs as vespa (uid/gid 1000) via the pod securityContext; fsGroup keeps the
+# data volumes group-owned by 1000 (replaces the old root chown-* init containers).
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -25,20 +27,9 @@ spec:
         envFrom:
         - configMapRef:
             name: vespa-config
-        # Per-role logical image name — see vespa-configserver.yaml.
         image: vespa-content
         imagePullPolicy: Always
         name: vespa-content
-        # Readiness on the metrics proxy's /state/v1/health (port 19092 —
-        # verified serving 200 on the live content nodes; this port exists on
-        # every Vespa node type, unlike the containers' 8080). Gates rollout
-        # so an upgrade won't move to the next content pod until this one is
-        # back up. Readiness-only — NO liveness (a slow content node loading
-        # its index must not be killed). Crucially, vespa-internal sets
-        # publishNotReadyAddresses: true, so a not-ready content pod is still
-        # resolvable for peer discovery — this probe gates rollout WITHOUT
-        # dropping the node from the cluster. initialDelay is generous because
-        # content nodes load buckets on boot.
         readinessProbe:
           httpGet:
             path: /state/v1/health
@@ -49,28 +40,62 @@ spec:
           failureThreshold: 6
         resources:
           limits:
-            memory: 12G
+            cpu: '8'   # = node size: policy needs a limit; no throttling, same thread sizing
+            memory: 16G
           requests:
+            # explicit: a cpu limit without a request defaults the request to the limit (8 = unschedulable)
+            cpu: 500m
             memory: 6G
         securityContext:
-          runAsUser: 1000
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
         volumeMounts:
+        - mountPath: /tmp
+          name: tmp
+        - mountPath: /opt/vespa/logs
+          name: vespa-logs-ephemeral
         - mountPath: /opt/vespa/var
           name: vespa-var
+      # Read-only root FS: the image ships a directory skeleton under
+      # /opt/vespa/{logs} that a bare emptyDir would hide; copy it in first.
       initContainers:
-      - command:
-        - sh
-        - -c
-        - chown -R 1000 /opt/vespa/var
-        image: busybox
-        imagePullPolicy: Always
-        name: chown-var
-        resources: {}
+      - name: seed-vespa-dirs
+        image: vespa-content
+        imagePullPolicy: IfNotPresent
+        command: ["sh", "-c", "set -e; for e in /opt/vespa/logs/* /opt/vespa/logs/.[!.]*; do [ -e \"$e\" ] || continue; cp -a \"$e\" /seed/logs/; done"]
+        resources:
+          requests:
+            cpu: 10m
+            memory: 32Mi
+          limits:
+            cpu: 500m
+            memory: 256Mi
         securityContext:
-          runAsUser: 0
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
         volumeMounts:
-        - mountPath: /opt/vespa/var
-          name: vespa-var
+        - mountPath: /seed/logs
+          name: vespa-logs-ephemeral
+      volumes:
+      - name: tmp
+        emptyDir: {}
+      - name: vespa-logs-ephemeral
+        emptyDir: {}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      automountServiceAccountToken: false
   updateStrategy:
     rollingUpdate:
       partition: 0

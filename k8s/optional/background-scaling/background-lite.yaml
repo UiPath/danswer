@@ -21,19 +21,16 @@
 # independently if it crashes; the pod is rescheduled as a unit.
 #
 # Env-neutral like the rest of the component (logical danswer-backend
-# image; config/secrets via env-configmap + danswer-secrets). The Slack
-# tokens reach the listener through the envFrom secretRef.
+# image; config via env-configmap, secrets as files under /mnt/secrets —
+# see base/secrets-loader.yaml). The Slack tokens reach the listener as
+# env vars exported by with-secrets.sh.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: background-lite-deployment
 spec:
-  # MUST stay 1 — see the singleton note above. Set in the component
-  # kustomization replicas: block too; kept here as the manifest default.
   replicas: 1
   strategy:
-    # Recreate (not RollingUpdate): celery-beat must never overlap with a
-    # second beat during a rollout, or periodic tasks double-fire.
     type: Recreate
   selector:
     matchLabels:
@@ -44,44 +41,22 @@ spec:
         app: background-lite
     spec:
       containers:
-      # --- celery worker (maintenance tasks) ---
       - name: celery-worker
         image: danswer-backend
         imagePullPolicy: IfNotPresent
         command:
+        - /bin/sh
+        - /opt/secrets-loader/with-secrets.sh
         - celery
         - -A
         - danswer.background.celery.celery_run:celery_app
         - worker
         - --pool=threads
-        # Fixed thread count, NOT --autoscale. Autoscale calls pool.grow()/shrink()
-        # which the threads TaskPool doesn't implement -> on the first task burst
-        # the worker dies with "AttributeError: 'TaskPool' object has no attribute
-        # 'grow'" and CrashLoopBackOffs. Autoscale is prefork-only. These
-        # maintenance tasks are I/O-bound, so a fixed pool of threads is fine.
         - --concurrency=10
         - --loglevel=INFO
-        env:
-        - name: POSTGRES_USER
-          valueFrom:
-            secretKeyRef:
-              key: postgres_user
-              name: danswer-secrets
-        - name: POSTGRES_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              key: postgres_password
-              name: danswer-secrets
         envFrom:
         - configMapRef:
             name: env-configmap
-        - secretRef:
-            name: danswer-secrets
-        # No PVCs: the file store (File connector uploads) and dynamic config
-        # are Postgres-backed in this fork (PGFileStore lobjs +
-        # PostgresBackedDynamicConfigStore). Nothing here reads /home/storage
-        # or /home/file_connector_storage. See README "Apply an optional
-        # component" for why the split deployments mount no volumes.
         resources:
           requests:
             cpu: 200m
@@ -89,37 +64,38 @@ spec:
           limits:
             cpu: '1'
             memory: 2Gi
-      # --- celery beat (periodic scheduler) ---
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities: &id001
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        - name: home
+          mountPath: /home/danswer
+        - name: app-secrets
+          mountPath: /mnt/secrets
+          readOnly: true
+        - name: secrets-loader
+          mountPath: /opt/secrets-loader
+          readOnly: true
       - name: celery-beat
         image: danswer-backend
         imagePullPolicy: IfNotPresent
         command:
+        - /bin/sh
+        - /opt/secrets-loader/with-secrets.sh
         - celery
         - -A
         - danswer.background.celery.celery_run:celery_app
         - beat
+        - --schedule=/tmp/celerybeat-schedule
         - --loglevel=INFO
-        env:
-        - name: POSTGRES_USER
-          valueFrom:
-            secretKeyRef:
-              key: postgres_user
-              name: danswer-secrets
-        - name: POSTGRES_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              key: postgres_password
-              name: danswer-secrets
         envFrom:
         - configMapRef:
             name: env-configmap
-        - secretRef:
-            name: danswer-secrets
-        # beat is light at runtime, but `celery -A ... beat` still imports the
-        # whole danswer app (langchain/llama-index/tokenizers), which alone
-        # exceeds 256Mi → OOMKilled on startup. Stable at a 1Gi limit; request
-        # doubled (256Mi→512Mi) for a guaranteed floor and limit lifted to 2Gi
-        # for headroom.
         resources:
           requests:
             cpu: 50m
@@ -127,29 +103,32 @@ spec:
           limits:
             cpu: 200m
             memory: 2Gi
-      # --- slack bot listener ---
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities: *id001
+          readOnlyRootFilesystem: true
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        - name: home
+          mountPath: /home/danswer
+        - name: app-secrets
+          mountPath: /mnt/secrets
+          readOnly: true
+        - name: secrets-loader
+          mountPath: /opt/secrets-loader
+          readOnly: true
       - name: slack-listener
         image: danswer-backend
         imagePullPolicy: IfNotPresent
         command:
+        - /bin/sh
+        - /opt/secrets-loader/with-secrets.sh
         - python
         - danswer/danswerbot/slack/listener.py
-        env:
-        - name: POSTGRES_USER
-          valueFrom:
-            secretKeyRef:
-              key: postgres_user
-              name: danswer-secrets
-        - name: POSTGRES_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              key: postgres_password
-              name: danswer-secrets
         envFrom:
         - configMapRef:
             name: env-configmap
-        - secretRef:
-            name: danswer-secrets
         resources:
           requests:
             cpu: 100m
@@ -157,3 +136,38 @@ spec:
           limits:
             cpu: 500m
             memory: 1Gi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities: *id001
+          readOnlyRootFilesystem: true
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        - name: home
+          mountPath: /home/danswer
+        - name: app-secrets
+          mountPath: /mnt/secrets
+          readOnly: true
+        - name: secrets-loader
+          mountPath: /opt/secrets-loader
+          readOnly: true
+      serviceAccountName: darwin-workload
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      automountServiceAccountToken: false
+      volumes:
+      - name: tmp
+        emptyDir: {}
+      - name: home
+        emptyDir: {}
+      - name: app-secrets
+        secret:
+          secretName: danswer-secrets
+      - name: secrets-loader
+        configMap:
+          name: secrets-loader

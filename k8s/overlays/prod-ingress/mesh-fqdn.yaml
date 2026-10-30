@@ -1,0 +1,40 @@
+# Hairpin: in-mesh calls to Darwin's public hostname go straight to the
+# ingress gateway instead of out through the load balancer (which the NSG
+# would drop). Previously owned by the `istio-configure` Helm release.
+apiVersion: networking.istio.io/v1beta1
+kind: ServiceEntry
+metadata:
+  name: fqdn
+  namespace: istio-system
+spec:
+  hosts:
+    - darwin.westeurope.cloudapp.azure.com
+  location: MESH_EXTERNAL
+  ports:
+    - name: https
+      number: 443
+      protocol: HTTPS
+  resolution: DNS
+---
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: fqdn
+  namespace: istio-system
+spec:
+  gateways:
+    - mesh
+  hosts:
+    - darwin.westeurope.cloudapp.azure.com
+  tls:
+    - match:
+        - gateways:
+            - mesh
+          port: 443
+          sniHosts:
+            - darwin.westeurope.cloudapp.azure.com
+      route:
+        - destination:
+            host: istio-ingressgateway.istio-system.svc.cluster.local
+            port:
+              number: 443

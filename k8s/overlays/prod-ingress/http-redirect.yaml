@@ -1,0 +1,21 @@
+# Port 80: redirect everything to HTTPS. The ACME http-01 solver is NOT routed
+# here: cert-manager creates a temporary Ingress (class istio) for
+# /.well-known/acme-challenge/<token>, and Istio gives those Ingress routes
+# precedence on the port-80 listener, so challenges still reach the solver.
+# Verified end to end with a Let's Encrypt staging issuance (see README).
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: darwin-http-redirect
+  namespace: istio-system
+spec:
+  gateways:
+    - istio-system/gateway-prod
+  hosts:
+    - darwin.westeurope.cloudapp.azure.com
+  http:
+    - match:
+        - port: 80
+      redirect:
+        scheme: https
+        redirectCode: 301

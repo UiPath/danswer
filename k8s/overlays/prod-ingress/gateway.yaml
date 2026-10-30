@@ -1,0 +1,27 @@
+# Darwin is served on one hostname: darwin.westeurope.cloudapp.azure.com.
+# Port 80 exists only for the ACME http-01 challenge; every other request on it
+# is redirected to HTTPS by http-redirect.yaml.
+apiVersion: networking.istio.io/v1beta1
+kind: Gateway
+metadata:
+  name: gateway-prod
+  namespace: istio-system
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+    - hosts:
+        - darwin.westeurope.cloudapp.azure.com
+      port:
+        name: http
+        number: 80
+        protocol: HTTP
+    - hosts:
+        - darwin.westeurope.cloudapp.azure.com
+      port:
+        name: https
+        number: 443
+        protocol: HTTPS
+      tls:
+        mode: SIMPLE
+        credentialName: darwin-azure-domain-cert-prod

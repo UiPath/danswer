@@ -1,3 +1,5 @@
+# nginx runs unprivileged (nginxinc/nginx-unprivileged, uid 101): it listens on
+# 8080 inside the pod; the Service still exposes port 80 so nothing upstream changes.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -35,17 +37,40 @@ spec:
         imagePullPolicy: IfNotPresent
         name: nginx
         ports:
-        - containerPort: 80
+        - containerPort: 8080
           protocol: TCP
-        resources: {}
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: '1'
+            memory: 256Mi
         volumeMounts:
         - mountPath: /etc/nginx/conf.d
           name: nginx-conf
+        - mountPath: /tmp
+          name: tmp
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
       volumes:
       - configMap:
           defaultMode: 420
           name: nginx-configmap
         name: nginx-conf
+      - name: tmp
+        emptyDir: {}
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        runAsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
 ---
 apiVersion: v1
 kind: Service
@@ -56,11 +81,11 @@ spec:
   - name: http
     port: 80
     protocol: TCP
-    targetPort: 80
+    targetPort: 8080
   - name: danswer
     port: 3000
     protocol: TCP
-    targetPort: 80
+    targetPort: 8080
   selector:
     app: nginx
   type: ClusterIP
@@ -69,7 +94,7 @@ apiVersion: v1
 data:
   nginx.conf: "upstream api_server {\n    server api-server-service:80 fail_timeout=0;\n\
     }\n\nupstream web_server {\n    server web-server-service:80 fail_timeout=0;\n\
-    }\n\nserver {\n    listen 80;\n    server_name $$DOMAIN;\n\n    client_max_body_size\
+    }\n\nserver {\n    listen 8080;\n    server_name $$DOMAIN;\n\n    client_max_body_size\
     \ 5G;    # Maximum upload size\n\n    location ~ ^/api(.*)$ {\n        rewrite\
     \ ^/api(/.*)$ $1 break;\n        proxy_set_header X-Real-IP $remote_addr;\n  \
     \      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n        proxy_set_header\

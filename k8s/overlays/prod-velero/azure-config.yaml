@@ -1,0 +1,18 @@
+# Velero's Azure plugin config — NO secret: it authenticates as managed
+# identity darwin-velero-mi through AKS workload identity (the velero
+# ServiceAccount is annotated with its client id, the pod carries the
+# azure.workload.identity/use label). Roles (granted 2026-10-30): Contributor
+# on darwin-backups, MC_darwin_darwin_westeurope, darwin, plus Storage Account
+# Key Operator / Reader on darwinaksbackup and Disk Snapshot/Restore roles.
+# Mounted at /credentials/cloud (AZURE_CREDENTIALS_FILE); replaces the old
+# cloud-credentials Secret that held the SP 155fae3c client secret.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: velero-azure-config
+  namespace: velero
+data:
+  cloud: |
+    AZURE_SUBSCRIPTION_ID=202e5d15-5356-4826-bc61-ebd449d12e34
+    AZURE_RESOURCE_GROUP=MC_darwin_darwin_westeurope
+    AZURE_CLOUD_NAME=AzurePublicCloud

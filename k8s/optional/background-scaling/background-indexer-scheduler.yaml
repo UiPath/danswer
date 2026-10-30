@@ -18,6 +18,8 @@ spec:
         image: danswer-backend
         imagePullPolicy: IfNotPresent
         command:
+        - /bin/sh
+        - /opt/secrets-loader/with-secrets.sh
         - python
         - danswer/background/update.py
         env:
@@ -25,31 +27,9 @@ spec:
           value: tcp://dask-scheduler-service:8786
         - name: CURRENT_PROCESS_IS_AN_INDEXING_JOB
           value: 'true'
-        - name: POSTGRES_USER
-          valueFrom:
-            secretKeyRef:
-              key: postgres_user
-              name: danswer-secrets
-        - name: POSTGRES_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              key: postgres_password
-              name: danswer-secrets
         envFrom:
         - configMapRef:
             name: env-configmap
-        - secretRef:
-            name: danswer-secrets
-        # No PVCs — the scheduler only polls Postgres + submits Dask futures;
-        # the file store / dynamic config are Postgres-backed (see README).
-        #
-        # Sized for the FIXED scheduler. The old ~7.5Gi/cycle spikes were a
-        # query bug, not real work: get_last_attempt() ran an unbounded
-        # ORDER BY (no LIMIT) once per cc-pair, materializing each cc-pair's
-        # FULL index_attempt history just to take the newest. Fixed with
-        # LIMIT 1 in db/index_attempt.py. Verified on the fixed image
-        # (vha-140): RSS sits FLAT at ~430Mi across update cycles, no spike.
-        # 512Mi request / 2Gi limit = comfortable headroom over that.
         resources:
           requests:
             cpu: 200m
@@ -57,3 +37,40 @@ spec:
           limits:
             cpu: 500m
             memory: 2Gi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        - name: home
+          mountPath: /home/danswer
+        - name: app-secrets
+          mountPath: /mnt/secrets
+          readOnly: true
+        - name: secrets-loader
+          mountPath: /opt/secrets-loader
+          readOnly: true
+      serviceAccountName: darwin-workload
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      automountServiceAccountToken: false
+      volumes:
+      - name: tmp
+        emptyDir: {}
+      - name: home
+        emptyDir: {}
+      - name: app-secrets
+        secret:
+          secretName: danswer-secrets
+      - name: secrets-loader
+        configMap:
+          name: secrets-loader

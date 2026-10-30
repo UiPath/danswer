@@ -1,3 +1,6 @@
+# Runs as uid 1001 (upstream image runs as root by default). The model cache
+# volume is mounted at /model-cache (was /root/.cache) with HF_HOME pointing
+# into it; fsGroup makes the existing cached files readable.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -8,10 +11,7 @@ spec:
     matchLabels:
       app: inference-model-server
   strategy:
-    rollingUpdate:
-      maxSurge: 25%
-      maxUnavailable: 25%
-    type: RollingUpdate
+    type: Recreate
   template:
     metadata:
       labels:
@@ -34,14 +34,44 @@ spec:
         ports:
         - containerPort: 9000
           protocol: TCP
-        resources: {}
+        resources:
+          requests:
+            cpu: 250m
+            memory: 2Gi
+          limits:
+            cpu: '8'      # = node size: satisfies the limits policy, no throttling
+            memory: 6Gi
         volumeMounts:
-        - mountPath: /root/.cache
+        - mountPath: /model-cache
           name: inference-model-storage
+        - name: tmp
+          mountPath: /tmp
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+        env:
+        - name: HF_HOME
+          value: /model-cache/huggingface
+        - name: HOME
+          value: /tmp
       volumes:
       - name: inference-model-storage
         persistentVolumeClaim:
           claimName: inference-model-pvc
+      - name: tmp
+        emptyDir: {}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      automountServiceAccountToken: false
 ---
 apiVersion: v1
 kind: Service

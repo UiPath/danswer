@@ -13,6 +13,7 @@ kind: Kustomization
 
 resources:
   - ../../base
+  - keyvault-secrets.yaml   # SecretProviderClass: app secrets from darwin-prod-kv
 
 components:
   - ../../optional/background-scaling
@@ -30,7 +31,12 @@ namespace: darwin
 images:
   - name: danswer-backend
     newName: sfbrdevhelmweacr.azurecr.io/danswer/danswer-backend
-    newTag: vha-239
+    # vha-246 = vha-245 + OIDC login via federated credential (no client secret).
+    # vha-245 = vha-244 + passwordless Blob (managed identity) + direct-upload flag.
+    # vha-244 = vha-243 + passwordless Postgres (Entra / workload identity).
+    # vha-243 = vha-242 + GEN_AI_GATEWAY_BASE_URL. vha-242 = vha-239 + non-root user (uid 1001).
+    # (vha-240/241 exist in the registry from another branch - never deployed.)
+    newTag: vha-246
   - name: danswer-web-server
     newName: sfbrdevhelmweacr.azurecr.io/danswer/danswer-web-server
     newTag: vha-124
@@ -38,8 +44,8 @@ images:
     newName: danswer/danswer-model-server
     newTag: v0.3.94
   - name: nginx
-    newName: nginx
-    newTag: 1.23.4-alpine
+    newName: nginxinc/nginx-unprivileged
+    newTag: 1.28.0-alpine
   # Vespa images live in the separate Vespa overlay (k8s/overlays/prod-vespa)
   # now that Vespa is applied independently of the app — see that file and
   # k8s/README.md.
@@ -72,16 +78,48 @@ configMapGenerator:
     envs:
       - env.properties
 
-# danswer-secrets: regenerated from secrets.env (gitignored). Same name as the
-# existing live Secret — deployments referencing `danswer-secrets` work
-# unchanged.
-secretGenerator:
-  - name: danswer-secrets
-    envs:
-      - secrets.env
+# No secretGenerator: prod secrets live only in Key Vault (keyvault-secrets.yaml).
+# The patches below swap base's app-secrets volume (a danswer-secrets Secret,
+# used by local) for the Key Vault CSI volume, and bind darwin-workload to
+# managed identity darwin-workload-mi.
+patches:
+  - target:
+      kind: Deployment
+      name: ^(api-server|background|background-lite|background-indexer-scheduler|dask-worker)-deployment$
+    patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: any
+      spec:
+        template:
+          metadata:
+            labels:
+              # workload-identity webhook injects AZURE_CLIENT_ID / TENANT_ID /
+              # FEDERATED_TOKEN_FILE — used for the passwordless Postgres login.
+              azure.workload.identity/use: "true"
+          spec:
+            volumes:
+              - name: app-secrets
+                secret: null
+                csi:
+                  driver: secrets-store.csi.k8s.io
+                  readOnly: true
+                  volumeAttributes:
+                    secretProviderClass: darwin-app-secrets
+  - target:
+      kind: ServiceAccount
+      name: darwin-workload
+    patch: |-
+      apiVersion: v1
+      kind: ServiceAccount
+      metadata:
+        name: darwin-workload
+        annotations:
+          azure.workload.identity/client-id: e1f103a4-439c-45e2-8a3c-dc8aab27df89
 
 # Without this kustomize appends a content-hash suffix to generated names
-# (e.g. danswer-secrets-abc123). Disabled so deployments' explicit
-# secretKeyRef name=danswer-secrets continues to resolve.
+# (e.g. env-configmap-abc123). Disabled so deployments' explicit
+# configMapRef name=env-configmap continues to resolve.
 generatorOptions:
   disableNameSuffixHash: true

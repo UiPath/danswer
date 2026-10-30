@@ -18,18 +18,7 @@ spec:
         app: web-server
     spec:
       containers:
-      - env:
-        - name: POSTGRES_USER
-          valueFrom:
-            secretKeyRef:
-              key: postgres_user
-              name: danswer-secrets
-        - name: POSTGRES_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              key: postgres_password
-              name: danswer-secrets
-        envFrom:
+      - envFrom:
         - configMapRef:
             name: env-configmap
         image: danswer-web-server
@@ -38,9 +27,6 @@ spec:
         ports:
         - containerPort: 3000
           protocol: TCP
-        # Zero-downtime rolling upgrade: the Service only sends traffic once the
-        # new pod actually serves, and (with maxUnavailable rounding to 0) the old
-        # pod is kept until the new one is Ready — so no request hits a booting pod.
         readinessProbe:
           httpGet:
             path: /
@@ -48,7 +34,6 @@ spec:
           periodSeconds: 5
           timeoutSeconds: 3
           failureThreshold: 3
-        # Grace for the Next.js server to come up before readiness is enforced.
         startupProbe:
           httpGet:
             path: /
@@ -58,8 +43,34 @@ spec:
           failureThreshold: 30
         resources:
           requests:
-            cpu: 500m
-            memory: 4Gi
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: '2'      # Next.js SSR bursts; nodes never exceeded 5 of 7.8 cores in 30d
+            memory: 1Gi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        - name: next-cache
+          mountPath: /app/.next/cache
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      automountServiceAccountToken: false
+      volumes:
+      - name: tmp
+        emptyDir: {}
+      - name: next-cache
+        emptyDir: {}
 ---
 apiVersion: v1
 kind: Service

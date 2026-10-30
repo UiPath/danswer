@@ -1,0 +1,26 @@
+# Prod edge for Darwin: TLS certificate and Istio routing for
+# darwin.westeurope.cloudapp.azure.com.
+#
+#     kubectl apply -k k8s/overlays/prod-ingress     # context: darwin
+#
+# Certificate: Let's Encrypt via ACME http-01 (clusterissuer-http01.yaml).
+# That hostname is in Microsoft's cloudapp.azure.com zone, so dns-01 is not
+# possible. RENEWAL DEPENDS ON inbound TCP 80 from the Internet to
+# 98.64.205.95 (NSG aks-agentpool-41398438-nsg, re-allowed after IR-1286767 on
+# 2026-10-30). If that rule is removed, renewals fail ~30 days before expiry.
+#
+# Port 80 redirects everything to HTTPS except the ACME challenge path
+# (http-redirect.yaml); app routes match port 443 only and send HSTS.
+#
+# WEB_DOMAIN lives in k8s/overlays/prod/env.properties; keep it in sync.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - clusterissuer-http01.yaml
+  - certificate-azure.yaml
+  - gateway.yaml
+  - virtualservices.yaml
+  - http-redirect.yaml
+  - mesh-fqdn.yaml
+  - cert-expiry-alert.yaml   # daily Slack alert if renewal stalls (velero ns, reuses slack-notify)

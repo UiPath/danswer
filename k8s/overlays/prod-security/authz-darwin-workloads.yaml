@@ -1,0 +1,170 @@
+# East-west lockdown for Darwin's non-Vespa workloads: only pods in the darwin
+# namespace (mTLS identity) may call them; nginx additionally accepts the Istio
+# ingress gateway (public traffic). Anything else - other namespaces, plaintext
+# callers without a sidecar - is denied by the workload's sidecar.
+# Validated with istio.io/dry-run before enforcing (0 would-be denials).
+# Vespa is handled separately (authz-vespa.yaml): its inter-node RPC uses
+# undeclared ports that travel without mTLS, so a namespace ALLOW would break it.
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: api-server-allow-darwin-only
+  namespace: darwin
+spec:
+  selector:
+    matchLabels:
+      app: api-server
+  action: ALLOW
+  rules:
+  - from:
+    - source:
+        namespaces:
+        - darwin
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: background-indexer-scheduler-allow-darwin-only
+  namespace: darwin
+spec:
+  selector:
+    matchLabels:
+      app: background-indexer-scheduler
+  action: ALLOW
+  rules:
+  - from:
+    - source:
+        namespaces:
+        - darwin
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: background-lite-allow-darwin-only
+  namespace: darwin
+spec:
+  selector:
+    matchLabels:
+      app: background-lite
+  action: ALLOW
+  rules:
+  - from:
+    - source:
+        namespaces:
+        - darwin
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: dask-scheduler-allow-darwin-only
+  namespace: darwin
+spec:
+  selector:
+    matchLabels:
+      app: dask-scheduler
+  action: ALLOW
+  rules:
+  - from:
+    - source:
+        namespaces:
+        - darwin
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: dask-worker-allow-darwin-only
+  namespace: darwin
+spec:
+  selector:
+    matchLabels:
+      app: dask-worker
+  action: ALLOW
+  rules:
+  - from:
+    - source:
+        namespaces:
+        - darwin
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: indexing-model-server-allow-darwin-only
+  namespace: darwin
+spec:
+  selector:
+    matchLabels:
+      app: indexing-model-server
+  action: ALLOW
+  rules:
+  - from:
+    - source:
+        namespaces:
+        - darwin
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: inference-model-server-allow-darwin-only
+  namespace: darwin
+spec:
+  selector:
+    matchLabels:
+      app: inference-model-server
+  action: ALLOW
+  rules:
+  - from:
+    - source:
+        namespaces:
+        - darwin
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: redis-allow-darwin-only
+  namespace: darwin
+spec:
+  selector:
+    matchLabels:
+      app: redis
+  action: ALLOW
+  rules:
+  - from:
+    - source:
+        namespaces:
+        - darwin
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: web-server-allow-darwin-only
+  namespace: darwin
+spec:
+  selector:
+    matchLabels:
+      app: web-server
+  action: ALLOW
+  rules:
+  - from:
+    - source:
+        namespaces:
+        - darwin
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: nginx-allow-darwin-only
+  namespace: darwin
+spec:
+  selector:
+    matchLabels:
+      app: nginx
+  action: ALLOW
+  rules:
+  - from:
+    - source:
+        namespaces:
+        - darwin
+  - from:
+    - source:
+        principals:
+        - cluster.local/ns/istio-system/sa/istio-ingressgateway

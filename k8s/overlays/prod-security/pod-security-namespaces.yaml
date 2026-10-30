@@ -1,0 +1,37 @@
+# Pod Security Admission labels for namespaces not owned by another overlay.
+# (cert-manager -> prod-cert-manager, velero -> prod-velero.)
+# NOTE: these are the real Namespace objects. `kubectl apply -k` only merges
+# the labels, but NEVER `kubectl delete -k` this overlay - it would delete the
+# namespaces and everything in them.
+#
+# darwin: restricted. Possible because Istio CNI (prod-istio/cni.yaml) replaced
+# the privileged istio-init container, and every workload runs non-root.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: darwin
+  labels:
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: istio-system
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: default
+  labels:
+    pod-security.kubernetes.io/enforce: baseline
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted
