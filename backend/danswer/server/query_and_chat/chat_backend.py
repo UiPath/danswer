@@ -17,6 +17,7 @@ from danswer.auth.api_key import validate_api_key
 from danswer.auth.users import current_user
 from danswer.chat.chat_utils import create_chat_chain
 from danswer.chat.process_message import stream_chat_message
+from danswer.configs.app_configs import AZURE_BLOB_DIRECT_UPLOAD_ENABLED
 from danswer.configs.app_configs import CHAT_FILE_MAX_SIZE_MB
 from danswer.configs.app_configs import CHAT_FILE_MAX_TOKEN_FRACTION
 from danswer.configs.app_configs import FILE_STORE_TYPE
@@ -737,7 +738,10 @@ def get_chat_file_upload_urls(
     _: User | None = Depends(current_user),
 ) -> ChatFileUploadUrlResponse:
     """Mint short-lived SAS URLs so the client PUTs files DIRECTLY to Blob."""
-    if FILE_STORE_TYPE != AzureBlobFileStore.__name__:
+    if (
+        FILE_STORE_TYPE != AzureBlobFileStore.__name__
+        or not AZURE_BLOB_DIRECT_UPLOAD_ENABLED
+    ):
         return ChatFileUploadUrlResponse(direct_upload=False)
     store = cast(AzureBlobFileStore, get_default_file_store(db_session))
     items: list[ChatFileUploadUrlResponseItem] = []

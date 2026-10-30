@@ -3,6 +3,7 @@ import os
 from logging.config import fileConfig
 
 from alembic import context
+from danswer.db.engine import attach_entra_auth
 from danswer.db.engine import build_connection_string
 from danswer.db.models import Base
 from sqlalchemy import pool
@@ -73,6 +74,7 @@ async def run_async_migrations() -> None:
         build_connection_string(),
         poolclass=pool.NullPool,
     )
+    attach_entra_auth(connectable)
 
     async with connectable.connect() as connection:
         await connection.run_sync(do_run_migrations)

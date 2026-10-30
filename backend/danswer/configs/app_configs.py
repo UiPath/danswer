@@ -89,6 +89,13 @@ OAUTH_CLIENT_SECRET = (
     os.environ.get("OAUTH_CLIENT_SECRET", os.environ.get("GOOGLE_OAUTH_CLIENT_SECRET"))
     or ""
 )
+# OIDC without a client secret: authenticate to the token endpoint with the
+# pod's workload-identity token (a federated credential on the app
+# registration trusts it) instead of OAUTH_CLIENT_SECRET.
+# See danswer/auth/federated_openid.py.
+OAUTH_USE_WORKLOAD_IDENTITY = (
+    os.environ.get("OAUTH_USE_WORKLOAD_IDENTITY") or ""
+).lower() == "true"
 # OpenID Connect discovery URL (e.g. Entra ID:
 # https://login.microsoftonline.com/<tenant-id>/v2.0/.well-known/openid-configuration)
 OPENID_CONFIG_URL = os.environ.get("OPENID_CONFIG_URL", "")
@@ -141,6 +148,11 @@ POSTGRES_PASSWORD = urllib.parse.quote_plus(
 POSTGRES_HOST = os.environ.get("POSTGRES_HOST") or "localhost"
 POSTGRES_PORT = os.environ.get("POSTGRES_PORT") or "5432"
 POSTGRES_DB = os.environ.get("POSTGRES_DB") or "postgres"
+# Passwordless login: authenticate as the pod's managed identity (AKS workload
+# identity) with a short-lived Entra token instead of POSTGRES_PASSWORD. Set
+# POSTGRES_USER to the Postgres role created for that identity.
+# See danswer/db/entra_auth.py.
+POSTGRES_ENTRA_AUTH = (os.environ.get("POSTGRES_ENTRA_AUTH") or "").lower() == "true"
 
 # SQLAlchemy connection-pool sizing, PER PROCESS. Max connections a single
 # process can open to Postgres is POSTGRES_POOL_SIZE + POSTGRES_POOL_OVERFLOW.
@@ -161,6 +173,17 @@ FILE_STORE_TYPE = os.environ.get("FILE_STORE_TYPE") or "PostgresBackedFileStore"
 # Only used when FILE_STORE_TYPE=AzureBlobFileStore (secret — set in
 # danswer-secrets). Container is auto-created on first use if absent.
 AZURE_BLOB_CONNECTION_STRING = os.environ.get("AZURE_BLOB_CONNECTION_STRING") or ""
+# Passwordless alternative to the connection string: the account's blob
+# endpoint (https://<account>.blob.core.windows.net), accessed as the pod's
+# managed identity (needs Storage Blob Data Contributor). Used only when
+# AZURE_BLOB_CONNECTION_STRING is empty. See danswer/db/entra_auth.py.
+AZURE_BLOB_ACCOUNT_URL = (os.environ.get("AZURE_BLOB_ACCOUNT_URL") or "").rstrip("/")
+# Chat uploads PUT straight from the browser to Blob via a SAS URL. Turn off
+# when the storage account isn't reachable from browsers (private endpoint
+# only): the client then falls back to uploading through the API server.
+AZURE_BLOB_DIRECT_UPLOAD_ENABLED = (
+    os.environ.get("AZURE_BLOB_DIRECT_UPLOAD_ENABLED") or "true"
+).lower() == "true"
 AZURE_BLOB_CONTAINER = os.environ.get("AZURE_BLOB_CONTAINER") or "danswer-files"
 
 # Chat file-upload limits. A chat-attached doc is stuffed WHOLE into the LLM
