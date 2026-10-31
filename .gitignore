@@ -44,3 +44,6 @@ k8s/overlays/prod-velero/credentials-velero
 k8s/overlays/prod-velero/slack-notify.env
 # Ad-hoc export of web connector URLs (local only)
 web-connectors.csv
+# Prod data exports from backend/scripts/clone_prod_to_local.py (real internal
+# content, hundreds of MB) — local only, never commit
+/clone_bundle*/
