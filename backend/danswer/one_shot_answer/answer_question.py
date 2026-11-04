@@ -8,8 +8,8 @@ from danswer.chat.chat_utils import reorganize_citations
 from danswer.chat.models import CitationInfo
 from danswer.chat.models import DanswerAnswerPiece
 from danswer.chat.models import DanswerContexts
-from danswer.chat.models import LlmDoc
 from danswer.chat.models import DanswerQuotes
+from danswer.chat.models import LlmDoc
 from danswer.chat.models import LLMRelevanceFilterResponse
 from danswer.chat.models import QADocsResponse
 from danswer.chat.models import StreamingError

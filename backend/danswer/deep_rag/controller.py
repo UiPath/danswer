@@ -392,7 +392,9 @@ def deep_rag_answer(
         #                          as the answer.
         ss_grounded = bool(ss.citations)
         mh_grounded = (
-            bool(mh.citations) and bool(mh.docs) and bool(mh.answer and mh.answer.strip())
+            bool(mh.citations)
+            and bool(mh.docs)
+            and bool(mh.answer and mh.answer.strip())
         )
         if mh_grounded and ss_grounded:
             keep_refined = refined_is_better(query, ss.answer, mh.answer, llm)

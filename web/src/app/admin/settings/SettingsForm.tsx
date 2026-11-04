@@ -392,11 +392,11 @@ export function SettingsForm() {
           <div className="flex flex-col text-sm">
             <SubLabel>
               One rule per line — e.g. &quot;Anything about Automation Suite →
-              Automation Suite&quot; or &quot;Who is the owner or product manager
-              of a product → Ownership&quot;. An LLM applies these between keyword
-              routing and the AI router: a matching rule overrides the AI router
-              (never a hard keyword match), and anything unmatched falls through
-              to the AI router.
+              Automation Suite&quot; or &quot;Who is the owner or product
+              manager of a product → Ownership&quot;. An LLM applies these
+              between keyword routing and the AI router: a matching rule
+              overrides the AI router (never a hard keyword match), and anything
+              unmatched falls through to the AI router.
             </SubLabel>
             <textarea
               className="mt-2 p-2 border rounded w-full min-h-[320px] font-mono text-xs"
@@ -431,8 +431,8 @@ export function SettingsForm() {
         <SubLabel>
           Instructions appended to EVERY assistant&apos;s prompt when answering
           (chat, search and Slack) — for cross-assistant answering policy
-          without editing each assistant. Keep it assistant-agnostic (never
-          name specific SMEs or products here). Empty = off.
+          without editing each assistant. Keep it assistant-agnostic (never name
+          specific SMEs or products here). Empty = off.
         </SubLabel>
         <div className="mt-2 flex items-center gap-3">
           <Button
@@ -463,9 +463,9 @@ export function SettingsForm() {
             <SubLabel>
               Appended to every assistant&apos;s system prompt on the next
               question (no redeploy). Use for global answering policy — e.g.
-              &quot;If a question mixes parts answerable from the documents
-              with parts lacking evidence, answer the answerable parts with
-              citations and defer only the rest.&quot;
+              &quot;If a question mixes parts answerable from the documents with
+              parts lacking evidence, answer the answerable parts with citations
+              and defer only the rest.&quot;
             </SubLabel>
             <textarea
               className="mt-2 p-2 border rounded w-full min-h-[320px] font-mono text-xs"

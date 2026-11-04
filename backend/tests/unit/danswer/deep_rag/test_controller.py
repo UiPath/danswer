@@ -295,9 +295,9 @@ def test_generate_empty_selected_docs_keeps_freshly_retrieved_docs(monkeypatch) 
     # single-shot (None) -> fresh docs too
     assert generate("q", selected_docs=None, want_verdict=False).docs == fresh
     # non-empty curated list -> surface exactly those sections
-    assert generate("q", selected_docs=[_Sec(document_id="dX")], want_verdict=False).docs == [
-        ("CURATED", "dX")
-    ]
+    assert generate(
+        "q", selected_docs=[_Sec(document_id="dX")], want_verdict=False
+    ).docs == [("CURATED", "dX")]
 
 
 def test_generate_external_verdict_judge(monkeypatch) -> None:  # type: ignore[no-untyped-def]
@@ -330,24 +330,32 @@ def test_generate_external_verdict_judge(monkeypatch) -> None:  # type: ignore[n
     persona = cast(Any, types.SimpleNamespace(id=1))
 
     judge = _JudgeLLM('---VERDICT---\n{"coverage": "partial", "missing": ["hardware"]}')
-    gen = ctrl._make_generate(persona, None, cast(Any, None), "", True, False, cast(Any, judge))
+    gen = ctrl._make_generate(
+        persona, None, cast(Any, None), "", True, False, cast(Any, judge)
+    )
     g = gen("q", selected_docs=None, want_verdict=True)
     assert (g.coverage, g.missing, judge.calls) == ("partial", ["hardware"], 1)
     assert g.answer == "grounded [1]"  # answer untouched by the gate
 
     # bare JSON without the marker also parses
     judge = _JudgeLLM('{"coverage": "partial", "missing": []}')
-    gen = ctrl._make_generate(persona, None, cast(Any, None), "", True, False, cast(Any, judge))
+    gen = ctrl._make_generate(
+        persona, None, cast(Any, None), "", True, False, cast(Any, judge)
+    )
     assert gen("q", selected_docs=None, want_verdict=True).coverage == "partial"
 
     # judge failure -> fail-open complete
     judge = _JudgeLLM(None)
-    gen = ctrl._make_generate(persona, None, cast(Any, None), "", True, False, cast(Any, judge))
+    gen = ctrl._make_generate(
+        persona, None, cast(Any, None), "", True, False, cast(Any, judge)
+    )
     assert gen("q", selected_docs=None, want_verdict=True).coverage == "complete"
 
     # want_verdict=False -> judge never called
     judge = _JudgeLLM('---VERDICT---\n{"coverage": "partial", "missing": []}')
-    gen = ctrl._make_generate(persona, None, cast(Any, None), "", True, False, cast(Any, judge))
+    gen = ctrl._make_generate(
+        persona, None, cast(Any, None), "", True, False, cast(Any, judge)
+    )
     assert gen("q", selected_docs=None, want_verdict=False).coverage == "complete"
     assert judge.calls == 0
 
@@ -355,8 +363,12 @@ def test_generate_external_verdict_judge(monkeypatch) -> None:  # type: ignore[n
 def test_empty_multi_hop_falls_back_to_single_shot_when_single_shot_grounded() -> None:
     # deep answer came back with no text; the single-shot IS grounded (has citations) ->
     # keep the real cited single-shot over the empty deep one.
-    ss = _gen("real single-shot [1]", coverage="partial")  # grounded + partial -> escalate
-    mh = _Gen(answer="   ", citations=[], docs=[object()], coverage="complete", missing=[])
+    ss = _gen(
+        "real single-shot [1]", coverage="partial"
+    )  # grounded + partial -> escalate
+    mh = _Gen(
+        answer="   ", citations=[], docs=[object()], coverage="complete", missing=[]
+    )
     res = deep_rag_answer(
         "q", _FakeGenerate(ss, mh), _retrieve, cast(LLM, _DecomposeCompareLLM())
     )
@@ -385,7 +397,9 @@ def test_neither_grounded_surfaces_single_shot_punt() -> None:
     # WINNING REQUIRES GROUNDING: if NEITHER answer is grounded (single-shot uncited; deep
     # answer's citations have no backing docs), no one wins -> surface the single-shot's
     # honest punt, never the ungrounded deep answer.
-    ss = _gen("ungrounded punt", citations=[])  # no citations -> escalate via no_citations
+    ss = _gen(
+        "ungrounded punt", citations=[]
+    )  # no citations -> escalate via no_citations
     mh = _Gen(
         answer="deep answer [1]",
         citations=[CitationInfo(citation_num=1, document_id="dX")],

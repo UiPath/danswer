@@ -601,7 +601,9 @@ export function AssistantEditor({
                       error={finalPromptError}
                     />
 
-                    {(globalSettings?.shared_prompt_instructions ?? "").trim() &&
+                    {(
+                      globalSettings?.shared_prompt_instructions ?? ""
+                    ).trim() &&
                       (() => {
                         const sharedInstructions =
                           globalSettings!.shared_prompt_instructions!.trim();
@@ -636,7 +638,9 @@ export function AssistantEditor({
                     {finalPrompt ? (
                       <pre className="text-sm mt-2 whitespace-pre-wrap">
                         {values.shared_instructions_enabled &&
-                        (globalSettings?.shared_prompt_instructions ?? "").trim()
+                        (
+                          globalSettings?.shared_prompt_instructions ?? ""
+                        ).trim()
                           ? `${finalPrompt}\n\n${globalSettings!.shared_prompt_instructions!.trim()}`
                           : finalPrompt}
                       </pre>
