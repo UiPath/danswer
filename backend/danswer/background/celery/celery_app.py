@@ -37,16 +37,16 @@ from danswer.db.document_set import fetch_document_sets_for_documents
 from danswer.db.document_set import fetch_documents_for_document_set_paginated
 from danswer.db.document_set import get_document_set_by_id
 from danswer.db.document_set import mark_document_set_as_synced
-from danswer.dynamic_configs.factory import get_dynamic_config_store
-from danswer.dynamic_configs.interface import ConfigNotFoundError
 from danswer.db.engine import build_connection_string
 from danswer.db.engine import get_sqlalchemy_engine
 from danswer.db.engine import SYNC_DB_API
-from danswer.db.tasks import get_stuck_deletion_cc_ids
 from danswer.db.models import DocumentSet
+from danswer.db.tasks import get_stuck_deletion_cc_ids
 from danswer.document_index.document_index_utils import get_both_index_names
 from danswer.document_index.factory import get_default_document_index
 from danswer.document_index.interfaces import UpdateRequest
+from danswer.dynamic_configs.factory import get_dynamic_config_store
+from danswer.dynamic_configs.interface import ConfigNotFoundError
 from danswer.utils.logger import setup_logger
 
 logger = setup_logger()
@@ -503,6 +503,25 @@ def check_for_stuck_deletion_tasks() -> None:
             )
 
 
+@celery_app.task(
+    name="prune_answer_traces_task",
+    soft_time_limit=JOB_TIMEOUT,
+)
+def prune_answer_traces_task() -> None:
+    """Daily prune of answer_trace provenance rows older than
+    ANSWER_TRACE_RETENTION_DAYS (default 14). Self-contained (not woven into the
+    main retention sweep). See danswer/answer_trace/tracer.py."""
+    from danswer.answer_trace.tracer import prune_old_traces
+
+    with Session(get_sqlalchemy_engine()) as db_session:
+        try:
+            deleted = prune_old_traces(db_session)
+        except Exception:
+            logger.exception("answer_trace prune raised; will retry next schedule")
+            raise
+    logger.info(f"answer_trace prune: {deleted} rows deleted")
+
+
 #####
 # Celery Beat (Periodic Tasks) Settings
 #####
@@ -555,6 +574,12 @@ celery_app.conf.beat_schedule.update(
         "run-retention": {
             "task": "run_retention_policies_task",
             "schedule": crontab(hour=8, minute=0),  # 08:00 UTC daily
+        },
+        # Daily prune of answer_trace provenance rows (default 14-day retention),
+        # 15 min after the main retention sweep. See danswer/answer_trace/.
+        "prune-answer-traces": {
+            "task": "prune_answer_traces_task",
+            "schedule": crontab(hour=8, minute=15),  # 08:15 UTC daily
         },
     }
 )

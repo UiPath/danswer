@@ -1,0 +1,28 @@
+# Istio for the prod cluster (darwin), formerly four Helm releases from the
+# Automation Suite installer charts (base / istiod / gateway / istio-configure,
+# Istio 1.23, installed 2024-10-18). Exported on 2026-10-29 with Helm's
+# ownership labels/annotations stripped, so plain kubectl owns them now:
+#
+#     kubectl apply -k k8s/overlays/prod-istio     # context: darwin
+#
+# Notes:
+#   - crds/ holds the Istio CRDs. The Helm `base` chart installed them from its
+#     crds/ folder, which Helm never tracked, so they were in no release.
+#   - The Darwin routing (Gateway gateway-prod, VirtualServices, the fqdn
+#     ServiceEntry/VirtualService hairpin) lives in k8s/overlays/prod-ingress,
+#     not here.
+#   - Webhook caBundle fields are injected by istiod at runtime and are
+#     deliberately absent from these manifests.
+#   - Images come from sfbrdevhelmweacr.azurecr.io/istio/*. Upgrading Istio
+#     means editing image tags here and rolling istiod before the gateway.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - crds/istio-crds.yaml
+  - base.yaml
+  - base-rbac.yaml   # istiod / istio-reader cluster RBAC (owned by Helm `base` but missing from its recorded manifest)
+  - istiod.yaml
+  - gateway.yaml
+  - istio-configure.yaml
+  - cni.yaml   # Istio CNI node agent (replaces privileged istio-init)

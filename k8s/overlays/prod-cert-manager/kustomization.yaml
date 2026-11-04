@@ -1,0 +1,88 @@
+# cert-manager for the prod cluster (darwin). Installed 2024-10-18 from the
+# upstream static manifest; vendored here unchanged so the repo can redeploy it.
+#
+#     kubectl apply -k k8s/overlays/prod-cert-manager     # context: darwin
+#
+# Source: https://github.com/cert-manager/cert-manager/releases/download/v1.16.1/cert-manager.yaml
+# sha256: ad09a35d3dd404f98f4e16555b01b89bdf7a499932b4567f3e2eddb4ef3cab15
+#
+# Upgrades: replace the vendored file with the new release's cert-manager.yaml
+# (read the release notes; upgrade one minor version at a time), then apply.
+# Issuers/Certificates live in k8s/overlays/prod-ingress, not here.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - cert-manager-v1.16.1.yaml
+
+# AKS's admissions enforcer adds these namespace exclusions to every webhook;
+# carrying them here keeps `kubectl apply` from fighting AKS.
+patches:
+  - target:
+      kind: ValidatingWebhookConfiguration
+      name: cert-manager-webhook
+    patch: |-
+      - op: add
+        path: /webhooks/0/namespaceSelector/matchExpressions/-
+        value: {key: control-plane, operator: NotIn, values: ["true"]}
+      - op: add
+        path: /webhooks/0/namespaceSelector/matchExpressions/-
+        value: {key: kubernetes.azure.com/managedby, operator: NotIn, values: [aks]}
+  # Azure Policy (Gatekeeper, Deny) on top of PSA restricted, for all three
+  # deployments (each has exactly one container, hence /containers/0):
+  #   - runAsGroup required          -> 1000 (the images' nonroot user). The
+  #     runtime refuses a group without a user, so runAsUser is set too.
+  #   - cpu+memory limits required   -> small; idle use is a few m / ~40Mi
+  #   - no automounted SA token      -> automount off + the SAME token mounted
+  #     explicitly (projected kube-api-access volume). The policy only checks
+  #     the automount field; the controllers still need API access.
+  - target:
+      kind: Deployment
+      labelSelector: app.kubernetes.io/instance=cert-manager
+    patch: |-
+      - op: add
+        path: /spec/template/spec/securityContext/runAsUser
+        value: 1000
+      - op: add
+        path: /spec/template/spec/securityContext/runAsGroup
+        value: 1000
+      - op: add
+        path: /spec/template/spec/automountServiceAccountToken
+        value: false
+      - op: add
+        path: /spec/template/spec/volumes
+        value:
+          - name: kube-api-access
+            projected:
+              defaultMode: 0444
+              sources:
+                - serviceAccountToken: {path: token, expirationSeconds: 3607}
+                - configMap: {name: kube-root-ca.crt, items: [{key: ca.crt, path: ca.crt}]}
+                - downwardAPI:
+                    items:
+                      - path: namespace
+                        fieldRef: {apiVersion: v1, fieldPath: metadata.namespace}
+      - op: add
+        path: /spec/template/spec/containers/0/volumeMounts
+        value:
+          - name: kube-api-access
+            mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+            readOnly: true
+      - op: add
+        path: /spec/template/spec/containers/0/resources
+        value:
+          requests: {cpu: 10m, memory: 64Mi}
+          limits: {cpu: 500m, memory: 512Mi}
+  # Pod Security Admission: cert-manager already meets "restricted".
+  - target:
+      kind: Namespace
+      name: cert-manager
+    patch: |-
+      - op: add
+        path: /metadata/labels
+        value:
+          kubernetes.io/metadata.name: cert-manager
+          pod-security.kubernetes.io/enforce: restricted
+          pod-security.kubernetes.io/enforce-version: latest
+          pod-security.kubernetes.io/warn: restricted
+          pod-security.kubernetes.io/audit: restricted

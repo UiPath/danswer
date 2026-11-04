@@ -49,8 +49,6 @@ spec:
         envFrom:
         - configMapRef:
             name: env-configmap
-        - secretRef:
-            name: danswer-secrets
         resources:
           requests:
             cpu: 100m
@@ -68,3 +66,27 @@ spec:
             port: 8786
           initialDelaySeconds: 15
           periodSeconds: 20
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+        - name: home
+          mountPath: /home/danswer
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      automountServiceAccountToken: false
+      volumes:
+      - name: tmp
+        emptyDir: {}
+      - name: home
+        emptyDir: {}

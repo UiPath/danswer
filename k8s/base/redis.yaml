@@ -1,3 +1,5 @@
+# Redis runs as the image's redis user (uid 999) with a read-only root FS;
+# /data is an emptyDir (persistence is off: --save '' and --appendonly no).
 apiVersion: v1
 kind: Service
 metadata:
@@ -30,7 +32,7 @@ spec:
     spec:
       containers:
       - name: redis
-        image: redis:7.2-alpine
+        image: redis:7.2.7-alpine
         ports:
         - containerPort: 6379
           name: redis
@@ -43,10 +45,6 @@ spec:
         - 512mb
         - --maxmemory-policy
         - allkeys-lru
-        # Container limit sits comfortably above --maxmemory because Redis
-        # uses extra RSS beyond the data limit for client output buffers,
-        # COW pages during BGSAVE, and fragmentation (~1.3-1.5x is typical;
-        # we set ~2x for safety on a single-replica setup where OOM = downtime).
         resources:
           requests:
             memory: 256Mi
@@ -64,3 +62,23 @@ spec:
             port: 6379
           initialDelaySeconds: 15
           periodSeconds: 20
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        volumeMounts:
+        - mountPath: /data
+          name: data
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      volumes:
+      - name: data
+        emptyDir: {}

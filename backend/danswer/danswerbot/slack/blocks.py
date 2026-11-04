@@ -24,6 +24,7 @@ from danswer.configs.app_configs import DISABLE_GENERATIVE_AI
 from danswer.configs.constants import DocumentSource
 from danswer.configs.constants import SearchFeedbackType
 from danswer.configs.danswerbot_configs import DANSWER_BOT_NUM_DOCS_TO_DISPLAY
+from danswer.configs.danswerbot_configs import DANSWER_BOT_SLACK_MARKDOWN_RENDERER
 from danswer.danswerbot.slack.constants import DISLIKE_BLOCK_ACTION_ID
 from danswer.danswerbot.slack.constants import FEEDBACK_DOC_BUTTON_BLOCK_ACTION_ID
 from danswer.danswerbot.slack.constants import FOLLOWUP_BUTTON_ACTION_ID
@@ -31,8 +32,11 @@ from danswer.danswerbot.slack.constants import FOLLOWUP_BUTTON_RESOLVED_ACTION_I
 from danswer.danswerbot.slack.constants import IMMEDIATE_RESOLVED_BUTTON_ACTION_ID
 from danswer.danswerbot.slack.constants import LIKE_BLOCK_ACTION_ID
 from danswer.danswerbot.slack.constants import SME_VALIDATE_BUTTON_ACTION_ID
+from danswer.danswerbot.slack.formatting import format_slack_message
 from danswer.danswerbot.slack.icons import source_to_github_img_link
 from danswer.danswerbot.slack.utils import build_feedback_id
+from danswer.danswerbot.slack.utils import markdown_to_slack
+from danswer.danswerbot.slack.utils import remove_slack_entities_only
 from danswer.danswerbot.slack.utils import remove_slack_text_interactions
 from danswer.danswerbot.slack.utils import translate_vespa_highlight_to_slack
 from danswer.search.models import SavedSearchDoc
@@ -91,6 +95,86 @@ def strip_code_fence_languages(text: str) -> str:
     return _CODE_FENCE_LANGUAGE_RE.sub(r"```\1", text)
 
 
+# The AutomationSuite persona appends "[SME]:" and "[Confidence Score]:" lines to its
+# answer (per the persona prompt). Rewrite them to their own BOLD, blank-line-separated
+# lines so they read as distinct sections (and so mistune doesn't strip the "[SME]"
+# brackets as a link reference and cram them onto the end of the last sentence). Matches
+# an optional leading "**"/"[" decoration; fires only when the labels are present.
+_ANSWER_FOOTER_RES = (
+    (
+        "SME",
+        re.compile(
+            r"^[ \t]*\**\[?\s*SME\s*\]?\**[ \t]*:[ \t]*(.*)$",
+            re.IGNORECASE | re.MULTILINE,
+        ),
+    ),
+    (
+        "Confidence Score",
+        re.compile(
+            r"^[ \t]*\**\[?\s*Confidence Score\s*\]?\**[ \t]*:[ \t]*(.*)$",
+            re.IGNORECASE | re.MULTILINE,
+        ),
+    ),
+)
+
+
+# The leading "Answer:" header the persona emits at the very start of the response —
+# bold it to match the other sections. Start-anchored + count=1 so a mid-answer
+# "answer:" in prose isn't affected.
+_ANSWER_HEADER_RE = re.compile(r"^\s*\**\[?\s*Answer\s*\]?\**[ \t]*:", re.IGNORECASE)
+
+
+def _emphasize_answer_sections(answer: str) -> str:
+    answer = _ANSWER_HEADER_RE.sub("**Answer:**", answer, count=1)
+    for label, rx in _ANSWER_FOOTER_RES:
+        answer = rx.sub(
+            lambda m, lbl=label: f"\n\n**{lbl}:** {m.group(1).strip()}", answer
+        )
+    return answer
+
+
+# Guarantee a blank line before each rendered footer section — mistune collapses the
+# paragraph breaks between these short one-line sections, so re-insert them post-render
+# (no-op when a blank line is already there). Runs on Slack mrkdwn (labels already `*..*`).
+_RENDERED_FOOTER_SECTION_RE = re.compile(
+    r"(?<!\n)\n(\*(?:SME|Confidence Score|Authoritative sources):\*)"
+)
+
+
+def _space_answer_sections(rendered: str) -> str:
+    return _RENDERED_FOOTER_SECTION_RE.sub(r"\n\n\1", rendered)
+
+
+def render_answer_markdown(answer: str) -> str:
+    """Convert an LLM markdown answer to Slack mrkdwn using the configured renderer
+    (DANSWER_BOT_SLACK_MARKDOWN_RENDERER), so the two can be A/B'd on real answers.
+
+    - "mistune": upstream-ported AST renderer. Parse markdown FIRST (it owns links +
+      bold), then strip Slack entities with the reduced sanitizer that won't undo them,
+      then decode escapes — mirrors upstream Onyx's ordering.
+    - "regex" (default): in-house markdown_to_slack. Our sanitizer strips <url|text>
+      and re-handles bold, so it must run FIRST; markdown_to_slack then (re-)adds Slack
+      links/bold, converts ### headers to *bold* with blank-line spacing, and -/*
+      bullets to •.
+    """
+    answer = _emphasize_answer_sections(answer)
+    if DANSWER_BOT_SLACK_MARKDOWN_RENDERER == "mistune":
+        rendered = decode_escapes(
+            remove_slack_entities_only(format_slack_message(answer))
+        )
+        # header() emits a leading blank line before each section (see formatting.py);
+        # collapse any resulting run of blank lines and drop the stray leading one.
+        rendered = re.sub(r"\n{3,}", "\n\n", rendered).strip()
+        return _space_answer_sections(rendered)
+    return _space_answer_sections(
+        markdown_to_slack(
+            strip_code_fence_languages(
+                decode_escapes(remove_slack_text_interactions(answer))
+            )
+        )
+    )
+
+
 def _split_text(text: str, limit: int = 3000) -> list[str]:
     if len(text) <= limit:
         return [text]
@@ -101,14 +185,23 @@ def _split_text(text: str, limit: int = 3000) -> list[str]:
             chunks.append(text)
             break
 
-        # Find the nearest space before the limit to avoid splitting a word
-        split_at = text.rfind(" ", 0, limit)
-        if split_at == -1:  # No spaces found, force split
-            split_at = limit
+        window = text[:limit]
+        # Prefer to break at a NEWLINE so a line is never cut across two Slack blocks.
+        # A *bold* span lives entirely on one line, so splitting mid-line can orphan a
+        # "*" (e.g. "...Handling" | "Dependencies:*") and break the bolding. Fall back
+        # to a space (word-safe), then a hard cut, only when a single line is itself
+        # longer than the limit.
+        newline_at = window.rfind("\n")
+        if newline_at > 0:
+            chunks.append(text[:newline_at])
+            text = text[newline_at + 1 :]
+            continue
 
-        chunk = text[:split_at]
-        chunks.append(chunk)
-        text = text[split_at:].lstrip()  # Remove leading spaces from the next chunk
+        split_at = window.rfind(" ")
+        if split_at <= 0:  # no space in an over-long line -> force split
+            split_at = limit
+        chunks.append(text[:split_at])
+        text = text[split_at:].lstrip()
 
     return chunks
 
@@ -411,9 +504,7 @@ def build_qa_response_blocks(
             )
         ]
     else:
-        answer_processed = strip_code_fence_languages(
-            decode_escapes(remove_slack_text_interactions(answer))
-        )
+        answer_processed = render_answer_markdown(answer)
         if process_message_for_citations:
             answer_processed = _process_citations_for_slack(answer_processed)
         answer_blocks = [

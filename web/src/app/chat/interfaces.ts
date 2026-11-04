@@ -62,6 +62,14 @@ export interface ChatSession {
   current_alternate_model: string;
 }
 
+// Compact per-answer provenance for the end-user badge (projection of answer_trace).
+export interface AnswerTraceInfoPacket {
+  cited_source_count: number;
+  deep_rag_escalated: boolean;
+  sub_question_count: number;
+  trace_uuid: string | null;
+}
+
 export interface Message {
   messageId: number;
   message: string;
@@ -70,6 +78,7 @@ export interface Message {
   query?: string | null;
   documents?: DanswerDocument[] | null;
   citations?: CitationMap;
+  answerTrace?: AnswerTraceInfoPacket | null;
   files: FileDescriptor[];
   toolCalls: ToolCallMetadata[];
   // for rebuilding the message tree

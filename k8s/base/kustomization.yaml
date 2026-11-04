@@ -13,13 +13,13 @@ kind: Kustomization
 
 resources:
   # Core danswer app
+  - secrets-loader.yaml  # darwin-workload SA + with-secrets.sh (see file header)
   - api-server.yaml
   - background.yaml
   - web-server.yaml
   - nginx.yaml
   - inference-model-server.yaml
   - indexing-model-server.yaml
-  - persistent-volumes.yaml
   - redis.yaml  # cache + rate limiting; both prod and local deploy it
 
   # NOTE: Vespa is intentionally NOT part of base. It is a stateful subsystem

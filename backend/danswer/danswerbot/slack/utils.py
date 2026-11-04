@@ -281,6 +281,48 @@ def remove_slack_text_interactions(slack_str: str) -> str:
     return slack_str
 
 
+def remove_slack_entities_only(slack_str: str) -> str:
+    """Reduced sanitizer for use WITH the mistune renderer (formatting.py), mirroring
+    upstream Onyx's remove_slack_text_interactions. Strips Slack entities (tags,
+    channels, mentions, catchall) but deliberately does NOT run replace_links or
+    handle_bold_syntax_for_slack — the markdown parser already owns links and bold, so
+    re-running those would collapse the <url|text> links it emitted."""
+    slack_str = SlackTextCleaner.replace_tags_basic(slack_str)
+    slack_str = SlackTextCleaner.replace_channels_basic(slack_str)
+    slack_str = SlackTextCleaner.replace_special_mentions(slack_str)
+    slack_str = SlackTextCleaner.replace_special_catchall(slack_str)
+    slack_str = SlackTextCleaner.add_zero_width_whitespace_after_tag(slack_str)
+    return slack_str
+
+
+_MD_HEADER_RE = re.compile(r"(?m)^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$")
+_MD_LINK_RE = re.compile(r"\[([^\]]+)\]\((https?://[^)\s]+)\)")
+_MD_BOLD_RE = re.compile(r"\*\*([^*\n]+)\*\*")
+_MD_BULLET_RE = re.compile(r"(?m)^(\s*)[-*]\s+")
+
+
+def markdown_to_slack(text: str) -> str:
+    """Convert common Markdown to Slack mrkdwn so LLM-formatted answers render
+    cleanly — especially the multi-section Deep RAG synthesis, which uses `###`
+    headers and `**bold**` that Slack does NOT support (Slack has no headers and
+    uses *single asterisks* for bold). Handles markdown links and `-`/`*` bullets too.
+    """
+
+    def _header(match: "re.Match[str]") -> str:
+        # drop any residual ** in the title, render the heading as bold, and force a
+        # blank line before it so sections don't club together in Slack (which shows
+        # single newlines tightly). Excess newlines are collapsed below.
+        title = match.group(1).replace("*", "").strip()
+        return f"\n*{title}*"
+
+    out = _MD_LINK_RE.sub(r"<\2|\1>", text)  # [text](url) -> <url|text>
+    out = _MD_BOLD_RE.sub(r"*\1*", out)  # **bold** -> *bold*
+    out = _MD_HEADER_RE.sub(_header, out)  # ### Heading -> (blank line) *Heading*
+    out = _MD_BULLET_RE.sub(r"\1• ", out)  # -/* bullets -> •
+    out = re.sub(r"\n{3,}", "\n\n", out)  # collapse runs of blank lines to one
+    return out.strip()
+
+
 def get_channel_from_id(client: WebClient, channel_id: str) -> dict[str, Any]:
     response = client.conversations_info(channel=channel_id)
     response.validate()

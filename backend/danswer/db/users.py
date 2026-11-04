@@ -1,5 +1,6 @@
 from collections.abc import Sequence
 
+from sqlalchemy import func
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from sqlalchemy.schema import Column
@@ -19,7 +20,16 @@ def list_users(db_session: Session, q: str = "") -> Sequence[User]:
 
 
 def get_user_by_email(email: str, db_session: Session) -> User | None:
-    user = db_session.query(User).filter(User.email == email).first()  # type: ignore
+    # Emails are case-insensitive by spec, but the stored value can differ in case
+    # from the lookup source (e.g. Slack canonicalizes to lowercase while sign-up may
+    # store mixed case), which silently broke sender/ACL resolution. Compare
+    # case-insensitively. Safe here: the user table has no case-variant duplicate
+    # emails (verified in prod), so `.first()` is unambiguous.
+    user = (
+        db_session.query(User)
+        .filter(func.lower(User.email) == func.lower(email))
+        .first()  # type: ignore
+    )
 
     return user
 

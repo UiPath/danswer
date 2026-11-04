@@ -1,0 +1,19 @@
+# Pod-level resource metrics for the prod cluster (darwin), for sizing
+# requests/limits. Bare-minimum in-cluster Prometheus, 15-day retention —
+# see prometheus.yaml.
+#
+#     kubectl apply -k k8s/overlays/prod-monitoring     # context: darwin
+#     kubectl -n monitoring port-forward prometheus-0 9090
+#
+# ama-metrics-settings.yaml turns OFF every target of the Azure managed
+# Prometheus add-on (it can't be uninstalled: `az aks update
+# --disable-azure-monitor-metrics` is blocked by the darwin RG lock). With all
+# targets off nothing is ingested, so the leftover Azure pieces (darwin-amw,
+# DCR/DCE MSProm-westeurope-darwin) cost nothing.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - namespace.yaml
+  - prometheus.yaml
+  - ama-metrics-settings.yaml

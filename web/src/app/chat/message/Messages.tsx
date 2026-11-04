@@ -21,7 +21,12 @@ import { ThreeDots } from "react-loader-spinner";
 import { SkippedSearch } from "./SkippedSearch";
 import remarkGfm from "remark-gfm";
 import { CopyButton } from "@/components/CopyButton";
-import { ChatFileType, FileDescriptor, ToolCallMetadata } from "../interfaces";
+import {
+  AnswerTraceInfoPacket,
+  ChatFileType,
+  FileDescriptor,
+  ToolCallMetadata,
+} from "../interfaces";
 import {
   IMAGE_GENERATION_TOOL_NAME,
   SEARCH_TOOL_NAME,
@@ -91,6 +96,7 @@ export const AIMessage = ({
   query,
   personaName,
   citedDocuments,
+  answerTrace,
   toolCall,
   isComplete,
   hasDocs,
@@ -110,6 +116,7 @@ export const AIMessage = ({
   query?: string;
   personaName?: string;
   citedDocuments?: [string, DanswerDocument][] | null;
+  answerTrace?: AnswerTraceInfoPacket | null;
   toolCall?: ToolCallMetadata;
   isComplete?: boolean;
   hasDocs?: boolean;
@@ -168,7 +175,11 @@ export const AIMessage = ({
   ) : undefined;
 
   return (
-    <div className={"py-5 px-5 flex -mr-6 w-full bg-background-weak border-y border-border"}>
+    <div
+      className={
+        "py-5 px-5 flex -mr-6 w-full bg-background-weak border-y border-border"
+      }
+    >
       <div className="mx-auto w-searchbar-xs 2xl:w-searchbar-sm 3xl:w-searchbar relative">
         {/* px-4 matches the input bar's inset so the answer text lines up
         exactly with the search box (previously ml-8 shifted it ~16px right). */}
@@ -264,6 +275,25 @@ export const AIMessage = ({
             {content ? (
               <>
                 <FileDisplay files={files || []} />
+
+                {answerTrace &&
+                  (answerTrace.cited_source_count > 0 ||
+                    answerTrace.deep_rag_escalated) && (
+                    <div className="text-xs text-subtle mb-2">
+                      {answerTrace.cited_source_count > 0 &&
+                        `Answered from ${
+                          answerTrace.cited_source_count
+                        } source${
+                          answerTrace.cited_source_count === 1 ? "" : "s"
+                        }`}
+                      {answerTrace.deep_rag_escalated &&
+                        `${
+                          answerTrace.cited_source_count > 0 ? " · " : ""
+                        }deep-searched ${answerTrace.sub_question_count} angle${
+                          answerTrace.sub_question_count === 1 ? "" : "s"
+                        }`}
+                    </div>
+                  )}
 
                 {typeof content === "string" ? (
                   <ReactMarkdown

@@ -1,3 +1,5 @@
+# Runs as vespa (uid/gid 1000) via the pod securityContext; fsGroup keeps the
+# data volumes group-owned by 1000 (replaces the old root chown-* init containers).
 apiVersion: v1
 data:
   VESPA_CONFIGSERVERS: vespa-configserver-0.vespa-internal.darwin.svc.cluster.local,vespa-configserver-1.vespa-internal.darwin.svc.cluster.local,vespa-configserver-2.vespa-internal.darwin.svc.cluster.local

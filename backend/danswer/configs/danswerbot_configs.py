@@ -78,6 +78,13 @@ DANSWER_BOT_REPHRASE_MESSAGE = (
     os.environ.get("DANSWER_BOT_REPHRASE_MESSAGE", "").lower() == "true"
 )
 
+# Which markdown->Slack-mrkdwn renderer the bot uses for answers. "regex" (default)
+# uses the lightweight in-house markdown_to_slack; "mistune" uses the upstream-ported
+# AST renderer (formatting.format_slack_message). Kept side-by-side for A/B comparison.
+DANSWER_BOT_SLACK_MARKDOWN_RENDERER = (
+    os.environ.get("DANSWER_BOT_SLACK_MARKDOWN_RENDERER") or "regex"
+).lower()
+
 # JIRA Configuration
 JIRA_SERVER_URL = os.getenv("JIRA_SERVER_URL", "")
 JIRA_EMAIL = os.getenv("JIRA_EMAIL", "")

@@ -1,0 +1,63 @@
+# Azure Monitor managed Prometheus (AKS metrics add-on) — ALL TARGETS OFF.
+#
+# Replaced 2026-10-30 by the in-cluster Prometheus (prometheus.yaml): Azure
+# Monitor workspace retention is fixed at 18 months and can't be shortened,
+# and we only need ~2 weeks of usage data. The add-on can't be uninstalled
+# (`az aks update --disable-azure-monitor-metrics` hits the darwin RG lock),
+# so every scrape target is disabled here → nothing is ingested → no cost.
+# Leftover Azure pieces (idle): darwin-amw, DCE/DCR MSProm-westeurope-darwin,
+# the cluster's DCR association.
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: ama-metrics-settings-configmap
+  namespace: kube-system
+data:
+  schema-version: v2
+  config-version: darwin1
+  cluster-metrics: |-
+    default-targets-scrape-enabled: |-
+      kubelet = false
+      coredns = false
+      cadvisor = false
+      kubeproxy = false
+      apiserver = false
+      kubestate = false
+      nodeexporter = false
+      windowsexporter = false
+      windowskubeproxy = false
+      kappiebasic = false
+      networkobservabilityRetina = false
+      networkobservabilityHubble = false
+      networkobservabilityCilium = false
+      acstor-capacity-provisioner = false
+      acstor-metrics-exporter = false
+      local-csi-driver = false
+      ztunnel = false
+      istio-cni = false
+      dcgmexporter = false
+      prometheuscollectorhealth = false
+    pod-annotation-based-scraping: |-
+      podannotationnamespaceregex = ""
+    default-targets-metrics-keep-list: |-
+      cadvisor = "container_cpu_usage_seconds_total|container_memory_working_set_bytes|container_cpu_cfs_throttled_periods_total|container_cpu_cfs_periods_total|container_oom_events_total"
+      kubestate = "kube_pod_container_resource_requests|kube_pod_container_resource_limits|kube_pod_container_status_restarts_total|kube_pod_container_status_last_terminated_reason"
+    minimal-ingestion-profile: |-
+      enabled = false
+    default-targets-scrape-interval-settings: |-
+      cadvisor = "60s"
+      kubestate = "60s"
+  controlplane-metrics: |-
+    default-targets-scrape-enabled: |-
+      apiserver = false
+      cluster-autoscaler = false
+      node-auto-provisioning = false
+      kube-scheduler = false
+      kube-controller-manager = false
+      etcd = false
+      istio = false
+    minimal-ingestion-profile: |-
+      enabled = true
+  prometheus-collector-settings: |-
+    cluster_alias = ""
+    debug-mode = false

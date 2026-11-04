@@ -1067,6 +1067,20 @@ class Persona(Base):
     rerank_enabled: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="false"
     )
+    # Per-assistant opt-in for feature-gated Deep RAG (verdict-gated multi-hop).
+    # Only takes effect when the chat request also sets the deep_rag override; see
+    # danswer/deep_rag/controller.py. Default off so existing assistants are
+    # unchanged until piloted.
+    deep_rag_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false"
+    )
+    # Per-assistant opt-OUT of the global Shared Assistant Instructions (Admin →
+    # Settings → shared_prompt_instructions, appended to every assistant's system
+    # prompt at answer time). Default ON so the global policy applies everywhere;
+    # flip off in the assistant editor for assistants that must not receive it.
+    shared_instructions_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default="true"
+    )
     # Allows the Persona to specify a different LLM version than is controlled
     # globablly via env variables. For flexibility, validity is not currently enforced
     # NOTE: only is applied on the actual response generation - is not used for things like
@@ -1795,4 +1809,65 @@ class OnboardingRequest(Base):
         nullable=False,
         server_default=func.now(),
         onupdate=func.now(),
+    )
+
+
+class AnswerTrace(Base):
+    """Operator-facing provenance for a single answer (chat or search): the
+    branch-level pipeline decisions that produced it. One row per answer.
+
+    Filterable dimensions are promoted to columns; the ordered per-stage detail
+    lives in `events` (JSONB). Events reference doc/chunk IDENTIFIERS, never chunk
+    content, and record deterministic decisions actually taken — no reconstructed
+    or LLM-narrated reasoning. Written on-by-default; pruned by retention
+    (default 14 days). See danswer/answer_trace/ and DEEP_RAG.md.
+    """
+
+    __tablename__ = "answer_trace"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # universal handle returned to the client; works for chat AND search
+    trace_uuid: Mapped[UUID] = mapped_column(
+        postgresql.UUID(as_uuid=True), unique=True, index=True, nullable=False
+    )
+    # nullable: the search surface has no chat_message
+    chat_message_id: Mapped[int | None] = mapped_column(
+        ForeignKey("chat_message.id", ondelete="CASCADE"), unique=True, nullable=True
+    )
+    chat_session_id: Mapped[int | None] = mapped_column(
+        Integer, index=True, nullable=True
+    )
+    user_id: Mapped[UUID | None] = mapped_column(
+        postgresql.UUID(as_uuid=True), index=True, nullable=True
+    )
+    surface: Mapped[str] = mapped_column(String, nullable=False)
+    persona_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), index=True
+    )
+
+    query: Mapped[str] = mapped_column(Text, nullable=False)
+    rephrased_query: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    route_stage: Mapped[str | None] = mapped_column(String, nullable=True)
+    route_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    retrieved_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    reranked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    cited_source_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    deep_rag_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    deep_rag_escalated: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    sub_question_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    model: Mapped[str | None] = mapped_column(String, nullable=True)
+    total_duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    trace_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    events: Mapped[list] = mapped_column(
+        postgresql.JSONB(), nullable=False, default=list
     )

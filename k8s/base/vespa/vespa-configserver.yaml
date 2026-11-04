@@ -1,3 +1,5 @@
+# Runs as vespa (uid/gid 1000) via the pod securityContext; fsGroup keeps the
+# data volumes group-owned by 1000 (replaces the old root chown-* init containers).
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -6,7 +8,7 @@ spec:
   persistentVolumeClaimRetentionPolicy:
     whenDeleted: Retain
     whenScaled: Retain
-  podManagementPolicy: OrderedReady
+  podManagementPolicy: Parallel
   replicas: 3
   selector:
     matchLabels:
@@ -25,20 +27,9 @@ spec:
         envFrom:
         - configMapRef:
             name: vespa-config
-        # Per-role logical image name (overlay images: resolves it to
-        # vespaengine/vespa:<tag>). Split per role so the upgrade script can
-        # move one StatefulSet's version at a time — see vespa-upgrade.sh.
         image: vespa-configserver
         imagePullPolicy: Always
         name: vespa-configserver
-        # Gates the vespa-configserver Service so consumers (api-server's
-        # ensure_indices_exist, other Vespa nodes) only route here once the
-        # config server actually serves — not the instant the container
-        # starts. Readiness-only: a slow/booting config server is pulled
-        # from rotation but never restarted (an aggressive liveness probe
-        # could kill a healthy-but-slow node and cause a restart loop).
-        # initialDelay is generous because config-server bootstrap (ZK +
-        # app load) takes 1-2 min.
         readinessProbe:
           httpGet:
             path: /state/v1/health
@@ -49,45 +40,67 @@ spec:
           failureThreshold: 6
         resources:
           limits:
+            cpu: '8'   # = node size: policy needs a limit; no throttling, same thread sizing
             memory: 4096M
           requests:
+            # explicit: a cpu limit without a request defaults the request to the limit (8 = unschedulable)
+            cpu: 200m
             memory: 4096M
         securityContext:
-          runAsUser: 1000
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
         volumeMounts:
+        - mountPath: /tmp
+          name: tmp
+        # configserver creates preprocess temp dirs under /opt/vespa/conf at startup
+        - mountPath: /opt/vespa/conf
+          name: vespa-conf-ephemeral
         - mountPath: /opt/vespa/var
           name: vespa-var1
         - mountPath: /opt/vespa/logs
           name: vespa-logs1
         - mountPath: /workspace
           name: vespa-workspace1
+      # Read-only root FS: /opt/vespa/conf ships the config definitions and the
+      # configserver also writes temp dirs there; copy the image's contents in first.
       initContainers:
-      - command:
-        - sh
-        - -c
-        - chown -R 1000 /opt/vespa/var
-        image: busybox
-        imagePullPolicy: Always
-        name: chown-var
-        resources: {}
+      - name: seed-vespa-dirs
+        image: vespa-configserver
+        imagePullPolicy: IfNotPresent
+        command: ["sh", "-c", "set -e; for e in /opt/vespa/conf/* /opt/vespa/conf/.[!.]*; do [ -e \"$e\" ] || continue; cp -a \"$e\" /seed/conf/; done"]
+        resources:
+          requests:
+            cpu: 10m
+            memory: 32Mi
+          limits:
+            cpu: 500m
+            memory: 256Mi
         securityContext:
-          runAsUser: 0
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
         volumeMounts:
-        - mountPath: /opt/vespa/var
-          name: vespa-var1
-      - command:
-        - sh
-        - -c
-        - chown -R 1000 /opt/vespa/logs
-        image: busybox
-        imagePullPolicy: Always
-        name: chown-logs
-        resources: {}
-        securityContext:
-          runAsUser: 0
-        volumeMounts:
-        - mountPath: /opt/vespa/logs
-          name: vespa-logs1
+        - mountPath: /seed/conf
+          name: vespa-conf-ephemeral
+      volumes:
+      - name: tmp
+        emptyDir: {}
+      - name: vespa-conf-ephemeral
+        emptyDir: {}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      automountServiceAccountToken: false
   updateStrategy:
     rollingUpdate:
       partition: 0
@@ -143,10 +156,9 @@ metadata:
 spec:
   ports:
   - name: vespa-tenant-port
-    nodePort: 31439
     port: 19071
     protocol: TCP
     targetPort: 19071
   selector:
     app: vespa-configserver
-  type: NodePort
+  type: ClusterIP

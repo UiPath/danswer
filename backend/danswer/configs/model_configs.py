@@ -86,6 +86,11 @@ GEN_AI_CLIENT_ID = os.environ.get("GEN_AI_CLIENT_ID") or None
 GEN_AI_CLIENT_SECRET = os.environ.get("GEN_AI_CLIENT_SECRET") or None
 GEN_AI_ACCOUNT_ID = os.environ.get("GEN_AI_ACCOUNT_ID") or None
 GEN_AI_TENANT_ID = os.environ.get("GEN_AI_TENANT_ID") or None
+# Base URL of the UiPath LLM gateway environment (alpha / staging / cloud).
+# Every model's completions URL is built from it plus account/tenant/vendor/model.
+GEN_AI_GATEWAY_BASE_URL = (
+    os.environ.get("GEN_AI_GATEWAY_BASE_URL") or "https://alpha.uipath.com"
+).rstrip("/")
 GEN_AI_VENDOR = os.environ.get("GEN_AI_VENDOR") or "openai"
 GEN_AI_MODEL_NAME = os.environ.get("GEN_AI_MODEL_NAME") or "gpt-4o-2024-11-20"
 # Number of tokens from chat history to include at maximum

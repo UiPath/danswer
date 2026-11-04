@@ -5,7 +5,13 @@ from typing import cast
 
 from sqlalchemy.orm import Session
 
+from danswer.answer_trace.tracer import event
+from danswer.answer_trace.tracer import finalize_and_persist
+from danswer.answer_trace.tracer import record_deep_rag
+from danswer.answer_trace.tracer import set_fields
+from danswer.answer_trace.tracer import start_trace
 from danswer.chat.chat_utils import create_chat_chain
+from danswer.chat.models import AnswerTraceInfo
 from danswer.chat.models import CitationInfo
 from danswer.chat.models import CustomToolResponse
 from danswer.chat.models import DanswerAnswerPiece
@@ -37,6 +43,7 @@ from danswer.db.models import SearchDoc as DbSearchDoc
 from danswer.db.models import ToolCall
 from danswer.db.models import User
 from danswer.db.persona import get_persona_by_id
+from danswer.deep_rag.controller import run_deep_rag
 from danswer.document_index.factory import get_default_document_index
 from danswer.file_store.models import ChatFileType
 from danswer.file_store.models import FileDescriptor
@@ -48,6 +55,7 @@ from danswer.llm.answering.models import CitationConfig
 from danswer.llm.answering.models import DocumentPruningConfig
 from danswer.llm.answering.models import PreviousMessage
 from danswer.llm.answering.models import PromptConfig
+from danswer.llm.answering.models import with_shared_instructions
 from danswer.llm.exceptions import GenAIDisabledException
 from danswer.llm.factory import get_llms_for_persona
 from danswer.llm.factory import get_main_llm_from_tuple
@@ -202,6 +210,7 @@ ChatPacket = (
     | CitationInfo
     | ImageGenerationDisplay
     | CustomToolResponse
+    | AnswerTraceInfo
 )
 ChatPacketStream = Iterator[ChatPacket]
 
@@ -252,6 +261,15 @@ def stream_chat_message_objects(
             )
         else:
             persona = chat_session.persona
+
+        # Begin answer-trace (no-op when tracing disabled). Persisted at the end.
+        start_trace(
+            surface="chat",
+            query=message_text,
+            persona_id=persona.id if persona else None,
+            chat_session_id=chat_session_id,
+            user_id=user.id if user else None,
+        )
 
         prompt_id = new_msg_req.prompt_id
         if prompt_id is None and persona.prompts:
@@ -418,7 +436,7 @@ def stream_chat_message_objects(
         if not final_msg.prompt:
             raise RuntimeError("No Prompt found")
 
-        prompt_config = (
+        prompt_config = with_shared_instructions(
             PromptConfig.from_model(
                 final_msg.prompt,
                 prompt_override=(
@@ -426,7 +444,8 @@ def stream_chat_message_objects(
                 ),
             )
             if not persona
-            else PromptConfig.from_model(persona.prompts[0])
+            else PromptConfig.from_model(persona.prompts[0]),
+            persona=persona or chat_session.persona,
         )
 
         # find out what tools to use
@@ -549,6 +568,91 @@ def stream_chat_message_objects(
             llm.config.model_provider, llm.config.model_name
         )
 
+        # Deep RAG: when the chat request opts in, answer via the multi-hop controller
+        # instead of the normal Answer/tool loop, surface the retrieved documents +
+        # map citations, then persist like a normal assistant message and return.
+        # Per-question override: the chat toggle runs Deep RAG regardless of the
+        # assistant's deep_rag_enabled (that flag now sets the toggle's DEFAULT /
+        # gradual-rollout, it no longer gates execution). See DEEP_RAG.md.
+        if new_msg_req.deep_rag:
+            # Serialize prior turns so follow-up questions decompose/answer in
+            # context (keep the most recent ~4k chars). Mirrors upstream's
+            # history-aware decomposition.
+            deep_history = "\n".join(
+                f"{'User' if m.message_type == MessageType.USER else 'Assistant'}: "
+                f"{m.message}"
+                for m in history_msgs
+            )[-4000:]
+            deep_result = run_deep_rag(
+                query=final_msg.message,
+                user=user,
+                persona=persona,
+                db_session=db_session,
+                history=deep_history,
+                # The chat toggle is a manual per-question override: force the deep
+                # path regardless of the single-shot verdict (compare-guard still
+                # keeps single-shot if the deep answer isn't better).
+                force=True,
+            )
+            record_deep_rag(
+                escalated=deep_result.escalated,
+                coverage=deep_result.coverage,
+                sub_questions=deep_result.sub_questions,
+                source=deep_result.source,
+                escalation_reason=deep_result.escalation_reason,
+            )
+            # Surface the retrieved documents so the UI shows sources (not "the AI
+            # decided this query didn't need a search") and citations resolve. The
+            # docs come straight from the normal answer flow the controller reused.
+            deep_reference_db_docs = [
+                create_db_search_doc(server_search_doc=doc, db_session=db_session)
+                for doc in deep_result.docs
+            ]
+            yield QADocsResponse(
+                rephrased_query=final_msg.message,
+                top_documents=[
+                    translate_db_search_doc_to_server_search_doc(d)
+                    for d in deep_reference_db_docs
+                ],
+                predicted_flow=None,
+                predicted_search=None,
+                applied_source_filters=None,
+                applied_time_cutoff=None,
+                recency_bias_multiplier=1.0,
+            )
+
+            # Map the answer's [n] markers -> saved doc ids via the shared helper (the
+            # citations the normal answer flow computed carry citation_num -> document_id,
+            # already renumbered to match the answer text; the helper re-maps to the rows
+            # we just saved and skips any stray citation).
+            deep_citations = translate_citations(
+                deep_result.citations, deep_reference_db_docs
+            )
+
+            yield DanswerAnswerPiece(answer_piece=deep_result.answer)
+            gen_ai_response_message = partial_response(
+                message=deep_result.answer,
+                rephrased_query=final_msg.message,
+                reference_docs=deep_reference_db_docs,
+                files=None,
+                token_count=len(llm_tokenizer_encode_func(deep_result.answer)),
+                citations=deep_citations or None,
+                error=None,
+                tool_calls=[],
+            )
+            deep_trace_uuid = finalize_and_persist(
+                db_session, chat_message_id=gen_ai_response_message.id
+            )
+            db_session.commit()
+            yield AnswerTraceInfo(
+                cited_source_count=len(set(deep_citations.values())),
+                deep_rag_escalated=deep_result.escalated,
+                sub_question_count=len(deep_result.sub_questions),
+                trace_uuid=str(deep_trace_uuid) if deep_trace_uuid else None,
+            )
+            yield translate_db_message_to_chat_message_detail(gen_ai_response_message)
+            return
+
         # LLM prompt building, response capturing, etc.
         answer = Answer(
             question=final_msg.message,
@@ -605,6 +709,14 @@ def stream_chat_message_objects(
                         else False,
                     )
                     yield qa_docs_response
+                    event(
+                        "retrieve",
+                        {
+                            "candidates": len(qa_docs_response.top_documents),
+                            "rephrased_query": qa_docs_response.rephrased_query,
+                            "predicted_flow": str(qa_docs_response.predicted_flow),
+                        },
+                    )
                 elif packet.id == SECTION_RELEVANCE_LIST_ID:
                     chunk_indices = packet.response
 
@@ -617,6 +729,10 @@ def stream_chat_message_objects(
 
                     yield LLMRelevanceFilterResponse(
                         relevant_chunk_indices=chunk_indices
+                    )
+                    event(
+                        "relevance_filter",
+                        {"relevant_chunk_indices": chunk_indices},
                     )
                 elif packet.id == IMAGE_GENERATION_RESPONSE_ID:
                     img_generation_response = cast(
@@ -698,8 +814,31 @@ def stream_chat_message_objects(
             if tool_result
             else [],
         )
+        set_fields(
+            rephrased_query=(
+                qa_docs_response.rephrased_query if qa_docs_response else None
+            ),
+            retrieved_count=(
+                len(qa_docs_response.top_documents) if qa_docs_response else None
+            ),
+            cited_source_count=(
+                len(reference_db_search_docs) if reference_db_search_docs else 0
+            ),
+            reranked=bool(RERANK_ENABLED and new_msg_req.use_reranking),
+        )
+        trace_uuid = finalize_and_persist(
+            db_session, chat_message_id=gen_ai_response_message.id
+        )
         db_session.commit()  # actually save user / assistant message
 
+        yield AnswerTraceInfo(
+            cited_source_count=(
+                len(reference_db_search_docs) if reference_db_search_docs else 0
+            ),
+            deep_rag_escalated=False,
+            sub_question_count=0,
+            trace_uuid=str(trace_uuid) if trace_uuid else None,
+        )
         msg_detail_response = translate_db_message_to_chat_message_detail(
             gen_ai_response_message
         )

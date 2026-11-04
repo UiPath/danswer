@@ -63,3 +63,7 @@ class OneShotQAResponse(BaseModel):
     answer_valid: bool = True  # Reflexion result, default True if Reflexion not run
     chat_message_id: int | None = None
     contexts: DanswerContexts | None = None
+    # Post this answer even if it cites nothing. Set by flows whose uncited answer is a
+    # DELIBERATE deferral (e.g. deep-rag surfacing the persona's "check with the SME/PM"
+    # punt) rather than a grounding failure — the Slack no-citations gate honors it.
+    allow_uncited: bool = False

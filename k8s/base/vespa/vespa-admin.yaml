@@ -1,3 +1,5 @@
+# Runs as vespa (uid/gid 1000) via the pod securityContext; fsGroup keeps the
+# data volumes group-owned by 1000 (replaces the old root chown-* init containers).
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -25,13 +27,9 @@ spec:
         envFrom:
         - configMapRef:
             name: vespa-config
-        # Per-role logical image name — see vespa-configserver.yaml.
         image: vespa-admin
         imagePullPolicy: Always
         name: vespa-admin
-        # Readiness on the metrics proxy's /state/v1/health (port 19092 —
-        # node-agnostic, same as content). Gates rollout; readiness-only (no
-        # liveness). See the content-node note re: publishNotReadyAddresses.
         readinessProbe:
           httpGet:
             path: /state/v1/health
@@ -42,11 +40,66 @@ spec:
           failureThreshold: 6
         resources:
           limits:
+            cpu: '8'   # = node size: policy needs a limit; no throttling, same thread sizing
             memory: 2G
           requests:
+            # explicit: a cpu limit without a request defaults the request to the limit (8 = unschedulable)
+            cpu: 100m
             memory: 1G
         securityContext:
-          runAsUser: 1000
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        volumeMounts:
+        - mountPath: /tmp
+          name: tmp
+        - mountPath: /opt/vespa/var
+          name: vespa-var-ephemeral
+        - mountPath: /opt/vespa/logs
+          name: vespa-logs-ephemeral
+      # Read-only root FS: the image ships a directory skeleton under
+      # /opt/vespa/{var,logs} that a bare emptyDir would hide; copy it in first.
+      initContainers:
+      - name: seed-vespa-dirs
+        image: vespa-admin
+        imagePullPolicy: IfNotPresent
+        command: ["sh", "-c", "set -e; for e in /opt/vespa/var/* /opt/vespa/var/.[!.]*; do [ -e \"$e\" ] || continue; cp -a \"$e\" /seed/var/; done && for e in /opt/vespa/logs/* /opt/vespa/logs/.[!.]*; do [ -e \"$e\" ] || continue; cp -a \"$e\" /seed/logs/; done"]
+        resources:
+          requests:
+            cpu: 10m
+            memory: 32Mi
+          limits:
+            cpu: 500m
+            memory: 256Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        volumeMounts:
+        - mountPath: /seed/var
+          name: vespa-var-ephemeral
+        - mountPath: /seed/logs
+          name: vespa-logs-ephemeral
+      volumes:
+      - name: tmp
+        emptyDir: {}
+      - name: vespa-var-ephemeral
+        emptyDir: {}
+      - name: vespa-logs-ephemeral
+        emptyDir: {}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      automountServiceAccountToken: false
   updateStrategy:
     rollingUpdate:
       partition: 0

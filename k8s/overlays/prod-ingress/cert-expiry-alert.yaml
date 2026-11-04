@@ -1,0 +1,125 @@
+# Daily check of the certificate Darwin actually serves on
+# darwin.westeurope.cloudapp.azure.com:443. Posts to Slack only when something
+# is wrong: fewer than ALERT_DAYS left (cert-manager renews at 30 days, so <21
+# means renewal has been failing for 9+ days — e.g. the NSG port-80 rule was
+# removed), or the TLS check itself fails (expired/invalid cert, unreachable).
+#
+# Runs in the velero namespace to reuse the `slack-notify` secret (Darwin Slack
+# app bot token + channel, owned by k8s/overlays/prod-velero). The Darwin bot
+# must be a member of that channel.
+#
+# No Kubernetes API access: no ServiceAccount token, non-root, read-only FS.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cert-expiry-alert
+  namespace: velero
+data:
+  check.py: |
+    import json, os, socket, ssl, sys, urllib.request
+    from datetime import datetime, timezone
+
+    host = os.environ["HOST"]
+    alert_days = int(os.environ.get("ALERT_DAYS", "21"))
+    dry_run = os.environ.get("DRY_RUN") == "1"
+
+    def post(text):
+        if dry_run:
+            print("DRY_RUN, would post:", text)
+            return
+        req = urllib.request.Request(
+            "https://slack.com/api/chat.postMessage",
+            data=json.dumps({"channel": os.environ["SLACK_CHANNEL"], "text": text}).encode(),
+            headers={
+                "Authorization": "Bearer " + os.environ["SLACK_BOT_TOKEN"],
+                "Content-Type": "application/json; charset=utf-8",
+            },
+        )
+        resp = json.loads(urllib.request.urlopen(req, timeout=20).read())
+        if not resp.get("ok"):
+            print("Slack post failed:", resp.get("error"))
+            sys.exit(1)
+
+    try:
+        ctx = ssl.create_default_context()
+        with socket.create_connection((host, 443), timeout=20) as sock:
+            with ctx.wrap_socket(sock, server_hostname=host) as tls:
+                cert = tls.getpeercert()
+        not_after = datetime.fromtimestamp(ssl.cert_time_to_seconds(cert["notAfter"]), timezone.utc)
+        days_left = (not_after - datetime.now(timezone.utc)).days
+    except Exception as e:  # invalid/expired cert or unreachable endpoint
+        post(f":rotating_light: TLS check failed for https://{host}: {type(e).__name__}: {e}")
+        sys.exit(1)
+
+    print(f"{host}: certificate valid until {not_after:%Y-%m-%d} ({days_left} days left)")
+    if days_left < alert_days:
+        post(
+            f":warning: The TLS certificate for https://{host} expires on "
+            f"{not_after:%Y-%m-%d} ({days_left} days left) and has not been renewed. "
+            "cert-manager should renew it 30 days before expiry; check the Certificate "
+            "`istio-system/darwin-azure-domain-cert-prod` and that inbound TCP 80 is "
+            "still allowed from the Internet (Let's Encrypt http-01)."
+        )
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: cert-expiry-alert
+  namespace: velero
+spec:
+  schedule: "0 8 * * *"  # daily, 08:00 UTC
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            runAsGroup: 65534   # Azure Policy requires an explicit group
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: check
+              image: python:3.12.7-alpine3.20
+              command: ["python", "/app/check.py"]
+              env:
+                - name: HOST
+                  value: darwin.westeurope.cloudapp.azure.com
+                - name: ALERT_DAYS
+                  value: "21"
+                - name: SLACK_BOT_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: slack-notify
+                      key: SLACK_BOT_TOKEN
+                - name: SLACK_CHANNEL
+                  valueFrom:
+                    secretKeyRef:
+                      name: slack-notify
+                      key: SLACK_CHANNEL
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 32Mi
+                limits:
+                  cpu: 100m
+                  memory: 64Mi
+              volumeMounts:
+                - name: script
+                  mountPath: /app
+                  readOnly: true
+          volumes:
+            - name: script
+              configMap:
+                name: cert-expiry-alert

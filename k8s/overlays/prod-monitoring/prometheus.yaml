@@ -1,0 +1,183 @@
+# Minimal in-cluster Prometheus for sizing container requests/limits.
+#
+# Deliberately bare: ONE Prometheus server, no Grafana / Alertmanager /
+# node-exporter / kube-state-metrics / operator. It scrapes only each node's
+# kubelet cAdvisor endpoint and keeps only the usage series needed for tuning:
+#   container_cpu_usage_seconds_total, container_memory_working_set_bytes,
+#   container_cpu_cfs_{throttled_,}periods_total, container_oom_events_total
+# (Requests/limits themselves are in git; restarts: `kubectl get pods`.)
+#
+# Retention 15d (and a 4GB cap) on a 10Gi disk. Not exposed anywhere — open
+# the UI with:
+#   kubectl -n monitoring port-forward prometheus-0 9090
+# Handy queries (CPU in cores, memory in bytes, last 7d):
+#   max_over_time(sum by (namespace,pod,container) (rate(container_cpu_usage_seconds_total[5m]))[7d:5m])
+#   quantile_over_time(0.95, sum by (namespace,pod,container) (rate(container_cpu_usage_seconds_total[5m]))[7d:5m])
+#   max_over_time(container_memory_working_set_bytes[7d])
+#   sum by (namespace,pod,container) (rate(container_cpu_cfs_throttled_periods_total[5m])) / sum by (namespace,pod,container) (rate(container_cpu_cfs_periods_total[5m]))
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: prometheus
+  namespace: monitoring
+automountServiceAccountToken: false
+---
+# Read-only: discover nodes and read the kubelet's metrics endpoints.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: monitoring-prometheus
+rules:
+- apiGroups: [""]
+  resources: ["nodes"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["nodes/metrics"]
+  verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: monitoring-prometheus
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: monitoring-prometheus
+subjects:
+- kind: ServiceAccount
+  name: prometheus
+  namespace: monitoring
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: monitoring
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 30s
+      scrape_timeout: 20s
+    scrape_configs:
+    - job_name: cadvisor
+      scheme: https
+      metrics_path: /metrics/cadvisor
+      kubernetes_sd_configs:
+      - role: node
+      authorization:
+        credentials_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+      # Kubelet serving certs on this cluster are issued by the cluster CA
+      # (serving-cert rotation) with the node IP in the SAN, so verify them.
+      # Don't "fix" scraping via the API-server proxy: that needs nodes/proxy,
+      # which reaches the full kubelet API (exec/run) — nodes/metrics is enough.
+      tls_config:
+        ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+      relabel_configs:
+      - source_labels: [__meta_kubernetes_node_name]
+        target_label: node
+      metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: container_cpu_usage_seconds_total|container_memory_working_set_bytes|container_cpu_cfs_throttled_periods_total|container_cpu_cfs_periods_total|container_oom_events_total
+        action: keep
+      # only real containers in pods: drop node/system cgroup slices and pause sandboxes
+      - source_labels: [pod]
+        regex: ""
+        action: drop
+      - source_labels: [container]
+        regex: POD
+        action: drop
+      # per-container identity is namespace/pod/container; the cgroup path and
+      # runtime container id only add churn.
+      - regex: id|name
+        action: labeldrop
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: prometheus
+  namespace: monitoring
+spec:
+  serviceName: prometheus
+  replicas: 1
+  selector:
+    matchLabels:
+      app: prometheus
+  template:
+    metadata:
+      labels:
+        app: prometheus
+    spec:
+      serviceAccountName: prometheus
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        fsGroup: 65534
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: prometheus
+        image: prom/prometheus:v2.53.3
+        imagePullPolicy: IfNotPresent
+        args:
+        - --config.file=/etc/prometheus/prometheus.yml
+        - --storage.tsdb.path=/prometheus
+        - --storage.tsdb.retention.time=15d
+        - --storage.tsdb.retention.size=4GB
+        ports:
+        - name: web
+          containerPort: 9090
+        readinessProbe:
+          httpGet:
+            path: /-/ready
+            port: 9090
+          periodSeconds: 10
+        resources:
+          requests:
+            cpu: 50m
+            memory: 256Mi
+          limits:
+            cpu: '1'
+            memory: 1Gi
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        volumeMounts:
+        - name: config
+          mountPath: /etc/prometheus
+          readOnly: true
+        - name: data
+          mountPath: /prometheus
+        # Explicit SA token (automount off for the Azure Policy): node discovery
+        # + kubelet scrape auth.
+        - name: kube-api-access
+          mountPath: /var/run/secrets/kubernetes.io/serviceaccount
+          readOnly: true
+      volumes:
+      - name: config
+        configMap:
+          name: prometheus-config
+      - name: kube-api-access
+        projected:
+          defaultMode: 0444
+          sources:
+          - serviceAccountToken: {path: token, expirationSeconds: 3607}
+          - configMap: {name: kube-root-ca.crt, items: [{key: ca.crt, path: ca.crt}]}
+          - downwardAPI:
+              items:
+              - path: namespace
+                fieldRef: {apiVersion: v1, fieldPath: metadata.namespace}
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      accessModes: [ReadWriteOnce]
+      storageClassName: managed-csi
+      resources:
+        requests:
+          storage: 10Gi

@@ -121,6 +121,10 @@ class CreateChatMessageRequest(ChunkContext):
     # global master switch (RERANK_ENABLED / LLM_RELEVANCE_FILTER_ENABLED).
     use_reranking: bool = False
     use_relevance_filter: bool = False
+    # Per-conversation Deep RAG override, default OFF. Only takes effect when the
+    # assistant also has deep_rag_enabled; escalates to the verdict-gated multi-hop
+    # loop. See danswer/deep_rag/controller.py.
+    deep_rag: bool = False
 
     @root_validator
     def check_search_doc_ids_or_retrieval_options(cls: BaseModel, values: dict) -> dict:

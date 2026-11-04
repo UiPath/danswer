@@ -17,6 +17,7 @@ from httpx_oauth.clients.openid import OpenID
 from sqlalchemy.orm import Session
 
 from danswer import __version__
+from danswer.auth.federated_openid import FederatedOpenID
 from danswer.auth.schemas import UserCreate
 from danswer.auth.schemas import UserRead
 from danswer.auth.schemas import UserUpdate
@@ -32,6 +33,7 @@ from danswer.configs.app_configs import DISABLE_INDEX_UPDATE_ON_SWAP
 from danswer.configs.app_configs import LOG_ENDPOINT_LATENCY
 from danswer.configs.app_configs import OAUTH_CLIENT_ID
 from danswer.configs.app_configs import OAUTH_CLIENT_SECRET
+from danswer.configs.app_configs import OAUTH_USE_WORKLOAD_IDENTITY
 from danswer.configs.app_configs import OPENID_CONFIG_URL
 from danswer.configs.app_configs import USER_AUTH_SECRET
 from danswer.configs.app_configs import WEB_DOMAIN
@@ -168,6 +170,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator:
 
     if OAUTH_CLIENT_ID and OAUTH_CLIENT_SECRET:
         logger.info("Both OAuth Client ID and Secret are configured.")
+    if OAUTH_CLIENT_ID and OAUTH_USE_WORKLOAD_IDENTITY:
+        logger.info("OAuth client authenticates with workload identity (no secret).")
 
     if DISABLE_GENERATIVE_AI:
         logger.info("Generative AI Q&A disabled")
@@ -371,7 +375,11 @@ def get_application() -> FastAPI:
         include_router_with_global_prefix_prepended(
             application,
             fastapi_users.get_oauth_router(
-                OpenID(OAUTH_CLIENT_ID, OAUTH_CLIENT_SECRET, OPENID_CONFIG_URL),
+                (
+                    FederatedOpenID(OAUTH_CLIENT_ID, OPENID_CONFIG_URL)
+                    if OAUTH_USE_WORKLOAD_IDENTITY
+                    else OpenID(OAUTH_CLIENT_ID, OAUTH_CLIENT_SECRET, OPENID_CONFIG_URL)
+                ),
                 auth_backend,
                 USER_AUTH_SECRET,
                 associate_by_email=True,

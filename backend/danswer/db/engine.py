@@ -4,6 +4,7 @@ from collections.abc import Generator
 from datetime import datetime
 from typing import ContextManager
 
+from sqlalchemy import event
 from sqlalchemy import text
 from sqlalchemy.engine import create_engine
 from sqlalchemy.engine import Engine
@@ -14,6 +15,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm import sessionmaker
 
 from danswer.configs.app_configs import POSTGRES_DB
+from danswer.configs.app_configs import POSTGRES_ENTRA_AUTH
 from danswer.configs.app_configs import POSTGRES_HOST
 from danswer.configs.app_configs import POSTGRES_PASSWORD
 from danswer.configs.app_configs import POSTGRES_POOL_OVERFLOW
@@ -57,6 +59,25 @@ def build_connection_string(
     return f"postgresql+{db_api}://{user}:{password}@{host}:{port}/{db}"
 
 
+def attach_entra_auth(engine: Engine | AsyncEngine) -> None:
+    """With POSTGRES_ENTRA_AUTH, give every new connection a fresh Entra token as
+    its password (the one in the URL is ignored). No-op otherwise."""
+    if not POSTGRES_ENTRA_AUTH:
+        return
+    from danswer.db.entra_auth import get_postgres_entra_token
+
+    sync_engine = engine.sync_engine if isinstance(engine, AsyncEngine) else engine
+
+    @event.listens_for(sync_engine, "do_connect")
+    def _provide_token(dialect, conn_rec, cargs, cparams):  # type: ignore
+        cparams["password"] = get_postgres_entra_token()
+        # Azure Database for PostgreSQL only accepts tokens over TLS.
+        if dialect.driver == "psycopg2":
+            cparams.setdefault("sslmode", "require")
+        else:
+            cparams.setdefault("ssl", "require")
+
+
 def get_sqlalchemy_engine() -> Engine:
     global _SYNC_ENGINE
     if _SYNC_ENGINE is None:
@@ -76,6 +97,7 @@ def get_sqlalchemy_engine() -> Engine:
             pool_pre_ping=True,
             connect_args=keepalive_kwargs,
         )
+        attach_entra_auth(_SYNC_ENGINE)
     return _SYNC_ENGINE
 
 
@@ -97,6 +119,7 @@ def get_sqlalchemy_async_engine() -> AsyncEngine:
             pool_pre_ping=True,
             pool_recycle=3600,
         )
+        attach_entra_auth(_ASYNC_ENGINE)
     return _ASYNC_ENGINE
 
 

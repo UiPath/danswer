@@ -1,0 +1,63 @@
+# Vespa: deny its service ports (query/feed 8080, config-server admin API 19071)
+# to anything outside the darwin namespace or without an mTLS identity. Darwin's
+# apps reach these ports through Services over mTLS; Vespa's own inter-node RPC
+# uses other ports and is left alone. Validated with istio.io/dry-run (0 would-be denials) before enforcing.
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: vespa-query-container-deny-outside-darwin
+  namespace: darwin
+spec:
+  selector:
+    matchLabels:
+      app: vespa-query-container
+  action: DENY
+  rules:
+  - from:
+    - source:
+        notNamespaces:
+        - darwin
+    to:
+    - operation:
+        ports:
+        - '8080'
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: vespa-feed-container-deny-outside-darwin
+  namespace: darwin
+spec:
+  selector:
+    matchLabels:
+      app: vespa-feed-container
+  action: DENY
+  rules:
+  - from:
+    - source:
+        notNamespaces:
+        - darwin
+    to:
+    - operation:
+        ports:
+        - '8080'
+---
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: vespa-configserver-deny-outside-darwin
+  namespace: darwin
+spec:
+  selector:
+    matchLabels:
+      app: vespa-configserver
+  action: DENY
+  rules:
+  - from:
+    - source:
+        notNamespaces:
+        - darwin
+    to:
+    - operation:
+        ports:
+        - '19071'

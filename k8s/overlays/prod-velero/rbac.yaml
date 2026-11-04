@@ -3,6 +3,8 @@ kind: ServiceAccount
 metadata:
   name: velero
   namespace: velero
+  annotations:
+    azure.workload.identity/client-id: b1d37da8-43f4-48b1-842e-266f2aaf98ce   # darwin-velero-mi
   labels:
     app.kubernetes.io/name: velero
 ---

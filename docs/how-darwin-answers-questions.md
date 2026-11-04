@@ -311,6 +311,51 @@ business.
 
 ---
 
+## 8. Deep RAG — when one pass isn't enough
+
+Some questions can't be answered from a single retrieval — comparisons
+("Automation Cloud vs Automation Suite"), multi-part questions, or anything whose
+evidence is scattered across documents. **Deep RAG** is an opt-in escalation: the
+assistant answers once, judges its own coverage, and only if that's *partial* does
+it decompose the question and retrieve per sub-question. It's **off by default** and
+requires both a per-assistant enable and a per-chat toggle.
+
+```mermaid
+%%{init: {'theme':'base','themeVariables':{'textColor':'#1e293b','lineColor':'#64748b','edgeLabelBackground':'#ffffff','clusterBorder':'#cbd5e1'}}}%%
+flowchart TB
+    Q["❓ question"]:::q --> GATE{"assistant Deep RAG on<br/>AND chat toggle on?"}:::gate
+    GATE -->|no| NORM["single-shot pipeline<br/>(sections 2–4)"]:::norm
+    GATE -->|yes| SS["① single-shot answer<br/>+ self-verdict (coverage)"]:::step
+    SS --> V{"coverage?"}:::gate
+    V -->|complete| OUT1(["✅ single-shot answer"]):::answer
+    V -->|partial| DEC["② decompose ≤3 sub-questions<br/>seeded by what was missing"]:::step
+    DEC --> RET["③ retrieve per sub-question<br/>real user + persona ACL"]:::step
+    RET --> SYN["④ synthesize across sub-questions"]:::step
+    SYN --> CMP{"⑤ substantially better<br/>than single-shot?"}:::gate
+    CMP -->|yes| OUT2(["✅ deep answer"]):::answer
+    CMP -->|no| OUT3(["✅ single-shot answer<br/>compare-guard fallback"]):::answer
+    classDef q fill:#e0f2fe,stroke:#0284c7,color:#0c4a6e
+    classDef gate fill:#fef9c3,stroke:#ca8a04,color:#713f12
+    classDef step fill:#ede9fe,stroke:#7c3aed,color:#4c1d95
+    classDef norm fill:#f1f5f9,stroke:#94a3b8,color:#334155
+    classDef answer fill:#dcfce7,stroke:#16a34a,color:#14532d
+```
+
+- **The gate is the model's own coverage verdict** — not an up-front classifier and
+  not a retrieval-score threshold (neither predicts need reliably; measured in
+  `multihop-gate-eval-40.md`). Only a `partial` verdict escalates.
+- **Compare-guard**: the deeper answer is kept only if it's substantially better,
+  so escalating a question that didn't need it can't produce a *worse* answer.
+- **Fail-open**: any error in the deep path returns the single-shot answer.
+- **Multi-turn**: conversation history is threaded into the verdict and
+  decomposition, so follow-ups resolve in context.
+- **Beta**: the answer streams as one piece and citations are `[n]` text (no rich
+  doc-reference UI yet).
+
+Full design, eval results, and upstream-comparison: [`DEEP_RAG.md`](../DEEP_RAG.md).
+
+---
+
 *Companion deep-dive:*
 [`search-quality-reranking-and-recency.md`](./search-quality-reranking-and-recency.md)
 *(architecture, exact ranking math, file references, rollout plan).*

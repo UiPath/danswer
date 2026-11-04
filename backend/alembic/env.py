@@ -1,8 +1,8 @@
 import asyncio
-import os
 from logging.config import fileConfig
 
 from alembic import context
+from danswer.db.engine import attach_entra_auth
 from danswer.db.engine import build_connection_string
 from danswer.db.models import Base
 from sqlalchemy import pool
@@ -49,7 +49,7 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,  # type: ignore
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
-        version_table_schema='public',
+        version_table_schema="public",
     )
 
     with context.begin_transaction():
@@ -73,6 +73,7 @@ async def run_async_migrations() -> None:
         build_connection_string(),
         poolclass=pool.NullPool,
     )
+    attach_entra_auth(connectable)
 
     async with connectable.connect() as connection:
         await connection.run_sync(do_run_migrations)
@@ -84,6 +85,7 @@ def run_migrations_online() -> None:
     """Run migrations in 'online' mode."""
 
     asyncio.run(run_async_migrations())
+
 
 # migrate = os.getenv("APPLY_MIGRATIONS")
 migrate = True

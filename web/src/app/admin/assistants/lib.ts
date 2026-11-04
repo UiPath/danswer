@@ -14,6 +14,8 @@ interface PersonaCreationRequest {
   is_public: boolean;
   llm_relevance_filter: boolean | null;
   rerank_enabled: boolean;
+  deep_rag_enabled: boolean;
+  shared_instructions_enabled: boolean;
   llm_model_provider_override: string | null;
   llm_model_version_override: string | null;
   starter_messages: StarterMessage[] | null;
@@ -38,6 +40,8 @@ interface PersonaUpdateRequest {
   is_public: boolean;
   llm_relevance_filter: boolean | null;
   rerank_enabled: boolean;
+  deep_rag_enabled: boolean;
+  shared_instructions_enabled: boolean;
   llm_model_provider_override: string | null;
   llm_model_version_override: string | null;
   starter_messages: StarterMessage[] | null;
@@ -118,6 +122,8 @@ function buildPersonaAPIBody(
     num_chunks,
     llm_relevance_filter,
     rerank_enabled,
+    deep_rag_enabled,
+    shared_instructions_enabled,
     is_public,
     groups,
     users,
@@ -133,6 +139,8 @@ function buildPersonaAPIBody(
     num_chunks,
     llm_relevance_filter,
     rerank_enabled,
+    deep_rag_enabled,
+    shared_instructions_enabled,
     llm_filter_extraction: false,
     is_public,
     recency_bias: "base_decay",

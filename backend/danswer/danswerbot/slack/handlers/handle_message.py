@@ -17,6 +17,7 @@ from slack_sdk.models.blocks import SectionBlock
 from slack_sdk.models.blocks.basic_components import MarkdownTextObject
 from sqlalchemy.orm import Session
 
+from danswer.chat.models import QADocsResponse
 from danswer.configs.app_configs import DISABLE_GENERATIVE_AI
 from danswer.configs.danswerbot_configs import DANSWER_BOT_ANSWER_GENERATION_TIMEOUT
 from danswer.configs.danswerbot_configs import DANSWER_BOT_DISABLE_COT
@@ -50,6 +51,8 @@ from danswer.danswerbot.slack.utils import respond_in_thread
 from danswer.danswerbot.slack.utils import slack_usage_report
 from danswer.danswerbot.slack.utils import SlackRateLimiter
 from danswer.danswerbot.slack.utils import update_emote_react
+from danswer.db.chat import create_db_search_doc
+from danswer.db.chat import translate_db_search_doc_to_server_search_doc
 from danswer.db.engine import get_sqlalchemy_engine
 from danswer.db.models import Persona
 from danswer.db.models import SlackBotConfig
@@ -65,6 +68,7 @@ from danswer.db.users import add_user_slack_persona
 from danswer.db.users import clear_user_slack_persona
 from danswer.db.users import fetch_user_slack_persona
 from danswer.db.users import get_user_by_email
+from danswer.deep_rag.controller import run_deep_rag
 from danswer.llm.answering.prompts.citations_prompt import (
     compute_max_document_tokens_for_persona,
 )
@@ -226,6 +230,7 @@ def _route_search_persona(
     try:
         with Session(get_sqlalchemy_engine()) as db_session:
             acl_user = None
+            email = None
             try:
                 if sender_id:
                     email = (
@@ -239,6 +244,12 @@ def _route_search_persona(
                 logger_base.warning(
                     "search route: could not resolve Slack sender for ACL"
                 )
+            logger_base.info(
+                "search route: sender_id=%s email_resolved=%s acl_user_id=%s",
+                sender_id,
+                bool(email),
+                (str(acl_user.id) if acl_user else None),
+            )
             if acl_user is None:
                 # Conservative: no routing for an unresolved sender.
                 return None, []
@@ -254,6 +265,12 @@ def _route_search_persona(
                     if settings.assistant_router_rules_enabled
                     else None
                 ),
+            )
+            logger_base.info(
+                "search route: routed=%s persona_id=%s ranked=%s",
+                resolution.routed,
+                resolution.persona_id,
+                resolution.ranked_ids[:5],
             )
             # Map the router's ranked ids -> display names for the footer, dropping
             # whoever actually answered (the top pick / the default).
@@ -430,7 +447,11 @@ def handle_message(
 
     if is_bot_msg and channel_name is None:
         command = message_info.command
-        if command == "/personas":
+        # `/personas-dev` is a dev-only alias: the dev bot (Darwinx) can't register
+        # `/personas` when the prod bot already owns that command name in the same
+        # workspace, so register `/personas-dev` on the dev app to exercise this
+        # locally. Harmless in prod (that command isn't registered there).
+        if command in ("/personas", "/personas-dev"):
             with Session(get_sqlalchemy_engine()) as db_session:
                 # ACL scope: only offer personas this Slack user can access.
                 # Resolve the sender to a Danswer user via their Slack email;
@@ -647,7 +668,9 @@ def handle_message(
                     thread_ts=message_ts_to_respond_to,
                 )
                 return
-    elif is_bot_msg and (command == "/personas" or command == "/current_persona"):
+    elif is_bot_msg and (
+        command in ("/personas", "/personas-dev") or command == "/current_persona"
+    ):
         logger.info("The slash command was used in a channel, won't work")
         return
 
@@ -776,6 +799,102 @@ def handle_message(
         max_history_tokens: int | None = None
 
         with Session(get_sqlalchemy_engine()) as db_session:
+            # Deep RAG on Slack: assistant-gated + ADAPTIVE. If the selected
+            # assistant has deep_rag_enabled, run the verdict-gated loop (single-shot
+            # -> escalate only if the answer is judged partial -> compare-guard ->
+            # best answer). Fails OPEN to the normal Slack answer path on any error.
+            dr_persona = fetch_persona_by_id(db_session, new_message_request.persona_id)
+            if (
+                not DISABLE_GENERATIVE_AI
+                and dr_persona is not None
+                and dr_persona.deep_rag_enabled
+            ):
+                try:
+                    dr_query = new_message_request.messages[-1].message
+                    dr_history = "\n".join(
+                        m.message for m in new_message_request.messages[:-1]
+                    )[-4000:]
+                    dr = run_deep_rag(
+                        query=dr_query,
+                        user=None,
+                        persona=dr_persona,
+                        db_session=db_session,
+                        history=dr_history,
+                        force=False,  # adaptive: escalate only on a partial verdict
+                        bypass_acl=bypass_acl,
+                    )
+                    logger.info(
+                        "deep_rag: persona_id=%s source=%s escalated=%s "
+                        "docs=%s citations=%s answer_len=%s",
+                        new_message_request.persona_id,
+                        dr.source,
+                        dr.escalated,
+                        len(dr.docs),
+                        len(dr.citations),
+                        len(dr.answer or ""),
+                    )
+                    # Persist the documents the normal answer flow (reused by the
+                    # controller) returned so the Slack sources blocks render (and
+                    # feedback references resolve).
+                    dr_db_docs = [
+                        create_db_search_doc(
+                            server_search_doc=doc, db_session=db_session
+                        )
+                        for doc in dr.docs
+                    ]
+                    db_session.commit()
+                    # Citations come straight from the answer flow (citation_num ->
+                    # document_id, already renumbered to match the answer text); keep
+                    # only those whose doc we actually persisted.
+                    dr_doc_ids = {d.document_id for d in dr_db_docs}
+                    dr_citations = [
+                        c for c in dr.citations if c.document_id in dr_doc_ids
+                    ]
+                    logger.info(
+                        "deep_rag: persisted %s db docs (kept %s citations) -> returning",
+                        len(dr_db_docs),
+                        len(dr_citations),
+                    )
+                    # markdown -> Slack mrkdwn conversion happens centrally in
+                    # build_qa_response_blocks (shared by all Slack answers).
+                    dr_answer_text = dr.answer
+                    if dr.escalated:
+                        dr_answer_text += (
+                            f"\n\n_🔎 Deep-searched {len(dr.sub_questions)} angles._"
+                        )
+                    return OneShotQAResponse(
+                        answer=dr_answer_text,
+                        docs=QADocsResponse(
+                            rephrased_query=dr_query,
+                            top_documents=[
+                                translate_db_search_doc_to_server_search_doc(d)
+                                for d in dr_db_docs
+                            ],
+                            predicted_flow=None,
+                            predicted_search=None,
+                            applied_source_filters=None,
+                            applied_time_cutoff=None,
+                            recency_bias_multiplier=1.0,
+                        ),
+                        citations=dr_citations or None,
+                        error_msg=None,
+                        answer_valid=True,
+                        # An uncited deep-rag answer is the persona's DELIBERATE deferral
+                        # (grounding-gated: "neither grounded -> surface the honest punt"),
+                        # not a hallucination — post it instead of the 🤷-only suppression.
+                        allow_uncited=True,
+                    )
+                except Exception:
+                    logger.exception(
+                        "deep_rag Slack path failed; falling back to normal answer"
+                    )
+            else:
+                logger.info(
+                    "deep_rag: SKIPPED (persona_id=%s deep_rag_enabled=%s) -> normal path",
+                    new_message_request.persona_id,
+                    getattr(dr_persona, "deep_rag_enabled", None),
+                )
+
             if len(new_message_request.messages) > 1:
                 persona = cast(
                     Persona,
@@ -1040,7 +1159,12 @@ def handle_message(
             if matching_doc:
                 cited_docs.append((citation.citation_num, matching_doc))
 
-        if not cited_docs:
+        if not cited_docs and answer.allow_uncited:
+            # A deliberate uncited answer (deep-rag surfacing the persona's SME/PM
+            # deferral): post the answer text itself, just with no sources block —
+            # far more useful than the 🤷-only suppression below.
+            logger.info("Posting uncited answer (deliberate deferral, allow_uncited).")
+        elif not cited_docs:
             logger.info("Skipping response: No context documents cited for this query.")
             update_emote_react(
                 emoji="no-idea",
@@ -1068,8 +1192,9 @@ def handle_message(
 
             return True
 
-        cited_docs.sort()
-        citations_block = build_sources_blocks(cited_documents=cited_docs)
+        if cited_docs:  # empty only on the allow_uncited (deliberate deferral) path
+            cited_docs.sort()
+            citations_block = build_sources_blocks(cited_documents=cited_docs)
     elif priority_ordered_docs:
         document_blocks = build_documents_blocks(
             documents=priority_ordered_docs,

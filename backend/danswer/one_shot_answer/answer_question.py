@@ -9,6 +9,7 @@ from danswer.chat.models import CitationInfo
 from danswer.chat.models import DanswerAnswerPiece
 from danswer.chat.models import DanswerContexts
 from danswer.chat.models import DanswerQuotes
+from danswer.chat.models import LlmDoc
 from danswer.chat.models import LLMRelevanceFilterResponse
 from danswer.chat.models import QADocsResponse
 from danswer.chat.models import StreamingError
@@ -30,6 +31,7 @@ from danswer.llm.answering.models import CitationConfig
 from danswer.llm.answering.models import DocumentPruningConfig
 from danswer.llm.answering.models import PromptConfig
 from danswer.llm.answering.models import QuotesConfig
+from danswer.llm.answering.models import with_shared_instructions
 from danswer.llm.factory import get_llms_for_persona
 from danswer.llm.factory import get_main_llm_from_tuple
 from danswer.llm.override_models import LLMOverride
@@ -95,6 +97,11 @@ def stream_answer_objects(
     # Force a specific answer model (vendor/version), bypassing the persona default.
     # Used by the Search-tab compare flow to answer the union scope with Sonnet.
     llm_override: LLMOverride | None = None,
+    # Deep RAG reuse (additive, default None -> unchanged for all existing callers):
+    # answer over these pre-retrieved docs instead of retrieving (multi-hop synthesis),
+    # and/or append prompt_suffix to the task prompt (e.g. the coverage-verdict block).
+    selected_docs: list["LlmDoc"] | None = None,
+    prompt_suffix: str | None = None,
 ) -> AnswerObjectIterator:
     """Streams in order:
     1. [always] Retrieved documents, stops flow if nothing is found
@@ -164,7 +171,14 @@ def stream_answer_objects(
     llm, fast_llm = get_llms_for_persona(
         persona=chat_session.persona, llm_override=llm_override
     )
-    prompt_config = PromptConfig.from_model(prompt)
+    prompt_config = with_shared_instructions(
+        PromptConfig.from_model(prompt), persona=chat_session.persona
+    )
+    if prompt_suffix:
+        # PromptConfig is frozen -> build a modified copy with the suffix appended.
+        prompt_config = prompt_config.copy(
+            update={"task_prompt": prompt_config.task_prompt + prompt_suffix}
+        )
     document_pruning_config = DocumentPruningConfig(
         max_chunks=int(
             chat_session.persona.num_chunks
@@ -184,6 +198,7 @@ def stream_answer_objects(
         fast_llm=fast_llm,
         pruning_config=document_pruning_config,
         bypass_acl=bypass_acl,
+        selected_docs=selected_docs,
     )
 
     answer_config = AnswerStyleConfig(
@@ -194,7 +209,7 @@ def stream_answer_objects(
     answer = Answer(
         question=query_msg.message,
         answer_style_config=answer_config,
-        prompt_config=PromptConfig.from_model(prompt),
+        prompt_config=prompt_config,
         llm=get_main_llm_from_tuple(
             get_llms_for_persona(
                 persona=chat_session.persona, llm_override=llm_override
@@ -319,9 +334,16 @@ def get_search_answer(
     | None = None,
     rerank_metrics_callback: Callable[[RerankMetricsContainer], None] | None = None,
     llm_override: LLMOverride | None = None,
+    # Deep RAG reuse (additive, default None): see stream_answer_objects.
+    selected_docs: list[LlmDoc] | None = None,
+    prompt_suffix: str | None = None,
+    # How many times to re-run when use_citations is on but no citations came back.
+    # Default 5 (unchanged for all existing callers); deep RAG passes 2 — a legitimate
+    # low-confidence/SME-deferral answer never cites, so 5 attempts just burn tokens.
+    max_citation_attempts: int = 5,
 ) -> OneShotQAResponse:
     """Collects the streamed one shot answer responses into a single object"""
-    max_attempts = 5
+    max_attempts = max_citation_attempts
     attempt = 0
     qa_response = None
 
@@ -341,6 +363,8 @@ def get_search_answer(
             retrieval_metrics_callback=retrieval_metrics_callback,
             rerank_metrics_callback=rerank_metrics_callback,
             llm_override=llm_override,
+            selected_docs=selected_docs,
+            prompt_suffix=prompt_suffix,
         )
 
         answer = ""

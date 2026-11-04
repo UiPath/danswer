@@ -1,0 +1,24 @@
+# Certificate for the primary hostname darwin.westeurope.cloudapp.azure.com
+# (the URL automations use). Same Certificate/secret name the gateway used
+# before IR-1286767; now issued by the clean http-01 issuer, new key each time.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: darwin-azure-domain-cert-prod
+  namespace: istio-system
+spec:
+  secretName: darwin-azure-domain-cert-prod
+  dnsNames:
+    - darwin.westeurope.cloudapp.azure.com
+  issuerRef:
+    kind: ClusterIssuer
+    name: letsencrypt-prod-http01
+  privateKey:
+    rotationPolicy: Always
+  # 90-day certificate (Let's Encrypt's fixed lifetime), rotated automatically
+  # starting 30 days before expiry (i.e. about every 60 days).
+  duration: 2160h
+  # Renew 30 days before expiry (LE certs last 90 days): leaves ~4 weeks of
+  # retries if a renewal fails (e.g. the NSG port-80 rule is removed).
+  renewBefore: 720h
+  revisionHistoryLimit: 3

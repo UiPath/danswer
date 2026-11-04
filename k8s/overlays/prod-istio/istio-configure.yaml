@@ -1,0 +1,127 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fabric-utils
+  namespace: istio-system
+  annotations:
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+data:
+  utils.sh: "#!/bin/bash\n\n# Copyright UiPath 2021\n#\n# =================\n# LICENSE\
+    \ AGREEMENT\n# -----------------\n#   Use of paid UiPath products and services\
+    \ is subject to the licensing agreement\n#   executed between you and UiPath.\
+    \ Unless otherwise indicated by UiPath, use of free\n#   UiPath products is subject\
+    \ to the associated licensing agreement available here:\n#   https://www.uipath.com/legal/trust-and-security/legal-terms\
+    \ (or successor website).\n#   You must not use this file separately from the\
+    \ product it is a part of or is associated with.\n\nYELLOW='\\033[0;33m'\nRED='\\\
+    033[0;31m'\nNC='\\033[0m' # No Color\n\nfunction error() {\n  echo -e \"${RED}[ERROR][$(date\
+    \ +'%Y-%m-%dT%H:%M:%S%z')]: $*${NC}\\n\" >&2\n  exit 1\n}\n\nfunction info() {\n\
+    \  echo \"[INFO] [$(date +'%Y-%m-%dT%H:%M:%S%z')]: $*\"\n}\n\nfunction warn()\
+    \ {\n  echo \"${YELLOW}[WARN] [$(date +'%Y-%m-%dT%H:%M:%S%z')]: $*${NC}\" >&2\n\
+    }\n\n########\n# Validates whether the argument is empty or not\n########\nfunction\
+    \ check_if_empty() {\n  local arg_name=$1\n  local arg_val=$2\n\n  if [ -z \"\
+    $arg_val\" ]; then\n    error \"$arg_name argument is missing\"\n  fi\n}\n\n########\n\
+    # Wait till the rollout is successful\n# Arguments:\n#   namespace\n#   object_type\
+    \ (deployment, statefulset etc)\n########\nfunction wait_till_rollout() {\n  local\
+    \ namespace=$1\n  local object_type=$2\n\n  check_if_empty namespace \"$namespace\"\
+    \n  check_if_empty object_type \"$object_type\"\n\n  deployments=$(kubectl -n\
+    \ \"$namespace\" get \"$object_type\" -o name)\n  for i in $deployments; do\n\
+    \    kubectl -n \"$namespace\" rollout status \"$i\" -w --timeout=600s\n    #\
+    \ shellcheck disable=SC2181\n    if [[ \"$?\" -ne 0 ]]; then\n      echo \"$i\
+    \ deployment failed in namespace $namespace. Exiting !!!\"\n      exit 1\n   \
+    \ fi\n  done\n}\n\n########\n# Wait till the pods of an particular app are all\
+    \ in Ready status\n# Arguments:\n#   namespace\n#   app_label\n########\nfunction\
+    \ wait_for_pod_ready() {\n  local namespace=$1\n  local app_label=$2\n\n  check_if_empty\
+    \ namespace \"$namespace\"\n  check_if_empty app_label \"$app_label\"\n\n  for\
+    \ pod in $(kubectl -n \"$namespace\" get pods -l app=\"$app_label\" -o name);\
+    \ do\n    local try=0\n    local maxtry=120\n    while [[ $(kubectl -n \"$namespace\"\
+    \ get \"$pod\" -o 'jsonpath={..status.conditions[?(@.type==\"Ready\")].status}')\
+    \ != \"True\" ]]; do\n      if [ $try == $maxtry ]; then\n        error \"Pod:\
+    \ $pod under namespace: $namespace is not in Ready status\"\n      fi\n      echo\
+    \ \"Waiting for app: $app_label to be available\" && sleep 5\n      try=$((try\
+    \ + 1))\n    done\n  done\n}\n\n########\n# Label configMap/secret to enable secret/configmap\
+    \ copy to other namespaces\n# Arguments:\n#   namespace\n#   object_type\n#  \
+    \ object_name\n########\nfunction label_object() {\n  local namespace=$1\n  local\
+    \ object_type=$2\n  local object_name=$3\n\n  check_if_empty namespace \"$namespace\"\
+    \n  check_if_empty object_type \"$object_type\"\n  check_if_empty object_name\
+    \ \"$object_name\"\n\n  kubectl -n \"$namespace\" label \"$object_type\" \"$object_name\"\
+    \ config-discovery=yes 2>/dev/null || true\n}\n\n########\n# Wait till an resource\
+    \ exists\n########\nfunction wait_till_resource_exists() {\n  local namespace=$1\n\
+    \  local object_type=$2\n  local object_name=$3\n\n  check_if_empty namespace\
+    \ \"$namespace\"\n  check_if_empty object_type \"$object_type\"\n  check_if_empty\
+    \ object_name \"$object_name\"\n\n  local try=0\n  local maxtry=120\n\n  while\
+    \ ! [ \"$(kubectl -n \"$namespace\" get \"$object_type\" \"$object_name\" --ignore-not-found\
+    \ -o name | wc -l)\" -gt 0 ]; do\n    if [ $try == $maxtry ]; then\n      error\
+    \ \"Unable to find objectName $object_name of type $object_type under the namespace\
+    \ $namespace\"\n    fi\n\n    info \"Waiting for objectName $object_name of type\
+    \ $object_type under the namespace $namespace to become available\"\n    sleep\
+    \ 5\n    try=$((try + 1))\n  done\n}\n\n########\n# urlencode <string>\n########\n\
+    function urlencode() {\n  local LANG=C\n  local length=\"${#1}\"\n  for ((i =\
+    \ 0; i < length; i++)); do\n    local c=\"${1:i:1}\"\n    case $c in\n    [a-zA-Z0-9.~_-])\
+    \ printf \"%s\" \"$c\" ;;\n    *) printf '%%%02X' \"'$c\" ;;\n    esac\n  done\n\
+    }\n\n########\n# generate_password\n########\n#shellcheck disable=SC2005\nfunction\
+    \ generate_password() {\n  chars='@#$%&_+'\n  random_string=$(\n    date +%s |\
+    \ sha256sum | base64 | head -c 14\n    echo\n  )\n  random_special_char=${chars:$((RANDOM\
+    \ % ${#chars})):1}\n  random_number=$((1 + \"$RANDOM\" % 9))\n  echo \"$random_string$random_special_char$random_number\"\
+    \n}\n\n# Set s3cmd context passing following params\n# 1 Access key of the user\n\
+    # 2 Secret key of the user\nfunction setS3CMDContext() {\n  OBJECT_GATEWAY_INTERNAL_HOST=$(kubectl\
+    \ -n rook-ceph get services/rook-ceph-rgw-rook-ceph -o jsonpath=\"{.spec.clusterIP}\"\
+    )\n  OBJECT_GATEWAY_INTERNAL_PORT=$(kubectl -n rook-ceph get services/rook-ceph-rgw-rook-ceph\
+    \ -o jsonpath=\"{.spec.ports[0].port}\")\n  AWS_ACCESS_KEY=$1\n  AWS_SECRET_KEY=$2\n\
+    \n  # Reference https://rook.io/docs/rook/v1.5/ceph-object.html#consume-the-object-storage\n\
+    \  export AWS_HOST=$OBJECT_GATEWAY_INTERNAL_HOST\n  export AWS_ENDPOINT=$OBJECT_GATEWAY_INTERNAL_HOST:$OBJECT_GATEWAY_INTERNAL_PORT\n\
+    \  export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY\n  export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_KEY\n\
+    }\n"
+---
+apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: response-server-passthrough-filter
+  namespace: istio-system
+spec:
+  workloadSelector:
+    labels:
+      istio: ingressgateway
+  configPatches:
+  - applyTo: NETWORK_FILTER
+    match:
+      context: GATEWAY
+      listener:
+        filterChain:
+          filter:
+            name: envoy.filters.network.http_connection_manager
+    patch:
+      operation: MERGE
+      value:
+        typed_config:
+          '@type': type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+          server_header_transformation: PASS_THROUGH
+---
+apiVersion: networking.istio.io/v1alpha3
+kind: EnvoyFilter
+metadata:
+  name: response-filter
+  namespace: istio-system
+spec:
+  workloadSelector:
+    labels:
+      istio: ingressgateway
+  configPatches:
+  - applyTo: HTTP_FILTER
+    match:
+      context: GATEWAY
+      listener:
+        filterChain:
+          filter:
+            name: envoy.filters.network.http_connection_manager
+            subFilter:
+              name: envoy.filters.http.router
+    patch:
+      operation: INSERT_BEFORE
+      value:
+        name: envoy.config.filter.network.custom_protocol
+        typed_config:
+          '@type': type.googleapis.com/envoy.extensions.filters.http.lua.v3.Lua
+          inlineCode: "\nfunction envoy_on_response(response_handle)\n  response_handle:headers():remove(\"\
+            X-AspNet-Version\")\n  response_handle:headers():remove(\"server\")\n\
+            \  response_handle:headers():remove(\"x-envoy-upstream-service-time\"\
+            )\nend\n"

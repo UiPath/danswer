@@ -8,6 +8,7 @@ from typing import IO
 
 from sqlalchemy.orm import Session
 
+from danswer.configs.app_configs import AZURE_BLOB_ACCOUNT_URL
 from danswer.configs.app_configs import AZURE_BLOB_CONNECTION_STRING
 from danswer.configs.app_configs import AZURE_BLOB_CONTAINER
 from danswer.configs.app_configs import FILE_STORE_TYPE
@@ -171,29 +172,39 @@ def _parse_azure_conn_str(conn_str: str) -> dict[str, str]:
     return dict(seg.split("=", 1) for seg in conn_str.split(";") if "=" in seg)
 
 
+def _get_azure_blob_service_client() -> Any:
+    """Connection string (account key / Azurite) when set; otherwise the
+    passwordless path: AZURE_BLOB_ACCOUNT_URL as the pod's managed identity."""
+    if not (AZURE_BLOB_CONNECTION_STRING or AZURE_BLOB_ACCOUNT_URL):
+        raise RuntimeError(
+            "FILE_STORE_TYPE=AzureBlobFileStore but neither "
+            "AZURE_BLOB_CONNECTION_STRING nor AZURE_BLOB_ACCOUNT_URL is set."
+        )
+    # Lazy import — optional dependency (azure-storage-blob).
+    try:
+        from azure.storage.blob import BlobServiceClient  # type: ignore
+    except ImportError as e:
+        raise RuntimeError(
+            "FILE_STORE_TYPE=AzureBlobFileStore requires the "
+            "azure-storage-blob package (it's in requirements; "
+            "rebuild the image or `pip install azure-storage-blob`)."
+        ) from e
+
+    if AZURE_BLOB_CONNECTION_STRING:
+        return BlobServiceClient.from_connection_string(AZURE_BLOB_CONNECTION_STRING)
+    from danswer.db.entra_auth import WorkloadIdentityCredential
+
+    return BlobServiceClient(
+        AZURE_BLOB_ACCOUNT_URL, credential=WorkloadIdentityCredential()
+    )
+
+
 def _get_azure_container_client() -> Any:
     global _az_container_client
     if _az_container_client is None:
         with _az_lock:
             if _az_container_client is None:
-                if not AZURE_BLOB_CONNECTION_STRING:
-                    raise RuntimeError(
-                        "FILE_STORE_TYPE=AzureBlobFileStore but "
-                        "AZURE_BLOB_CONNECTION_STRING is unset."
-                    )
-                # Lazy import — optional dependency (azure-storage-blob).
-                try:
-                    from azure.storage.blob import BlobServiceClient  # type: ignore
-                except ImportError as e:
-                    raise RuntimeError(
-                        "FILE_STORE_TYPE=AzureBlobFileStore requires the "
-                        "azure-storage-blob package (it's in requirements; "
-                        "rebuild the image or `pip install azure-storage-blob`)."
-                    ) from e
-
-                svc = BlobServiceClient.from_connection_string(
-                    AZURE_BLOB_CONNECTION_STRING
-                )
+                svc = _get_azure_blob_service_client()
                 cc = svc.get_container_client(AZURE_BLOB_CONTAINER)
                 try:
                     cc.create_container()
@@ -313,6 +324,26 @@ class AzureBlobFileStore(FileStore):
         from azure.storage.blob import BlobServiceClient  # type: ignore
         from azure.storage.blob import generate_blob_sas  # type: ignore
 
+        expiry = datetime.datetime.utcnow() + datetime.timedelta(minutes=expiry_minutes)
+        if not AZURE_BLOB_CONNECTION_STRING:
+            # Managed identity: no account key exists, so sign with a
+            # user-delegation key (Entra-issued, needs only the data role the
+            # identity already has). Same one-blob, write+create, short-lived
+            # shape as the account-key SAS below.
+            svc = _get_azure_blob_service_client()
+            start = datetime.datetime.utcnow() - datetime.timedelta(minutes=5)
+            delegation_key = svc.get_user_delegation_key(start, expiry)
+            sas = generate_blob_sas(
+                account_name=svc.account_name,
+                container_name=AZURE_BLOB_CONTAINER,
+                blob_name=file_name,
+                user_delegation_key=delegation_key,
+                permission=BlobSasPermissions(write=True, create=True),
+                start=start,
+                expiry=expiry,
+            )
+            return f"{svc.url.rstrip('/')}/{AZURE_BLOB_CONTAINER}/{file_name}?{sas}"
+
         # Let the SDK parse the connection string — it's authoritative about
         # the blob endpoint (handles Azurite, custom endpoints, and key
         # casing/ordering that a hand-rolled parse trips on).
@@ -360,8 +391,7 @@ class AzureBlobFileStore(FileStore):
             blob_name=file_name,
             account_key=account_key,
             permission=BlobSasPermissions(write=True, create=True),
-            expiry=datetime.datetime.utcnow()
-            + datetime.timedelta(minutes=expiry_minutes),
+            expiry=expiry,
         )
         return f"{blob_endpoint}/{AZURE_BLOB_CONTAINER}/{file_name}?{sas}"
 

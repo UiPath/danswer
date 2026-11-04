@@ -46,6 +46,15 @@ class Settings(BaseModel):
     # resolver). Keep the rulebook small + authoritative — kNN handles the tail.
     assistant_router_rules_enabled: bool = False
     assistant_router_rules_prompt: str = ""
+    # Global answer-behavior instructions appended to EVERY assistant's system
+    # prompt (chat, search, Slack and deep-rag all build through PromptConfig).
+    # For cross-assistant answering policy — e.g. "answer the parts of a question
+    # the documents evidence, defer only the unevidenced parts" — WITHOUT editing
+    # every persona's own prompt. Keep it persona-agnostic: never name specific
+    # SMEs/PMs/products here (those belong in the owning assistant's prompt).
+    # Empty (the default, so it ships dark) = disabled. Edited in Admin →
+    # Settings; applies on the next question, no redeploy.
+    shared_prompt_instructions: str = ""
     # Side-by-side compare on the Search tab: alongside the single top-1 answer,
     # also answer over the UNION of the router's top-N assistants' document sets
     # (answered by AUTO_SEARCH_UNION_LLM_*, default Sonnet). Only runs on LLM-router

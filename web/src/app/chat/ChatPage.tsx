@@ -2,6 +2,7 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import {
+  AnswerTraceInfoPacket,
   BackendChatSession,
   BackendMessage,
   ChatFileType,
@@ -375,6 +376,9 @@ export function ChatPage({
   // master switch. Reset per page load — "default off" is intentional.
   const [useReranking, setUseReranking] = useState(false);
   const [useRelevanceFilter, setUseRelevanceFilter] = useState(false);
+  // Deep RAG override, default off; only takes effect when the active assistant
+  // has deep_rag_enabled. Reset per page load.
+  const [deepRag, setDeepRag] = useState(false);
 
   // uploaded files
   const [currentMessageFiles, setCurrentMessageFiles] = useState<
@@ -405,6 +409,13 @@ export function ChatPage({
   );
   const livePersona =
     selectedPersona || filteredAssistants[0] || availablePersonas[0];
+
+  // Default the per-question Deep RAG toggle to the active assistant's setting
+  // (gradual rollout); the user can still flip it either way on any assistant.
+  // Resets when the active assistant changes.
+  useEffect(() => {
+    setDeepRag(livePersona?.deep_rag_enabled ?? false);
+  }, [livePersona?.id]);
 
   const [chatSessionSharedStatus, setChatSessionSharedStatus] =
     useState<ChatSessionSharedStatus>(ChatSessionSharedStatus.Private);
@@ -771,6 +782,7 @@ export function ChatPage({
     let error: string | null = null;
     let finalMessage: BackendMessage | null = null;
     let toolCalls: ToolCallMetadata[] = [];
+    let answerTrace: AnswerTraceInfoPacket | null = null;
 
     try {
       const lastSuccessfulMessageId =
@@ -813,6 +825,7 @@ export function ChatPage({
         useExistingUserMessage: isSeededChat,
         useReranking: useReranking,
         useRelevanceFilter: useRelevanceFilter,
+        deepRag: deepRag,
       });
       const updateFn = (messages: Message[]) => {
         const replacementsMap = finalMessage
@@ -872,6 +885,8 @@ export function ChatPage({
               error = (packet as StreamingError).error;
             } else if (Object.hasOwn(packet, "message_id")) {
               finalMessage = packet as BackendMessage;
+            } else if (Object.hasOwn(packet, "deep_rag_escalated")) {
+              answerTrace = packet as AnswerTraceInfoPacket;
             }
 
             const newUserMessageId =
@@ -898,6 +913,7 @@ export function ChatPage({
                 documents:
                   finalMessage?.context_docs?.top_documents || documents,
                 citations: finalMessage?.citations || {},
+                answerTrace: answerTrace,
                 files: finalMessage?.files || aiMessageImages || [],
                 toolCalls: finalMessage?.tool_calls || toolCalls,
                 parentMessageId: newUserMessageId,
@@ -1010,7 +1026,9 @@ export function ChatPage({
       // a blank session with no explanation of why.
       setPopup({
         message:
-          `Started a new chat with "${assistantDisplayName(persona)}", as each chat is bound to a single assistant.` +
+          `Started a new chat with "${assistantDisplayName(
+            persona
+          )}", as each chat is bound to a single assistant.` +
           (hadFiles ? " Please re-upload any files you'd attached." : ""),
         type: "success",
       });
@@ -1428,6 +1446,7 @@ export function ChatPage({
                                   citedDocuments={getCitedDocumentsFromMessage(
                                     message
                                   )}
+                                  answerTrace={message.answerTrace}
                                   toolCall={
                                     message.toolCalls && message.toolCalls[0]
                                   }
@@ -1678,6 +1697,8 @@ export function ChatPage({
                           setUseReranking={setUseReranking}
                           useRelevanceFilter={useRelevanceFilter}
                           setUseRelevanceFilter={setUseRelevanceFilter}
+                          deepRag={deepRag}
+                          setDeepRag={setDeepRag}
                           selectedAssistant={livePersona}
                           files={currentMessageFiles}
                           setFiles={setCurrentMessageFiles}

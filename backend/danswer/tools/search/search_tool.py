@@ -13,7 +13,6 @@ from danswer.chat.models import LlmDoc
 from danswer.db.models import Persona
 from danswer.db.models import User
 from danswer.dynamic_configs.interface import JSON_ro
-from danswer.llm.answering.doc_pruning import parse_question_doc_version
 from danswer.llm.answering.doc_pruning import prune_documents
 from danswer.llm.answering.doc_pruning import rewrite_docs_links
 from danswer.llm.answering.models import DocumentPruningConfig
@@ -27,6 +26,9 @@ from danswer.search.models import InferenceSection
 from danswer.search.models import RetrievalDetails
 from danswer.search.models import SearchRequest
 from danswer.search.pipeline import SearchPipeline
+from danswer.search.versioning import question_version_candidates
+from danswer.search.versioning import version_merged_sections
+from danswer.search.versioning import version_query_variants
 from danswer.secondary_llm_flows.choose_search import check_if_need_search
 from danswer.secondary_llm_flows.query_expansion import history_based_query_rephrase
 from danswer.tools.search.search_utils import llm_doc_to_dict
@@ -212,14 +214,8 @@ class SearchTool(Tool):
             ),
         )
 
-    def run(self, **kwargs: str) -> Generator[ToolResponse, None, None]:
-        query = cast(str, kwargs["query"])
-
-        if self.selected_docs:
-            yield from self._build_response_for_specified_sections(query)
-            return
-
-        search_pipeline = SearchPipeline(
+    def _run_pipeline(self, query: str) -> SearchPipeline:
+        return SearchPipeline(
             search_request=SearchRequest(
                 query=query,
                 human_selected_filters=(
@@ -242,15 +238,78 @@ class SearchTool(Tool):
             bypass_acl=self.bypass_acl,
             db_session=self.db_session,
         )
+
+    def _version_merged_retrieval(
+        self, query: str
+    ) -> tuple[list[InferenceSection], list[int], SearchPipeline]:
+        """Version-normalized retrieval via the shared `version_merged_sections` helper
+        (same one deep-RAG uses). Retrieves each corpus-form variant, keeps only on-version
+        hits, merges (deduped, score-sorted). LLM-relevance carries over: a merged section
+        is relevant if it was relevant in the variant pipeline it came from. Returns the
+        merged sections, their relevant indices, and the first variant's pipeline (for query
+        metadata — predicted flow, filters, recency)."""
+        relevant_keys: set[tuple[str, int]] = set()
+        meta: list[SearchPipeline | None] = [None]
+
+        def retrieve_one(variant: str) -> list[InferenceSection]:
+            pipeline = self._run_pipeline(variant)
+            if meta[0] is None:
+                meta[0] = pipeline
+            relevant = set(pipeline.relevant_chunk_indices or [])
+            sections = pipeline.reranked_sections
+            for i, section in enumerate(sections):
+                if i in relevant:
+                    relevant_keys.add((section.document_id, section.chunk_id))
+            return sections
+
+        merged = version_merged_sections(retrieve_one, query)
+        relevant_indices = [
+            idx
+            for idx, s in enumerate(merged)
+            if (s.document_id, s.chunk_id) in relevant_keys
+        ]
+        assert meta[0] is not None  # version_query_variants never returns an empty list
+        return merged, relevant_indices, meta[0]
+
+    def run(self, **kwargs: str) -> Generator[ToolResponse, None, None]:
+        query = cast(str, kwargs["query"])
+
+        if self.selected_docs:
+            yield from self._build_response_for_specified_sections(query)
+            return
+
+        # Version-normalized retrieval: a version token in the query is rewritten to its
+        # corpus form(s) — Automation Suite "2.NNMM" and/or standalone "YYYY.MM" — and each
+        # variant is retrieved, on-version-filtered and merged, so the query lands on the
+        # right release's docs instead of whatever version the raw token happens to rank
+        # (a literal "2025.10" matches no AS doc, which are labeled 2.2510). No version
+        # token -> a single pipeline on the raw query (behavior unchanged).
+        variants = version_query_variants(query)
+        if len(variants) == 1 and variants[0] == query:
+            pipeline = self._run_pipeline(query)
+            sections = pipeline.reranked_sections
+            relevant_indices = pipeline.relevant_chunk_indices
+            meta = pipeline
+        else:
+            sections, relevant_indices, meta = self._version_merged_retrieval(query)
+            if not sections:
+                # nothing survived the on-version filter (no doc for that version) ->
+                # fall back to the raw query so we never return empty where a plain
+                # search would have found something.
+                pipeline = self._run_pipeline(query)
+                sections = pipeline.reranked_sections
+                relevant_indices = pipeline.relevant_chunk_indices
+                meta = pipeline
+
         yield ToolResponse(
             id=SEARCH_RESPONSE_SUMMARY_ID,
             response=SearchResponseSummary(
                 rephrased_query=query,
-                top_sections=search_pipeline.reranked_sections,
-                predicted_flow=search_pipeline.predicted_flow,
-                predicted_search=search_pipeline.predicted_search_type,
-                final_filters=search_pipeline.search_query.filters,
-                recency_bias_multiplier=search_pipeline.search_query.recency_bias_multiplier,
+                top_sections=sections,
+                predicted_flow=meta.predicted_flow,
+                predicted_search=meta.predicted_search_type,
+                final_filters=meta.search_query.filters,
+                recency_bias_multiplier=meta.search_query.recency_bias_multiplier,
             ),
         )
         yield ToolResponse(
@@ -263,24 +322,20 @@ class SearchTool(Tool):
                         semantic_identifier=section.semantic_identifier,
                         blurb=section.blurb,
                     )
-                    for section in search_pipeline.reranked_sections
+                    for section in sections
                 ]
             ),
         )
         yield ToolResponse(
             id=SECTION_RELEVANCE_LIST_ID,
-            response=search_pipeline.relevant_chunk_indices,
+            response=relevant_indices,
         )
 
-        llm_docs = [
-            llm_doc_from_inference_section(section)
-            for section in search_pipeline.reranked_sections
-        ]
+        llm_docs = [llm_doc_from_inference_section(section) for section in sections]
         final_context_documents = prune_documents(
             docs=llm_docs,
             doc_relevance_list=[
-                True if ind in search_pipeline.relevant_chunk_indices else False
-                for ind in range(len(llm_docs))
+                ind in relevant_indices for ind in range(len(llm_docs))
             ],
             prompt_config=self.prompt_config,
             llm_config=self.llm.config,
@@ -288,12 +343,13 @@ class SearchTool(Tool):
             document_pruning_config=self.pruning_config,
         )
         # Rewrite versioned-docs links to the right version of the same page: the
-        # version the question asked about if it named one, else the newest indexed
-        # (retrieval can surface an arbitrary/stale version when several exist).
+        # version the question asked about if it named one (scheme-aware candidates),
+        # else the newest indexed (retrieval can surface a stale version when several
+        # exist).
         rewrite_docs_links(
             final_context_documents,
             self.db_session,
-            target_version=parse_question_doc_version(query),
+            target_versions=question_version_candidates(query),
         )
         yield ToolResponse(id=FINAL_CONTEXT_DOCUMENTS, response=final_context_documents)
 
