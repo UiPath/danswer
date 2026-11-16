@@ -471,7 +471,9 @@ class WebConnector(LoadConnector, PollConnector):
                     base_url, max_versions=max_versions
                 )
                 self.to_visit_list = [_ensure_valid_url(u) for u in expanded]
-                self.recursive_prefixes = self.to_visit_list
+                # A copy: load_from_state mutates its queue, and the scope must
+                # not shrink/grow with it.
+                self.recursive_prefixes = list(self.to_visit_list)
             else:
                 self.to_visit_list = [_ensure_valid_url(base_url)]
             return
@@ -503,7 +505,9 @@ class WebConnector(LoadConnector, PollConnector):
         """Traverses through all pages found on the website
         and converts them into documents"""
         visited_links: set[str] = set()
-        to_visit: list[str] = self.to_visit_list
+        # Copy: the crawl pops/pushes this queue; the seed list (and anything
+        # aliasing it) must survive for later runs on the same instance.
+        to_visit: list[str] = list(self.to_visit_list)
 
         if not to_visit:
             raise ValueError("No URLs to visit")
