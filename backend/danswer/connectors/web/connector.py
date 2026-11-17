@@ -128,6 +128,33 @@ def is_valid_url(url: str) -> bool:
         return False
 
 
+def canonicalize_url(url: str) -> str:
+    """docs.uipath.com serves paths case-insensitively and its own links mix
+    casing (api-guide / api-GuiDe / ...) and append redirect markers
+    (?fallbackReason=...&isFallback=true), so one page was crawled and indexed
+    under many ids. Lowercase the path and drop query/fragment for that host;
+    other sites are returned unchanged (their paths may be case-sensitive)."""
+    parsed = urlparse(url)
+    if parsed.netloc != "docs.uipath.com":
+        return url
+    return f"{parsed.scheme}://{parsed.netloc}{parsed.path.lower()}"
+
+
+# Rate-limit / overload responses are retried with backoff instead of
+# skipping the page for good (one Studio crawl lost 208 pages to 429s).
+_RETRYABLE_STATUSES = (429, 503)
+_MAX_RATE_LIMIT_WAIT_S = 120.0
+
+
+def _rate_limit_wait_s(retry_after: str | None, attempt: int) -> float:
+    try:
+        if retry_after is not None:
+            return min(max(float(retry_after), 1.0), _MAX_RATE_LIMIT_WAIT_S)
+    except ValueError:
+        pass  # HTTP-date form; fall back to backoff
+    return min(20.0 * (attempt + 1), _MAX_RATE_LIMIT_WAIT_S)
+
+
 def get_internal_links(
     base_url: str,
     url: str,
@@ -152,6 +179,7 @@ def get_internal_links(
         if not is_valid_url(href):
             # Relative path handling
             href = urljoin(url, href)
+        href = canonicalize_url(href)
 
         if urlparse(href).netloc == urlparse(url).netloc and any(
             prefix in href for prefix in prefixes
@@ -534,6 +562,7 @@ class WebConnector(LoadConnector, PollConnector):
             playwright, context = start_playwright()
             restart_playwright = False
             pages_visited = 0
+            throttle_s = 0.0  # per-page delay, raised whenever the site rate-limits us
             while to_visit:
                 if WEB_CONNECTOR_MAX_PAGES and pages_visited >= WEB_CONNECTOR_MAX_PAGES:
                     logger.info(
@@ -556,6 +585,8 @@ class WebConnector(LoadConnector, PollConnector):
 
                 logger.info(f"Visiting {current_url}")
                 pages_visited += 1
+                if throttle_s:
+                    time.sleep(throttle_s)
 
                 # Reinit the browser if a previous batch/crash flagged it. Done for
                 # every page (as before) so the browser is always live when we reach
@@ -605,7 +636,7 @@ class WebConnector(LoadConnector, PollConnector):
                                 # far faster and enough for text extraction.
                                 wait_until="domcontentloaded",
                             )
-                            final_page = page.url
+                            final_page = canonicalize_url(page.url)
                             if final_page != current_url:
                                 logger.info(f"Redirected to {final_page}")
                                 protected_url_check(final_page)
@@ -627,6 +658,24 @@ class WebConnector(LoadConnector, PollConnector):
                                 ):
                                     if link not in visited_links:
                                         to_visit.append(link)
+
+                            if (
+                                page_response
+                                and page_response.status in _RETRYABLE_STATUSES
+                                and attempt < WEB_CONNECTOR_MAX_RETRIES - 1
+                            ):
+                                wait_s = _rate_limit_wait_s(
+                                    page_response.headers.get("retry-after"), attempt
+                                )
+                                # Slow the rest of the crawl down too.
+                                throttle_s = min(throttle_s + 1.0, 5.0)
+                                logger.info(
+                                    f"HTTP {page_response.status} on {current_url}; "
+                                    f"retrying in {wait_s:.0f}s (crawl delay now "
+                                    f"{throttle_s:.0f}s/page)"
+                                )
+                                time.sleep(wait_s)
+                                continue
 
                             if page_response and str(page_response.status)[0] in (
                                 "4",

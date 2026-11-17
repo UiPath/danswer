@@ -81,3 +81,62 @@ def test_connector_instance_can_crawl_twice(monkeypatch: pytest.MonkeyPatch) -> 
     first = [d for b in conn.load_from_state() for d in b]
     second = [d for b in conn.load_from_state() for d in b]
     assert len(first) == len(second) == len(VERSIONS) + len(PAGES)
+
+
+def test_docs_uipath_case_and_fallback_variants_collapse() -> None:
+    from bs4 import BeautifulSoup
+
+    v = VERSIONS[0]
+    html = (
+        f'<a href="{v}/api-guide/x">a</a><a href="{v}/api-GuiDe/x">b</a>'
+        f'<a href="{v}/api-guidE/x?fallbackReason=invalidTopic&isFallback=true">c</a>'
+        f'<a href="{v}/api-guide/x#section">d</a>'
+    )
+    links = web.get_internal_links(
+        v, v, BeautifulSoup(html, "html.parser"), allowed_prefixes=[v]
+    )
+    assert links == {f"{v}/api-guide/x"}
+    # other hosts keep their (possibly case-sensitive) paths and queries
+    assert (
+        web.canonicalize_url("https://example.com/A?b=1") == "https://example.com/A?b=1"
+    )
+
+
+def test_rate_limited_page_is_retried_not_skipped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+
+    def fake_start() -> tuple[MagicMock, MagicMock]:
+        context = MagicMock()
+
+        def new_page() -> MagicMock:
+            page = MagicMock()
+
+            def goto(url: str, **kwargs: Any) -> MagicMock:
+                calls.append(url)
+                page.url = url
+                resp = MagicMock()
+                resp.status = 429 if len(calls) == 1 else 200
+                resp.headers = {"retry-after": "1"}
+                return resp
+
+            page.goto.side_effect = goto
+            page.content.return_value = "<html><title>t</title><body>ok</body></html>"
+            return page
+
+        context.new_page.side_effect = new_page
+        return MagicMock(), context
+
+    sleeps: list[float] = []
+    monkeypatch.setattr(web, "start_playwright", fake_start)
+    monkeypatch.setattr(web, "check_internet_connection", lambda url: None)
+    monkeypatch.setattr(web, "protected_url_check", lambda url: None)
+    monkeypatch.setattr(web.time, "sleep", lambda s: sleeps.append(s))
+    conn = web.WebConnector(
+        "https://example.com/",
+        web_connector_type=web.WEB_CONNECTOR_VALID_SETTINGS.SINGLE.value,
+    )
+    docs = [d for b in conn.load_from_state() for d in b]
+    assert len(docs) == 1 and len(calls) == 2
+    assert 1.0 in sleeps  # honored Retry-After
