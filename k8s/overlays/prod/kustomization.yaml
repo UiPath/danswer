@@ -31,12 +31,15 @@ namespace: darwin
 images:
   - name: danswer-backend
     newName: sfbrdevhelmweacr.azurecr.io/danswer/danswer-backend
+    # vha-249 = vha-248 + web connector 429/503 retry + docs.uipath.com URL canonicalization.
+    # vha-248 = vha-247 + web connector uipath_latest_versions scope fix.
+    # vha-247 = vha-246 + web connector always stops Playwright (worker-jam fix).
     # vha-246 = vha-245 + OIDC login via federated credential (no client secret).
     # vha-245 = vha-244 + passwordless Blob (managed identity) + direct-upload flag.
     # vha-244 = vha-243 + passwordless Postgres (Entra / workload identity).
     # vha-243 = vha-242 + GEN_AI_GATEWAY_BASE_URL. vha-242 = vha-239 + non-root user (uid 1001).
     # (vha-240/241 exist in the registry from another branch - never deployed.)
-    newTag: vha-246
+    newTag: vha-249
   - name: danswer-web-server
     newName: sfbrdevhelmweacr.azurecr.io/danswer/danswer-web-server
     newTag: vha-124
